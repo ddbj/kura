@@ -10,30 +10,38 @@
 
 ## 設定群のテスト
 
+`tests/integration/` に実装（vitest）。`npm test` が compose（`env.test`）と JWKS 配信を自動で起動し、終了時に破棄する。テストごとに一意な username（= bucket）を使い、状態を共有しない。
+
 ### IAM policy boundary test（主要テスト）
 
 実 SeaweedFS（compose）に対し、自前鍵で署名した JWT で STS を通して一時 credentials を取り、認可境界を自動検証する:
 
-- 自分の bucket の read / write / list / tagging / auto-create が許可されること
-- 他人の bucket の read / write / list / tagging が拒否されること
-- 他人の bucket 名での auto-create（新規 bucket 作成）が拒否されること
+- 自分の bucket の作成（CreateBucket）と read / write / list / tagging が許可されること
+- 他人の bucket の read / write / list / tagging / delete が拒否されること
+- 他人の bucket 名での新規 bucket 作成が拒否されること
 - role 偽装（token が対応しない role の指定）が拒否されること
+- 設定に列挙した `sub` だけが admin role を取れ、任意の bucket にアクセスできること
+- audience が一致しない token・期限切れ token が STS で拒否されること
 
 ### 公開境界 test
 
 nginx + filer の経路で、公開配信の enforcement を自動検証する:
 
 - tag `kura-public=true` がある object は anonymous で download できること
-- tag が無い object と存在しないパスは、どちらも 404 で区別できないこと
+- tag が無い object・tag 値が `true` 以外の object・存在しないパスは、いずれも同じ 404 で区別できないこと
 - unpublish（tag 削除）後は即座に 404 に戻ること
+- Range リクエスト、数 MB のストリーミング、directory パスの 404
+- ファイル名の encoding（space / `%` / `?` / `#` / unicode / 記号）で配信できること
 
 ### integration test
 
 実 SeaweedFS に対して主要フローを検証する:
 
 - STS `AssumeRoleWithWebIdentity` -> multipart upload -> download
+- 中断した multipart upload を新しい一時 credentials から再開できること
 - publish / unpublish（tagging）の往復
-- 一時 credentials による presigned URL（GET / PUT）
+- 一時 credentials による presigned URL（GET / PUT）と、署名なしリクエストの拒否
+- quota 超過での write 拒否、超過中の read / delete、削除 + vacuum 後の自動解除
 
 ## frontend のテスト
 

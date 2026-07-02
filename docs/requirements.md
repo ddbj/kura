@@ -27,12 +27,13 @@ kura が提供するのは次の 4 つのみ:
 - 各ユーザーは自分専用の領域を持ち、その中に任意のディレクトリ構造でファイルを置ける
 - ファイルは `<user>/<path>` で識別する。他ユーザーの領域にはアクセスできない（読み書き・一覧とも）
 - 領域はユーザーが初めて upload した時点で自動的に作られる。事前の申請・作成手続きは無い
+- username が S3 bucket の命名規則に適合しないユーザー（`_` を含む・`-` で終わる等）は kura を利用できない（詳細は [architecture.md](./architecture.md) の「配置」を参照）
 
 ## upload
 
 - ブラウザまたは S3 client から、100 GB クラスのファイルを upload できる
 - 1 時間を超える upload も中断なく継続できる
-- 中断した upload の再開（レジューム）は未確定。実測で可能と確認できた場合に対応する
+- 中断した upload は再開（レジューム）できる（multipart upload の完了済み part を引き継ぐ。認証セッションを取り直しても再開できる）
 
 ## download・一覧・削除
 
@@ -49,19 +50,19 @@ kura が提供するのは次の 4 つのみ:
 ## presigned URL
 
 - ユーザーは自分のファイルに対して presigned URL（GET / PUT）を発行できる
-- presign は短期の共有・受け渡し専用である。TTL の実効上限は未確定（一時 credentials の有効期間に依存するため、実測で確定して本仕様に明記する）
+- presign は短期の共有・受け渡し専用である。有効期間は発行に使った一時 credentials の残り時間で頭打ちになり、実効上限は約 1 時間（[architecture.md](./architecture.md) の「presign」を参照）
 - 長期の共有には presign を使わず、public 化 + 恒久 URL で代替する
 
 ## SP による非対話利用
 
 - 他のサービス（SP。例: Sapporo WES）が、ユーザーに代わって非対話で kura のファイルを読み書きできる（act-as-user）
 - SP がアクセスできるのはそのユーザー自身の領域だけで、権限はユーザー本人と同じ
-- ユーザーは自分の token を SP に渡すことで委譲する。token の種類は未確定（長時間の処理でも切れない offline token を第一候補とし、実測で確定する）
+- ユーザーは自分の token を SP に渡すことで委譲する。長時間の処理には offline token を用いる（SP が refresh で access token を得続け、一時 credentials を再取得する。idle 30 日で失効する）
 
 ## quota
 
 - 各ユーザーの領域には容量上限（quota）がある。default は 1 TB で、admin がユーザー単位に変更できる
-- quota を超過すると新規の upload が拒否される（403）。download と削除は引き続き行え、容量を quota 内に戻せば upload を再開できる（超過時挙動の詳細は実測で確定する）
+- quota を超過すると新規の upload がエラーで拒否される（超過の判定は約 1 分周期で行われる）。download と削除は引き続き行え、削除で quota 内に戻せば upload は自動的に再開できる（ストレージの再整理を待つため反映には遅延がありうる。[operations.md](./operations.md) を参照）
 
 ## 全ファイル TTL
 
@@ -72,8 +73,7 @@ kura が提供するのは次の 4 つのみ:
 
 ## ファイル名の制約
 
-- ファイル名に space と `%` は使えない（公開 URL の encoding 問題を避けるため）
-- 制約の緩和は未確定。配信経路の encoding 検証で問題ないと確認できた場合のみ緩和する
+- ファイル名に kura 固有の制約は無い。space・`%`・`?`・`#`・日本語などを含む名前も upload・公開配信できる（S3 の object key として有効であればよい）
 
 ## 監査
 

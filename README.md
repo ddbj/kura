@@ -15,6 +15,23 @@
 
 kura の実態は SeaweedFS（S3 + STS + IAM）と nginx の設定群であり、独自の API server は持たない。ファイルの byte は client と S3 の間で直接転送され、公開配信は nginx が object の tag を判定して行う。
 
+## 開発
+
+```sh
+npm install
+npm test    # SeaweedFS + nginx (docker compose, env.test) を自動起動して設定群のテストを実行
+npm run typecheck
+npm run lint
+```
+
+dev 環境（DDBJ staging Keycloak を使う。S3 = localhost:28333、UI / 公開配信 = localhost:28080）:
+
+```sh
+docker compose --env-file env.dev --env-file .env up -d --wait
+```
+
+`.env` は git 管理外の secret（[docs/operations.md](./docs/operations.md) の「secret 管理」参照）。
+
 ## ドキュメント
 
 | ドキュメント | 内容 |
