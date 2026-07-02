@@ -46,5 +46,12 @@ export const listObjectsV2Xml = ({ bucket, prefix, objects, commonPrefixes, next
   ${commonPrefixes.map((p) => `<CommonPrefixes><Prefix>${escapeXml(p)}</Prefix></CommonPrefixes>`).join("\n  ")}
 </ListBucketResult>`
 
+export const getObjectTaggingXml = (tags: { key: string; value: string }[]): string => `<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <TagSet>
+    ${tags.map((t) => `<Tag><Key>${escapeXml(t.key)}</Key><Value>${escapeXml(t.value)}</Value></Tag>`).join("\n    ")}
+  </TagSet>
+</Tagging>`
+
 export const s3ErrorXml = (code: string, message: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <Error><Code>${escapeXml(code)}</Code><Message>${escapeXml(message)}</Message></Error>`

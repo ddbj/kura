@@ -125,7 +125,7 @@ CORS:
 
 - 位置づけ: kura の使い方の reference。S3 API + STS を直接叩き、同じ操作は CLI（aws cli / curl）でも可能。frontend が無くても kura は成立する
 - React Router v7 の SPA モード（`ssr: false`、SSR なし）。静的ビルド（`build/client`）を内側 nginx が配信する。BFF は無い
-- デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / 公開 base URL）は SPA が起動時に `/_config.json` から読む。nginx が env 変数から生成して配信し（dev サーバでは vite の middleware が `env.dev` から同じ JSON を返す）、ビルド成果物は環境非依存になる。OIDC の redirect URI は `window.location.origin` から導出するため設定に含めない
+- デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / 公開 base URL / ファイル TTL（有効時のみ））は SPA が起動時に `/_config.json` から読む。nginx が env 変数から生成して配信し（dev サーバでは vite の middleware が `env.dev` から同じ JSON を返す）、ビルド成果物は環境非依存になる。OIDC の redirect URI は `window.location.origin` から導出するため設定に含めない
 - auth: react-oidc-context（PKCE、automaticSilentRenew。public client への refresh token grant で更新する）
 - 初回利用: HeadBucket で自分の bucket の存在を確認し、無ければ CreateBucket する（「配置」参照）
 - upload: AWS SDK lib-storage の multipart upload。credentials provider が token の silent renew -> STS 再取得を行い、1 時間を超える upload でも credentials を切らさない

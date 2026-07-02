@@ -33,6 +33,7 @@ const devConfigJson = (): Plugin => ({
         oidcClientId: env["KURA_OIDC_CLIENT_ID"],
         s3Endpoint: env["KURA_S3_ENDPOINT"],
         publicBase: env["KURA_PUBLIC_BASE_URL"],
+        fileTtlDays: env["KURA_FILE_TTL_DAYS"] ?? "",
       }))
     })
   },

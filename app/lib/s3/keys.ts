@@ -25,6 +25,9 @@ const encodeSegment = (segment: string): string => {
 export const prefixToUrlPath = (prefix: string): string =>
   prefixToSegments(prefix).map(encodeSegment).join("/")
 
+export const keyToUrlPath = (key: string): string =>
+  key.split("/").map(encodeSegment).join("/")
+
 // React Router splat params arrive percent-decoded; empty segments (from
 // hand-typed "a//b" URLs) are dropped.
 export const splatToPrefix = (splat: string): string =>

@@ -11,6 +11,7 @@ import { oidcProviderProps } from "~/lib/auth"
 import { ConfigProvider, fetchConfig } from "~/lib/config"
 import { LangProvider } from "~/lib/i18n"
 import { createQueryClient } from "~/lib/query"
+import { OverlayProviders } from "~/shell"
 
 import type { Route } from "./+types/root"
 
@@ -55,7 +56,9 @@ const App = ({ loaderData }: Route.ComponentProps) => {
       <AuthProvider {...oidcProviderProps(loaderData)}>
         <QueryClientProvider client={queryClient}>
           <LangProvider>
-            <Outlet />
+            <OverlayProviders>
+              <Outlet />
+            </OverlayProviders>
           </LangProvider>
         </QueryClientProvider>
       </AuthProvider>

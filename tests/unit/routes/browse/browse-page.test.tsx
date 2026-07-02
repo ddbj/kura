@@ -3,11 +3,12 @@ import { userEvent } from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, test, vi } from "vitest"
 
+import type { AppConfig } from "~/lib/config"
 import { BrowsePage } from "~/routes/browse/browse-page"
 
 import { seedAuthenticatedUser } from "../../_helpers/oidc"
 import { renderWithStub, testConfig } from "../../_helpers/render"
-import { listObjectsV2Xml, stsAssumeRoleXml } from "../../mocks/s3-xml"
+import { getObjectTaggingXml, listObjectsV2Xml, stsAssumeRoleXml } from "../../mocks/s3-xml"
 import { server } from "../../mocks/server"
 
 const ENDPOINT = testConfig.s3Endpoint
@@ -15,19 +16,30 @@ const BUCKET = "kura-tester"
 
 type ListedObject = { key: string; size: number; lastModified: string }
 
-const stubBucket = ({ objects = [], commonPrefixes = [], prefix = "" }: {
+const paramKey = (params: Record<string, string | readonly string[] | undefined>): string => {
+  const key = params["key"]
+
+  return Array.isArray(key) ? key.join("/") : String(key)
+}
+
+const stubBucket = ({ objects = [], commonPrefixes = [], prefix = "", publicKeys = [] }: {
   objects?: ListedObject[]
   commonPrefixes?: string[]
   prefix?: string
+  publicKeys?: string[]
 } = {}) => {
   const deleted: string[] = []
   server.use(
     http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 200 })),
     http.get(`${ENDPOINT}/${BUCKET}`, () =>
       HttpResponse.xml(listObjectsV2Xml({ bucket: BUCKET, prefix, objects, commonPrefixes }))),
+    // The browse view lazily fetches ?tagging per visible object.
+    http.get(`${ENDPOINT}/${BUCKET}/:key+`, ({ params }) =>
+      HttpResponse.xml(getObjectTaggingXml(
+        publicKeys.includes(paramKey(params)) ? [{ key: "kura-public", value: "true" }] : [],
+      ))),
     http.delete(`${ENDPOINT}/${BUCKET}/:key+`, ({ params }) => {
-      const key = params["key"]
-      deleted.push(Array.isArray(key) ? key.join("/") : String(key))
+      deleted.push(paramKey(params))
       return new HttpResponse(null, { status: 204 })
     }),
   )
@@ -45,15 +57,16 @@ const stubSts = () =>
       }))),
   )
 
-const renderBrowse = (prefix = "") => {
+const renderBrowse = (prefix = "", config: AppConfig = testConfig) => {
   stubSts()
-  seedAuthenticatedUser(testConfig, { username: BUCKET })
+  seedAuthenticatedUser(config, { username: BUCKET })
   return renderWithStub({
     routes: [
       { path: "/", Component: () => <BrowsePage prefix={prefix} /> },
       { path: "/_browse/*", Component: () => <p>navigated-to-splat</p> },
     ],
     initialEntries: ["/"],
+    config,
   })
 }
 
@@ -145,6 +158,152 @@ describe("BrowsePage", () => {
     } finally {
       clickSpy.mockRestore()
     }
+  })
+
+  test("BrowsePage_publicBadge_shownOnlyForTaggedObjects", async () => {
+    stubBucket({
+      objects: [
+        { key: "pub.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" },
+        { key: "priv.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" },
+      ],
+      publicKeys: ["pub.txt"],
+    })
+    renderBrowse()
+
+    const pubRow = (await screen.findByRole("cell", { name: /pub\.txt/ })).closest("tr")!
+    await vi.waitFor(() => expect(within(pubRow).getByText("公開中")).toBeInTheDocument())
+    const privRow = screen.getByRole("cell", { name: "priv.txt" }).closest("tr")!
+    expect(within(privRow).queryByText("公開中")).not.toBeInTheDocument()
+  })
+
+  test("BrowsePage_publishFlow_showsUrlAndUpdatesBadge", async () => {
+    const user = userEvent.setup()
+    stubBucket({ objects: [{ key: "doc.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }] })
+    const taggingPuts: string[] = []
+    server.use(http.put(`${ENDPOINT}/${BUCKET}/:key+`, async ({ request }) => {
+      expect(new URL(request.url).searchParams.has("tagging")).toBe(true)
+      taggingPuts.push(await request.text())
+      return new HttpResponse(null, { status: 200 })
+    }))
+    renderBrowse()
+
+    await user.click(await screen.findByRole("button", { name: "公開" }))
+    const dialog = await screen.findByRole("dialog")
+    const url = `${testConfig.publicBase}/${BUCKET}/doc.txt`
+    expect(within(dialog).getByText(url)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "公開する" }))
+    expect(await within(dialog).findByRole("textbox", { name: "公開 URL" })).toHaveValue(url)
+    expect(taggingPuts[0]).toContain("<Key>kura-public</Key>")
+    expect(await screen.findByText("公開中")).toBeInTheDocument()
+  })
+
+  test("BrowsePage_unpublishFlow_removesBadge", async () => {
+    const user = userEvent.setup()
+    stubBucket({
+      objects: [{ key: "pub.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }],
+      publicKeys: ["pub.txt"],
+    })
+    const taggingDeletes: string[] = []
+    server.use(http.delete(`${ENDPOINT}/${BUCKET}/:key+`, ({ request, params }) => {
+      expect(new URL(request.url).searchParams.has("tagging")).toBe(true)
+      taggingDeletes.push(paramKey(params))
+      return new HttpResponse(null, { status: 204 })
+    }))
+    renderBrowse()
+    expect(await screen.findByText("公開中")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "公開" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "公開停止" }))
+
+    await vi.waitFor(() => expect(taggingDeletes).toEqual(["pub.txt"]))
+    await vi.waitFor(() => expect(screen.queryByText("公開中")).not.toBeInTheDocument())
+    expect(within(dialog).getByRole("button", { name: "公開する" })).toBeInTheDocument()
+  })
+
+  test("BrowsePage_shareFlow_issuesPresignedGetUrl", async () => {
+    const user = userEvent.setup()
+    stubBucket({ objects: [{ key: "data.bin", size: 10, lastModified: "2026-07-01T10:00:00.000Z" }] })
+    renderBrowse()
+
+    await user.click(await screen.findByRole("button", { name: "共有" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "発行" }))
+
+    const field = await within(dialog).findByRole("textbox", { name: "presigned URL" })
+    const url = new URL((field as HTMLInputElement).value)
+    expect(url.origin).toBe(ENDPOINT)
+    expect(url.pathname).toBe(`/${BUCKET}/data.bin`)
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("900")
+    expect(url.searchParams.get("X-Amz-Security-Token")).toBeTruthy()
+    expect(url.searchParams.get("X-Amz-Signature")).toBeTruthy()
+    expect(within(dialog).getByText(/頃まで有効/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/実効上限は約 1 時間/)).toBeInTheDocument()
+  })
+
+  test("BrowsePage_uploadUrlFlow_issuesPresignedPutUrl", async () => {
+    const user = userEvent.setup()
+    stubBucket({ prefix: "docs/" })
+    renderBrowse("docs/")
+
+    await user.click(await screen.findByRole("button", { name: "アップロード用 URL" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByRole("textbox", { name: "ファイル名" }), "incoming.bin")
+    await user.click(within(dialog).getByRole("button", { name: "発行" }))
+
+    const field = await within(dialog).findByRole("textbox", { name: "presigned URL" })
+    const url = new URL((field as HTMLInputElement).value)
+    expect(url.pathname).toBe(`/${BUCKET}/docs/incoming.bin`)
+    expect(url.searchParams.get("X-Amz-Signature")).toBeTruthy()
+    expect(within(dialog).getByText(/curl -T/)).toBeInTheDocument()
+  })
+
+  test("BrowsePage_ttlEnabled_showsExpiryColumn", async () => {
+    stubBucket({ objects: [{ key: "a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }] })
+    renderBrowse("", { ...testConfig, fileTtlDays: 30 })
+
+    expect(await screen.findByRole("columnheader", { name: "有効期限" })).toBeInTheDocument()
+    // 2026-07-01T10:00Z + 30 日 (JST 表示)
+    expect(screen.getByText(/2026\/07\/31/)).toBeInTheDocument()
+  })
+
+  test("BrowsePage_ttlDisabled_hidesExpiryColumn", async () => {
+    stubBucket({ objects: [{ key: "a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }] })
+    renderBrowse()
+
+    await screen.findByRole("cell", { name: "a.txt" })
+    expect(screen.queryByRole("columnheader", { name: "有効期限" })).not.toBeInTheDocument()
+  })
+
+  test("BrowsePage_upload_putsObjectAndRefreshesList", async () => {
+    const user = userEvent.setup()
+    let uploaded = false
+    server.use(
+      http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 200 })),
+      http.get(`${ENDPOINT}/${BUCKET}`, () =>
+        HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "",
+          objects: uploaded ? [{ key: "new.txt", size: 1, lastModified: "2026-07-02T10:00:00.000Z" }] : [],
+          commonPrefixes: [],
+        }))),
+      http.put(`${ENDPOINT}/${BUCKET}/new.txt`, () => {
+        uploaded = true
+        return new HttpResponse(null, { status: 200, headers: { ETag: "\"etag\"" } })
+      }),
+    )
+    const { container } = renderBrowse()
+    await screen.findByText("ファイルはまだありません。")
+
+    const input = container.querySelector("input[type=file]")
+    expect(input).not.toBeNull()
+    await user.upload(input as HTMLInputElement, new File(["x"], "new.txt", { type: "text/plain" }))
+
+    // Upload completes, the toast flips to success, and the invalidated list
+    // shows the new object.
+    expect(await screen.findByText("アップロード完了")).toBeInTheDocument()
+    expect(await screen.findByRole("cell", { name: "new.txt" })).toBeInTheDocument()
   })
 
   test("BrowsePage_unsupportedUsername_showsGuidanceWithoutTouchingS3", async () => {

@@ -14,8 +14,23 @@ const validConfig = {
 
 describe("AppConfigSchema", () => {
   test("AppConfigSchema_validConfig_parses", () => {
-    expect(AppConfigSchema.parse(validConfig)).toEqual(validConfig)
+    expect(AppConfigSchema.parse(validConfig)).toEqual({ ...validConfig, fileTtlDays: null })
   })
+
+  test("AppConfigSchema_fileTtlDaysEmpty_normalizesToNull", () => {
+    expect(AppConfigSchema.parse({ ...validConfig, fileTtlDays: "" }).fileTtlDays).toBeNull()
+  })
+
+  test("AppConfigSchema_fileTtlDaysNumeric_parsesToInt", () => {
+    expect(AppConfigSchema.parse({ ...validConfig, fileTtlDays: "30" }).fileTtlDays).toBe(30)
+  })
+
+  test.each(["0", "-1", "abc", "1.5", " 30", "30 ", "０３", "1e3"])(
+    "AppConfigSchema_fileTtlDaysInvalid_%s_rejects",
+    (value) => {
+      expect(() => AppConfigSchema.parse({ ...validConfig, fileTtlDays: value })).toThrow()
+    },
+  )
 
   test.each(Object.keys(validConfig))("AppConfigSchema_missing_%s_rejects", (key) => {
     const { [key as keyof typeof validConfig]: _, ...rest } = validConfig
@@ -41,7 +56,7 @@ describe("AppConfigSchema", () => {
 describe("fetchConfig", () => {
   test("fetchConfig_ok_returnsParsedConfig", async () => {
     server.use(http.get("/_config.json", () => HttpResponse.json(validConfig)))
-    await expect(fetchConfig()).resolves.toEqual(validConfig)
+    await expect(fetchConfig()).resolves.toEqual({ ...validConfig, fileTtlDays: null })
   })
 
   test("fetchConfig_httpError_throws", async () => {

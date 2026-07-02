@@ -9,12 +9,14 @@ import { ConfigProvider } from "~/lib/config"
 import type { Lang } from "~/lib/i18n"
 import { LangProvider } from "~/lib/i18n"
 import { createQueryClient } from "~/lib/query"
+import { OverlayProviders } from "~/shell"
 
 export const testConfig: AppConfig = {
   oidcIssuer: "https://idp.test/realms/master",
   oidcClientId: "kura-test",
   s3Endpoint: "http://localhost:28333",
   publicBase: "http://localhost:28080",
+  fileTtlDays: null,
 }
 
 type Routes = Parameters<typeof createRoutesStub>[0]
@@ -41,7 +43,9 @@ export const renderWithStub = ({
       <AuthProvider {...oidcProviderProps(config)}>
         <QueryClientProvider client={createQueryClient()}>
           <LangProvider initialLang={lang}>
-            <Stub initialEntries={initialEntries} />
+            <OverlayProviders>
+              <Stub initialEntries={initialEntries} />
+            </OverlayProviders>
           </LangProvider>
         </QueryClientProvider>
       </AuthProvider>

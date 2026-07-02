@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import { userEvent } from "@testing-library/user-event"
 import { useState } from "react"
 import { describe, expect, test, vi } from "vitest"
 
@@ -39,7 +40,34 @@ const Harness = ({ onClose }: HarnessProps) => {
   )
 }
 
+// A controlled input re-renders the whole dialog per keystroke, and the inline
+// onClose changes identity each time — initial focus must not be re-applied.
+const TypingHarness = () => {
+  const [open, setOpen] = useState(true)
+  const [value, setValue] = useState("")
+  return (
+    <Modal open={open} onClose={() => setOpen(false)} ariaLabelledby="typing-title">
+      <ModalHeader title="dialog" titleId="typing-title" onClose={() => setOpen(false)} />
+      <ModalBody>
+        <input aria-label="name" value={value} onChange={(e) => setValue(e.target.value)} />
+      </ModalBody>
+    </Modal>
+  )
+}
+
 describe("Modal", () => {
+  test("Modal_typingInControlledInput_keepsFocusAndValue", async () => {
+    const user = userEvent.setup()
+    render(<TypingHarness />)
+
+    const input = screen.getByRole("textbox", { name: "name" })
+    await user.click(input)
+    await user.keyboard("incoming")
+
+    expect(input).toHaveValue("incoming")
+    expect(input).toHaveFocus()
+  })
+
   test("Modal_open_setsDialogRoleAndAria", () => {
     render(<Harness />)
     act(() => {

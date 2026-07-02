@@ -5,6 +5,42 @@ export type Resources = {
     loading: string
     cancel: string
     retry: string
+    close: string
+    copy: string
+    copied: string
+  }
+  upload: {
+    button: string
+    done: string
+    failed: string
+  }
+  publish: {
+    button: string
+    badge: string
+    title: string
+    loading: string
+    publicUrlLabel: string
+    makePublicIntro: string
+    makePublic: string
+    isPublicIntro: string
+    makePrivate: string
+    failed: string
+  }
+  presign: {
+    button: string
+    putButton: string
+    getTitle: string
+    putTitle: string
+    expiresLabel: string
+    minutes15: string
+    hour1: string
+    issue: string
+    urlLabel: string
+    expiresAt: string
+    note: string
+    filenameLabel: string
+    putUsage: string
+    failed: string
   }
   shell: {
     skipToContent: string
@@ -36,6 +72,7 @@ export type Resources = {
     name: string
     size: string
     lastModified: string
+    expiresAt: string
     download: string
     delete: string
     loadMore: string
@@ -51,6 +88,42 @@ export const ja: Resources = {
     loading: "読み込み中…",
     cancel: "キャンセル",
     retry: "再試行",
+    close: "閉じる",
+    copy: "コピー",
+    copied: "コピーしました",
+  },
+  upload: {
+    button: "アップロード",
+    done: "アップロード完了",
+    failed: "アップロードに失敗しました",
+  },
+  publish: {
+    button: "公開",
+    badge: "公開中",
+    title: "公開設定",
+    loading: "公開状態を確認中…",
+    publicUrlLabel: "公開 URL",
+    makePublicIntro: "{{name}} を公開します。次の URL で誰でも認証なしでダウンロードできるようになります。",
+    makePublic: "公開する",
+    isPublicIntro: "{{name}} は公開中です。次の URL で誰でもダウンロードできます。",
+    makePrivate: "公開停止",
+    failed: "公開状態の変更に失敗しました",
+  },
+  presign: {
+    button: "共有",
+    putButton: "アップロード用 URL",
+    getTitle: "共有 URL を発行",
+    putTitle: "アップロード用 URL を発行",
+    expiresLabel: "有効期間",
+    minutes15: "15 分",
+    hour1: "1 時間",
+    issue: "発行",
+    urlLabel: "presigned URL",
+    expiresAt: "{{datetime}} 頃まで有効",
+    note: "presigned URL は短期の受け渡し用です。発行に使うセッションの残り時間で頭打ちになるため、実効上限は約 1 時間です。長期の共有には公開を使ってください。",
+    filenameLabel: "ファイル名",
+    putUsage: "この URL に対して HTTP PUT でアップロードできます。",
+    failed: "URL の発行に失敗しました",
   },
   shell: {
     skipToContent: "本文へスキップ",
@@ -83,6 +156,7 @@ export const ja: Resources = {
     name: "名前",
     size: "サイズ",
     lastModified: "更新日時",
+    expiresAt: "有効期限",
     download: "ダウンロード",
     delete: "削除",
     loadMore: "さらに表示",

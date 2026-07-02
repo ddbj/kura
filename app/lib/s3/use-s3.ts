@@ -12,7 +12,7 @@ import { createStsCredentialsProvider } from "./credentials"
 // mid-action.
 const MIN_TOKEN_REMAINING_S = 120
 
-const freshAccessToken = async (auth: AuthContextProps): Promise<string> => {
+export const freshAccessToken = async (auth: AuthContextProps): Promise<string> => {
   const user = auth.user
   if (user && typeof user.expires_in === "number" && user.expires_in > MIN_TOKEN_REMAINING_S) {
     return user.access_token

@@ -8,7 +8,7 @@ export const PrefixBreadcrumb = ({ prefix }: { prefix: string }) => {
   const t = useT()
   const segments = prefixToSegments(prefix)
   return (
-    <nav aria-label={t("browse.breadcrumbLabel")} className="mb-4">
+    <nav aria-label={t("browse.breadcrumbLabel")}>
       <ol className="flex flex-wrap items-center gap-1 text-fs-body-sm">
         <li>
           {segments.length === 0

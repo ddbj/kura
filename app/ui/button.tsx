@@ -2,9 +2,9 @@ import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "reac
 
 import { cn } from "./cn"
 
-type SizedButtonKind = "primary" | "secondary" | "danger" | "ghost" | "accent"
+export type SizedButtonKind = "primary" | "secondary" | "danger" | "ghost" | "accent"
 type ButtonKind = SizedButtonKind | "link"
-type ButtonSize = "sm" | "md" | "lg"
+export type ButtonSize = "sm" | "md" | "lg"
 
 type SizedStyleProps = {
   kind?: SizedButtonKind

@@ -11,6 +11,14 @@ export const AppConfigSchema = z.object({
   oidcClientId: z.string().min(1),
   s3Endpoint: httpUrl,
   publicBase: httpUrl,
+  // envsubst bakes env vars as strings, so the TTL arrives as a decimal
+  // string; empty (or absent) means the deployment has no file TTL.
+  fileTtlDays: z
+    .union([
+      z.literal("").transform(() => null),
+      z.string().regex(/^[1-9][0-9]*$/).transform(Number),
+    ])
+    .default(null),
 })
 
 export type AppConfig = z.infer<typeof AppConfigSchema>

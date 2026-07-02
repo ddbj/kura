@@ -54,6 +54,8 @@ export const Modal = ({
   const previouslyFocused = useRef<Element | null>(null)
   const pointerDownOnOverlay = useRef<boolean>(false)
 
+  // Initial focus runs only on the open transition: re-renders while open
+  // (e.g. typing into a controlled input) must not steal focus back.
   useEffect(() => {
     if (!open) return
 
@@ -63,6 +65,15 @@ export const Modal = ({
       const focusables = focusableWithin(root)
       ;(focusables[0] ?? root).focus()
     }
+
+    return () => {
+      const prev = previouslyFocused.current
+      if (prev instanceof HTMLElement) prev.focus()
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
 
     const handleKey = (e: KeyboardEvent): void => {
       if (closeOnEscape && e.key === "Escape") {
@@ -100,8 +111,6 @@ export const Modal = ({
     return () => {
       document.removeEventListener("keydown", handleKey)
       document.body.style.overflow = previousOverflow
-      const prev = previouslyFocused.current
-      if (prev instanceof HTMLElement) prev.focus()
     }
   }, [open, onClose, closeOnEscape])
 

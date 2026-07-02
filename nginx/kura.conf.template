@@ -23,7 +23,7 @@ server {
   # environment-independent (docs/architecture.md frontend).
   location = /_config.json {
     default_type application/json;
-    return 200 '{"oidcIssuer":"${KURA_OIDC_ISSUER}","oidcClientId":"${KURA_OIDC_CLIENT_ID}","s3Endpoint":"${KURA_S3_ENDPOINT}","publicBase":"${KURA_PUBLIC_BASE_URL}"}';
+    return 200 '{"oidcIssuer":"${KURA_OIDC_ISSUER}","oidcClientId":"${KURA_OIDC_CLIENT_ID}","s3Endpoint":"${KURA_S3_ENDPOINT}","publicBase":"${KURA_PUBLIC_BASE_URL}","fileTtlDays":"${KURA_FILE_TTL_DAYS}"}';
   }
 
   # Fingerprinted build assets. "_"-prefixed paths can never collide with the
