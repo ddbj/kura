@@ -1,0 +1,46 @@
+import type { S3Client } from "@aws-sdk/client-s3"
+import { useEffect, useMemo, useRef } from "react"
+import type { AuthContextProps } from "react-oidc-context"
+import { useAuth } from "react-oidc-context"
+
+import { useConfig } from "~/lib/config"
+
+import { createS3Client } from "./client"
+import { createStsCredentialsProvider } from "./credentials"
+
+// Renew ahead of expiry so an STS session minted from this token does not die
+// mid-action.
+const MIN_TOKEN_REMAINING_S = 120
+
+const freshAccessToken = async (auth: AuthContextProps): Promise<string> => {
+  const user = auth.user
+  if (user && typeof user.expires_in === "number" && user.expires_in > MIN_TOKEN_REMAINING_S) {
+    return user.access_token
+  }
+  const renewed = await auth.signinSilent()
+  if (renewed === null) {
+    throw new Error("Silent renew did not return a session")
+  }
+  return renewed.access_token
+}
+
+// One client per endpoint: the SDK re-invokes the credentials provider on
+// expiry, and the provider always reads the latest auth state via the ref.
+export const useS3 = (): S3Client => {
+  const config = useConfig()
+  const auth = useAuth()
+  const authRef = useRef(auth)
+  useEffect(() => {
+    authRef.current = auth
+  }, [auth])
+  /* eslint-disable react-hooks/refs -- the provider closure runs when the SDK
+     signs a request (post-render), never during render itself */
+  return useMemo(
+    () => {
+      const getToken = () => freshAccessToken(authRef.current)
+      return createS3Client(config.s3Endpoint, createStsCredentialsProvider(getToken, config.s3Endpoint))
+    },
+    [config.s3Endpoint],
+  )
+  /* eslint-enable react-hooks/refs */
+}

@@ -46,9 +46,13 @@ nginx + filer の経路で、公開配信の enforcement を自動検証する:
 ## frontend のテスト
 
 - 構成は unit / pbt / e2e の 3 層。vitest + @testing-library/react + msw、@fast-check/vitest、@playwright/test
+- vitest は projects 構成: `unit`（jsdom、`tests/unit/`）/ `pbt`（node、`tests/pbt/`）/ `integration`（node、`tests/integration/`。compose を起動する globalSetup を持つ）。`npm run test:unit` は unit + pbt のみを実行し docker を必要としない。`npm test` は全 projects を実行する
+- unit テストはコンポーネントを実物の provider（AuthProvider / i18n / react-query）ごと動かす。認証済み状態は oidc-client-ts のストレージ（sessionStorage の `oidc.user:*` キー）へ User を seed して作る（ストレージ = 外部境界）
 - PBT（fast-check）の重点対象:
   - key / prefix 構築（`..`、percent-encoding、unicode、空 segment）
+  - username の S3 bucket 名適合判定（SeaweedFS の受理集合との一致）
   - filename validation の境界値
+  - i18n resources の ja / en パリティ（キー集合一致・空文字禁止・翻訳漏れ検知）
   - 公開バッジのキャッシュ・遅延取得ロジックの不変条件
 - E2E（Playwright）: 主要ユースケースをブラウザで通す。DDBJ staging へのログインを含む E2E は専用のテストユーザーを用いる（用意方法は未確定）
 

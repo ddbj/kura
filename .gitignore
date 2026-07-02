@@ -1,5 +1,7 @@
 .env
 node_modules/
 dist/
+build/
+.react-router/
 .claude/
 tests/setup/.jwks/

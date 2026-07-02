@@ -7,6 +7,7 @@
 - 稼働ノード: NIG オンプレミスの a012（`172.19.15.12`）
 - docker compose で SeaweedFS 一式と kura 内側 nginx を動かす。port は内側 nginx = 28080、SeaweedFS S3 = 28333
 - 起動は `docker compose --env-file env.<環境> --env-file .env up -d --wait`（`.env` は git 管理外の secret。「secret 管理」参照）
+- 内側 nginx は SPA のビルド成果物（`build/client`）をマウントして配信するため、compose up の前に `npm ci && npm run build` を実行する。ビルド成果物は環境非依存（デプロイ固有の設定は nginx が env から `/_config.json` として配信する。[architecture.md](./architecture.md)）
 - volume 設定: per-user bucket は bucket ごとに volume（collection）を消費するため、volume growth は 1 本ずつ（entrypoint が生成する master.toml）、volume 数上限は空きディスクからの自動算出（`-volume.max=0`）にしている。volume 1 本のサイズ上限は env `KURA_VOLUME_SIZE_LIMIT_MB`（dev / test は 1024。production の値は配備時に空きディスクと合わせて決める）
 - 前段の DDBJ gateway（`ddbj/service-gateway-conf`）が `kura.ddbj.nig.ac.jp` -> 内側 nginx（a012:28080）、`kura-s3.ddbj.nig.ac.jp` -> SeaweedFS S3（a012:28333）へ proxy する
 - filer の port（HTTP 8888 / gRPC）は compose の内部 network に閉じ、ホスト外に公開しない

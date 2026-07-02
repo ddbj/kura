@@ -104,7 +104,8 @@ subdomain 分離:
 root パスの名前空間:
 
 - gateway が `/ga4gh/` を予約 prefix として分岐する（別サービス用。kura は使わない）
-- 内側 nginx は `/<user>/<path>` の公開配信を先に試し、既知の SPA asset / route だけ index.html に fallback する。SPA asset・予約 segment が username と衝突しない routing 順序にする
+- SPA の予約パスはすべて `_` 始まり: `/_assets/`（fingerprint 付きビルド asset）、`/_browse/*`（階層ブラウズ画面）、`/_auth/callback`（OIDC callback）、`/_config.json`（環境設定）。username は S3 bucket 命名規則により `_` を含めないため、公開配信の `/<user>/<path>` と構造的に衝突しない
+- 内側 nginx は完全一致の `/` と上記の `_` 予約 prefix だけを SPA（index.html への fallback / 静的 asset / 設定 JSON）に routing する。`/<user>/<path>` は公開配信（tag 判定）、どちらにも該当しないパスは 404
 
 CORS:
 
@@ -123,14 +124,15 @@ CORS:
 ## frontend（reference SPA）
 
 - 位置づけ: kura の使い方の reference。S3 API + STS を直接叩き、同じ操作は CLI（aws cli / curl）でも可能。frontend が無くても kura は成立する
-- React Router v7 の SPA モード（`ssr: false`、SSR なし）。静的ビルドを内側 nginx が配信する。BFF は無い
-- auth: react-oidc-context（PKCE、automaticSilentRenew）
+- React Router v7 の SPA モード（`ssr: false`、SSR なし）。静的ビルド（`build/client`）を内側 nginx が配信する。BFF は無い
+- デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / 公開 base URL）は SPA が起動時に `/_config.json` から読む。nginx が env 変数から生成して配信し（dev サーバでは vite の middleware が `env.dev` から同じ JSON を返す）、ビルド成果物は環境非依存になる。OIDC の redirect URI は `window.location.origin` から導出するため設定に含めない
+- auth: react-oidc-context（PKCE、automaticSilentRenew。public client への refresh token grant で更新する）
 - 初回利用: HeadBucket で自分の bucket の存在を確認し、無ければ CreateBucket する（「配置」参照）
 - upload: AWS SDK lib-storage の multipart upload。credentials provider が token の silent renew -> STS 再取得を行い、1 時間を超える upload でも credentials を切らさない
 - publish / unpublish: `PutObjectTagging` / `DeleteObjectTagging`。公開バッジは表示中 directory の object にだけ `GetObjectTagging` を並列・遅延発行してキャッシュする（list 応答に tag は乗らないため。ページング前提で実用十分）
 - TTL 有効時は各ファイルの有効期限を一覧に表示する
 - design system: db-portal（BSI）の design system を使う。色は BSI 紫（`#6F4392`）
-- i18n: ja / en。言語解決は cookie / localStorage ベース
+- i18n: ja / en。言語解決は localStorage ベース（初回は `navigator.language` から推定、`?lang=ja|en` の URL hint で明示切替。hint は localStorage へ永続化して URL から除去する）
 - package manager: npm
 
 ## SeaweedFS 由来の制約と設計根拠

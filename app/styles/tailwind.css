@@ -1,0 +1,218 @@
+@import "tailwindcss";
+
+/* BSI デザイントークン (Tailwind v4 @theme).
+ *
+ * 本ファイルがデザインシステムの値の SSOT。utility class は Tailwind v4 が
+ * @theme 宣言から自動生成する (--color-brand → bg-brand / text-brand / border-brand、
+ * --spacing-section-md → p-section-md / m-section-md、--text-fs-h2 → text-fs-h2 …)。
+ *
+ * primitive 実装は app/ui/*.tsx、消費は app/features/ や app/routes/。
+ * primitive の Props / Variant ガイド + token の使い分け解説は docs/frontend.md。
+ *
+ * ルール:
+ *   - 値は整数 px のみ。0.5px 刻みは置かない (drift の温床)。
+ *   - 1-2 箇所しか使われない値は token 化しない (直接 utility で書く)。
+ *   - 同値で意味が違う token は別 token として残す (例: fs-h3/fs-body = 14, weight 違い)。
+ *   - 生 hex / arbitrary value (text-[14px], bg-[#xxx] 等) は app/features/ で ESLint 禁止。
+ *     app/ui/ と app/shell/ のみ細部値 (1px 境界線、3px brand bar 等) を直接書ける。
+ */
+
+@theme {
+  /* === Colors ============================================================ */
+  /* Brand (BSI 紫、本物ロゴ色 #6F4392 起点) */
+  --color-brand:        #6F4392;  /* primary button / active nav / link / H2 left bar */
+  --color-brand-deep:   #502E6B;  /* hover / pressed / 強調テキスト */
+  --color-brand-light:  #A987C5;  /* secondary surface fill / radio card border (checked) */
+  --color-brand-tint:   #E7DDF4;  /* brand-soft の一段濃い薄紫: brand-soft / surface いずれの面に乗る pill (keyword ラベル、 StepBadge の数字 pill) */
+  --color-brand-soft:   #F4F2FA;  /* tinted background block / brand chip bg / keyword 行 / AI モード box */
+  --color-brand-softer: #F8F4FB;  /* checked card surface (FmtRadio / FmtCheck) */
+
+  /* Ink (text 階層、WCAG AA 担保) */
+  --color-ink:        #1A1726;  /* heading / 主要 body */
+  --color-ink-mid:    #3F3B4F;  /* secondary text / nav inactive / caption */
+  --color-ink-soft:   #6E6A7B;  /* date / metadata / hint */
+  --color-ink-softer: #9C99A6;  /* 装飾 (·, ×) のみ。body には使わない (AA fail) */
+
+  /* Action / accent */
+  --color-red:   #B73B2C;  /* danger button text / critical */
+  --color-focus: #FFCC33;  /* :focus-visible outline (global rule で使用) */
+
+  /* Surface / border */
+  --color-surface:        #FFFFFF;  /* default page bg / card */
+  --color-surface-subtle: #FAFAFC;  /* table head / notice bg / panel inner */
+  --color-border-soft:    #DAD6E0;  /* default border / divider / Header bottom border */
+  --color-border-strong:  #1A1726;  /* SearchBox / Segmented 外周 border (strong contrast、 掴める入力面感を出す用途) */
+
+  /* Search highlight (<mark> 地色、ドキュメント検索結果のクエリ語強調) */
+  --color-highlight-bg: #FFF1B8;
+
+  /* Status palette (warn は色相 47° goldenrod、DDBJ source 35° と識別可能) */
+  --color-warn-bg:     #FCF7E3;
+  --color-warn-fg:     #705800;
+  --color-warn-border: #E3C65F;
+  --color-ok-bg:       #F1F8F3;
+  --color-ok-fg:       #1F5430;
+  --color-ok-border:   #BFD9C7;
+  --color-critical-bg:     #FCE8E5;
+  --color-critical-fg:     #B73B2C;
+  --color-critical-border: #F0BBB2;
+
+  /* Source palette (DDBJ amber vs DBCLS blue、source pill / facet swatch 用) */
+  --color-src-ddbj:       #A56712;  /* logo-derived amber (small chip / strong text 用) */
+  --color-src-ddbj-soft:  #FBEFDF;
+  --color-src-dbcls:      #004098;  /* royal blue (DBCLS site primary) */
+  --color-src-dbcls-soft: #DFEBFB;
+
+  /* === Font family ======================================================== */
+  --font-sans:  "Noto Sans JP Variable", "Public Sans", "Helvetica Neue", system-ui, sans-serif;
+  --font-serif: "Noto Serif JP", "Source Serif 4", Georgia, serif;
+  --font-mono:  "IBM Plex Mono", ui-monospace, monospace;
+
+  /* === Type scale (整数 px、半端値は置かない) ============================ */
+  --text-fs-h1:      28px;  /* PageTitle h1 */
+  --text-fs-h2:      18px;  /* SectionHeading / ModalHeader title / card title (h3) */
+  --text-fs-h3:      14px;  /* SidebarHeading (= fs-body と同値、weight 700 で識別) */
+  --text-fs-body:    14px;  /* default body / form control / SearchBox input (md) */
+  --text-fs-body-sm: 13px;  /* excerpt / Button sm / SearchBox scope (md) / FmtRadio・FmtCheck */
+  --text-fs-label:   12px;  /* mono small-caps label / FacetRow count / Chip / Pagination */
+  --text-fs-meta:    12px;  /* metadata (news date, accession code) — fs-label と同値、weight/family が違う */
+  --text-fs-micro:   11px;  /* Tag / FacetRow sub / FormGroup hint */
+
+  /* === Tracking (意味別、フォントの締まりを担う) ========================= */
+  --tracking-h1:       -0.015em;  /* PageTitle h1 */
+  --tracking-h3:        0.01em;   /* SidebarHeading */
+  --tracking-mono:      0.02em;   /* font-mono input / news date / mono metadata */
+  --tracking-tag:       0.04em;   /* Tag / FormGroup num */
+  --tracking-label:     0.06em;   /* Label (uppercase mono) / SidebarGroupLabel (sans bold CJK、 mono / uppercase は CJK で無効化なので tracking のみ継承) */
+  --tracking-eyebrow:   0.1em;    /* PageTitle eyebrow */
+
+  /* === Leading (3 段階、Tailwind 標準名で override) ====================== */
+  --leading-tight:   1.2;   /* h1 / h2 / h3 / sidebar heading */
+  --leading-snug:    1.4;   /* Tag / news title / search result card title */
+  --leading-relaxed: 1.6;   /* body / description / Modal description / Callout / content 段落 */
+
+  /* === Spacing (4 倍数を基本、1-2 箇所しか使わない値は token 化しない) === */
+  --spacing-section-sm:    16px;  /* 小 section padding */
+  --spacing-section-mid:   24px;  /* 中 section gap */
+  --spacing-section-block: 28px;  /* block 系 padding */
+  --spacing-section-md:    32px;  /* default section padding */
+  --spacing-section-lg:    48px;  /* hero / top page section */
+  --spacing-page-gutter:    40px;  /* page 横余白 */
+  --spacing-content-max:  1280px;  /* page content max-width (中央寄せ) */
+  --spacing-content-narrow: 880px; /* hero / reading 幅 (form 中央寄せ、subtitle 等) */
+  --spacing-sidebar:       256px;  /* search results / news の sidebar 固定幅 */
+  --spacing-right-pane:    280px;  /* search per-DB result の right pane / news row 右端 tag 領域の最大幅 */
+  --spacing-heading-row:    49px;  /* sidebar heading と main heading row の最小高さ (両者の border-b 位置を揃える) */
+  --spacing-popover:  18rem;  /* Select / Combobox / SearchBox の floating dropdown 最大高 (~9 行) */
+  --spacing-date-col:  5rem;  /* yyyy-mm-dd font-mono 1 行を収める列幅 (news date / docs meta / recently-updated 等で共有) */
+  --spacing-hero-pt:     72px;  /* top page hero の上端 padding (pt-18 相当) */
+  --spacing-hero-pb:     80px;  /* top page hero の下端 padding (pb-20 相当) */
+  --spacing-hero-stack:  56px;  /* top page hero と次 section の間 stack (pb-14 相当) */
+  --spacing-id-col:     115px;  /* cross-results 行の accession identifier 列幅 */
+
+  /* === Radius ============================================================= */
+  --radius-card:   10px;  /* card / panel / SearchBox / Callout */
+  --radius-button:  6px;  /* button / input / select / segmented button / chip filter */
+  --radius-tag:     4px;  /* Tag / badge / swatch */
+  --radius-badge:   2px;  /* AccessBadge outline variant 等、 2px 極小円角 (SSOT 化) */
+  --radius-pill: 9999px;  /* Chip / interactive pill */
+
+  /* === Z-index (階層 semantic、 modal 内で tooltip が上に出るように tooltip > modal) === */
+  --z-index-sticky:  10;  /* sidebar 装飾 (content-sidebar 等) */
+  --z-index-popover: 50;  /* dropdown / suggestion (Select / Combobox / SearchBox 等) */
+  --z-index-modal:   50;  /* modal overlay / skip-link focus */
+  --z-index-tooltip: 60;  /* tooltip / info-hint (modal より上位) */
+
+  /* === Shadow ============================================================= */
+  --shadow-card:       0 1px 2px rgba(26, 23, 38, 0.04);
+  --shadow-card-hover: 0 4px 16px -4px rgba(80, 46, 107, 0.12);
+  --shadow-modal:      0 20px 50px -10px rgba(20, 15, 30, 0.35);
+}
+
+/* === Global a11y rules ==================================================== */
+
+/* focus 系ルールは @layer base に入れて、 utility で個別に打ち消せるように
+   する (SearchBox の内側 input のように wrapper で focus を表すケースで
+   focus-visible:shadow-none を当てて上書きするため)。 un-layered だと CSS
+   cascade で utility に勝ってしまう。 */
+@layer base {
+  *:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* 非入力要素 (button / link 等) の focus indicator は double-ring: 内側
+   * 2px の brand-deep で WCAG 2.2 (1.4.11) の 3:1 コントラストを担保しつつ、
+   * 外側 4px の brand-yellow で BSI らしさを残す (単色 yellow #FFCC33 は
+   * 白背景で 1.51:1 で AA 未達)。 */
+  *:focus-visible {
+    outline: 2px solid var(--color-brand-deep);
+    outline-offset: 1px;
+    border-radius: 3px;
+    box-shadow: 0 0 0 4px var(--color-focus);
+  }
+
+  /* テキスト入力系は上の global 黄色 outline ではなく、角丸を保ったまま枠線を
+     brand 色に変え、外側に brand-tint の薄いリングを添えて focus を示す
+     (border-radius は input 自身の rounded-button に揃える)。 */
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: var(--color-brand);
+    border-radius: var(--radius-button);
+    box-shadow: 0 0 0 2px var(--color-brand-tint);
+  }
+}
+
+/* prefers-reduced-motion (前庭障害 / モーション感受性への配慮): 全 animation /
+ * transition を 0.01ms に縮退させ、 skeleton pulse や tab 遷移の visual
+ * disturbance を除去する (WCAG 2.3.3)。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+button[aria-disabled="true"],
+a[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-ink-soft);
+  opacity: 1;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+html,
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-surface);
+}
+
+/* Search highlight: <mark> within app surfaces (docs search snippet 等). */
+mark {
+  background: var(--color-highlight-bg);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}

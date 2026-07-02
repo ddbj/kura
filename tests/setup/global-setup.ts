@@ -33,6 +33,10 @@ const compose = (args: string[], env: NodeJS.ProcessEnv) => {
 const setup = async (project: TestProject) => {
   const testEnv = readEnvFile(join(repoRoot, "env.test"))
 
+  // The nginx service bind-mounts build/client (SPA build output); create it
+  // so docker does not make a root-owned directory when tests run pre-build.
+  mkdirSync(join(repoRoot, "build", "client"), { recursive: true })
+
   const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true })
   const jwk = { ...(await exportJWK(publicKey)), kid: "kura-test", alg: "RS256", use: "sig" }
   const jwksDir = join(repoRoot, "tests", "setup", ".jwks")

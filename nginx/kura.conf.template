@@ -1,6 +1,10 @@
 # kura inner nginx: SPA static delivery + anonymous public delivery.
 # Public delivery authorizes by the object tag kura-public=true, read from the
 # filer response header X-Amz-Tagging-kura-public (docs/architecture.md).
+#
+# This is an envsubst template (nginx image entrypoint): ${KURA_*} names are
+# replaced from container env vars; nginx runtime variables ($kura_user etc.)
+# survive because only defined env names are substituted.
 
 upstream kura_filer {
   server seaweedfs:8888;
@@ -9,13 +13,43 @@ upstream kura_filer {
 server {
   listen 8080;
   server_name _;
+  root /usr/share/nginx/html;
 
   location = /healthz {
     return 200 "ok\n";
   }
 
+  # SPA runtime config generated from env; the SPA build output itself is
+  # environment-independent (docs/architecture.md frontend).
+  location = /_config.json {
+    default_type application/json;
+    return 200 '{"oidcIssuer":"${KURA_OIDC_ISSUER}","oidcClientId":"${KURA_OIDC_CLIENT_ID}","s3Endpoint":"${KURA_S3_ENDPOINT}","publicBase":"${KURA_PUBLIC_BASE_URL}"}';
+  }
+
+  # Fingerprinted build assets. "_"-prefixed paths can never collide with the
+  # /<user>/<path> public-delivery namespace (usernames cannot contain "_").
+  location ^~ /_assets/ {
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    try_files $uri =404;
+  }
+
+  location = /favicon.svg {
+  }
+
+  # Only known SPA routes fall back to index.html; everything else stays in
+  # the public-delivery / 404 namespace.
   location = / {
-    root /usr/share/nginx/html;
+    add_header Cache-Control "no-cache";
+    try_files /index.html =404;
+  }
+
+  location ^~ /_browse {
+    add_header Cache-Control "no-cache";
+    try_files /index.html =404;
+  }
+
+  location ^~ /_auth/ {
+    add_header Cache-Control "no-cache";
     try_files /index.html =404;
   }
 
