@@ -6,7 +6,7 @@ import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
 import type { PendingUpload } from "~/lib/s3"
 import { abortPendingUpload, listPendingUploads, listUploadedParts, useS3 } from "~/lib/s3"
 import { useUploads } from "~/shell"
-import { Button, FilePickButton, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
+import { Button, Callout, FilePickButton, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
 
 // Interrupted multipart uploads under the current prefix, discovered on the
 // server (they survive reloads). Resuming needs the file to be re-selected:
@@ -55,6 +55,10 @@ export const PendingUploads = ({ bucket, prefix }: { bucket: string; prefix: str
       void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
     },
   })
+  const closeDiscardModal = () => {
+    discard.reset()
+    setDiscardTarget(null)
+  }
 
   if (uploads.length === 0) return null
 
@@ -108,22 +112,23 @@ export const PendingUploads = ({ bucket, prefix }: { bucket: string; prefix: str
       </ul>
       <Modal
         open={discardTarget !== null}
-        onClose={() => setDiscardTarget(null)}
+        onClose={closeDiscardModal}
         ariaLabelledby="discard-upload-title"
         width={480}
       >
         <ModalHeader
           title={t("pendingUploads.discardConfirmTitle")}
           titleId="discard-upload-title"
-          onClose={() => setDiscardTarget(null)}
+          onClose={closeDiscardModal}
         />
         <ModalBody minHeight={0}>
           <p>{t("pendingUploads.discardConfirmBody", { name: discardTarget?.key.slice(prefix.length) ?? "" })}</p>
+          {discard.isError ? <Callout tone="warn" role="alert">{t("pendingUploads.discardFailed")}</Callout> : null}
         </ModalBody>
         <ModalFooter
           actions={
             <>
-              <Button kind="secondary" onClick={() => setDiscardTarget(null)} disabled={discard.isPending}>
+              <Button kind="secondary" onClick={closeDiscardModal} disabled={discard.isPending}>
                 {t("common.cancel")}
               </Button>
               <Button

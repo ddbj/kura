@@ -12,34 +12,48 @@ export class ResumeMismatchError extends Error {
 
 const etagHex = (etag: string): string => etag.replaceAll("\"", "").toLowerCase()
 
+// Matches the upload side's part concurrency (app/lib/s3/resume.ts).
+const CONCURRENCY = 4
+
+const verifyPart = async (
+  file: File,
+  partSize: number,
+  part: UploadedPart,
+  signal?: AbortSignal,
+): Promise<void> => {
+  const { createMD5 } = await import("hash-wasm")
+  const hasher = await createMD5()
+  const start = (part.partNumber - 1) * partSize
+  const reader = file.slice(start, start + part.size).stream().getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    signal?.throwIfAborted()
+    hasher.update(value)
+  }
+  if (hasher.digest("hex") !== etagHex(part.etag)) {
+    throw new ResumeMismatchError(`part ${part.partNumber} content differs`)
+  }
+}
+
 // Confirms the local file really is the one the parts came from: SeaweedFS
 // part ETags are plain MD5, so hash the corresponding byte ranges and
 // compare. Runs alongside the remaining-part uploads (both must succeed
 // before CompleteMultipartUpload); MD5 is not in WebCrypto, hence hash-wasm,
-// loaded lazily to keep it out of the main bundle.
+// loaded lazily to keep it out of the main bundle. Parts are independent, so
+// they verify CONCURRENCY at a time instead of one by one.
 export const verifyCompletedParts = async ({ file, parts, partSize, signal }: {
   file: File
   parts: UploadedPart[]
   partSize: number
   signal?: AbortSignal
 }): Promise<void> => {
-  if (parts.length === 0) return
-  const { createMD5 } = await import("hash-wasm")
-  const hasher = await createMD5()
-
-  for (const part of parts) {
-    signal?.throwIfAborted()
-    const start = (part.partNumber - 1) * partSize
-    hasher.init()
-    const reader = file.slice(start, start + part.size).stream().getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
+  const queue = [...parts]
+  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async (): Promise<void> => {
+    for (let part = queue.shift(); part !== undefined; part = queue.shift()) {
       signal?.throwIfAborted()
-      hasher.update(value)
+      await verifyPart(file, partSize, part, signal)
     }
-    if (hasher.digest("hex") !== etagHex(part.etag)) {
-      throw new ResumeMismatchError(`part ${part.partNumber} content differs`)
-    }
-  }
+  })
+  await Promise.all(workers)
 }

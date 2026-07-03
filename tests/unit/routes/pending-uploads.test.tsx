@@ -130,6 +130,22 @@ describe("PendingUploads", () => {
     })
   })
 
+  test("pendingUploads_discardFails_showsAlertAndKeepsTheEntry", async () => {
+    const user = userEvent.setup()
+    stubOnePendingUpload()
+    server.use(http.delete(`${ENDPOINT}/${BUCKET}/docs/big.bin`, () =>
+      new HttpResponse(null, { status: 500 })))
+    renderPending()
+
+    await screen.findByRole("region", { name: "再開待ちのアップロード" }, { timeout: 5_000 })
+    await user.click(await screen.findByRole("button", { name: "破棄" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "破棄" }))
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("破棄に失敗しました")
+    expect(screen.getByRole("region", { name: "再開待ちのアップロード" })).toBeInTheDocument()
+  })
+
   test("pendingUploads_filePicked_resumesVerifiesAndCompletes", async () => {
     const user = userEvent.setup()
     stubOnePendingUpload()

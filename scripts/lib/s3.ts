@@ -10,8 +10,10 @@ export const requireEnv = (name: string): string => {
 }
 
 // Root-credential client for ops tasks; user traffic never takes this path
-// (docs/operations.md). SeaweedFS compatibility settings follow
-// app/lib/s3/client.ts.
+// (docs/operations.md). SeaweedFS compatibility settings mirror
+// app/lib/s3/seaweedfs-compat.ts, kept as its own copy rather than importing
+// it: the ops container only mounts scripts/ and node_modules/, not app/
+// (compose.yml), so this file cannot reach across to app/.
 export const opsS3Client = (): S3Client =>
   new S3Client({
     endpoint: requireEnv("KURA_S3_ENDPOINT"),

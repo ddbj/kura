@@ -15,6 +15,7 @@ export type Resources = {
     failed: string
     resume: string
     mismatch: string
+    cancelFailed: string
   }
   pendingUploads: {
     title: string
@@ -23,6 +24,7 @@ export type Resources = {
     discard: string
     discardConfirmTitle: string
     discardConfirmBody: string
+    discardFailed: string
   }
   publish: {
     button: string
@@ -108,6 +110,7 @@ export const ja: Resources = {
     failed: "アップロードに失敗しました",
     resume: "再開",
     mismatch: "選択したファイルは中断したアップロードと一致しません",
+    cancelFailed: "キャンセルに失敗しました。アップロードはサーバーに残っている可能性があります",
   },
   pendingUploads: {
     title: "再開待ちのアップロード",
@@ -116,6 +119,7 @@ export const ja: Resources = {
     discard: "破棄",
     discardConfirmTitle: "アップロードを破棄",
     discardConfirmBody: "{{name}} の中断したアップロードを破棄します。アップロード済みの部分は失われます。",
+    discardFailed: "破棄に失敗しました",
   },
   publish: {
     button: "公開",

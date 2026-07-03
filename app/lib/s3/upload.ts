@@ -7,6 +7,15 @@ const MiB = 1024 * 1024
 const DEFAULT_PART_SIZE = 8 * MiB
 const MAX_PARTS = 10_000
 
+// lib-storage's done() settles as soon as the abort signal fires, without
+// waiting for an in-flight CreateMultipartUpload; that request keeps running
+// in the background and eventually sets upload.uploadId regardless. Poll for
+// it (bounded by a normal request round trip) so a cancel issued during
+// CreateMultipartUpload still discards the upload once its id is known.
+const UPLOAD_ID_POLL_INTERVAL_MS = 200
+const UPLOAD_ID_POLL_TIMEOUT_MS = 15_000
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 // S3 multipart caps out at 10000 parts, so grow the part size just enough for
 // files the default cannot cover.
 export const computePartSize = (fileSize: number): number =>
@@ -32,6 +41,11 @@ export const startUpload = ({ s3, bucket, key, file, onProgress }: {
   file: File
   onProgress: (progress: UploadProgress) => void
 }): RunningUpload => {
+  const partSize = computePartSize(file.size)
+  // Matches lib-storage's own single-part-vs-multipart chunking decision, so
+  // this is known upfront without reaching into its (privately typed)
+  // isMultiPart field.
+  const isMultipart = file.size > partSize
   const upload = new Upload({
     client: s3,
     params: {
@@ -40,7 +54,7 @@ export const startUpload = ({ s3, bucket, key, file, onProgress }: {
       Body: file,
       ...(file.type === "" ? {} : { ContentType: file.type }),
     },
-    partSize: computePartSize(file.size),
+    partSize,
     // Errors keep the completed parts on the server for resume.
     leavePartsOnError: true,
   })
@@ -53,12 +67,19 @@ export const startUpload = ({ s3, bucket, key, file, onProgress }: {
   return {
     done,
     // With leavePartsOnError, upload.abort() only stops the transfer; the
-    // server-side discard is on us. The uploadId is re-read after done
-    // settles to close the race with a cancel before CreateMultipartUpload
-    // finished.
+    // server-side discard is on us. If CreateMultipartUpload was still
+    // in-flight when cancelled, its id is not known yet, so wait for it
+    // (see UPLOAD_ID_POLL_* above) before deciding there is nothing to discard.
+    // Single-PUT uploads never get one, so skip the wait entirely for those.
     abort: async () => {
       await upload.abort()
       await done.catch(() => undefined)
+      if (isMultipart) {
+        const deadline = Date.now() + UPLOAD_ID_POLL_TIMEOUT_MS
+        while (upload.uploadId === undefined && Date.now() < deadline) {
+          await sleep(UPLOAD_ID_POLL_INTERVAL_MS)
+        }
+      }
       const uploadId = upload.uploadId
       if (uploadId !== undefined) {
         await abortPendingUpload(s3, bucket, key, uploadId)

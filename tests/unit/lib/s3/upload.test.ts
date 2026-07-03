@@ -120,6 +120,49 @@ describe("startUpload", () => {
     expect(discards).toEqual(["up-cancel"])
   })
 
+  test("startUpload_multipartCancelBeforeCreateResolves_stillDiscardsOnceIdIsKnown", async () => {
+    const url = `${ENDPOINT}/kura-tester/docs/big.bin`
+    const discards: string[] = []
+    let resolveDispatched: () => void
+    const dispatched = new Promise<void>((resolve) => {
+      resolveDispatched = resolve
+    })
+    server.use(
+      http.post(url, async ({ request }) => {
+        const params = new URL(request.url).searchParams
+        if (params.has("uploads")) {
+          resolveDispatched()
+          await delay(300)
+
+          return xml(initiateMultipartUploadXml({ bucket: "kura-tester", key: "docs/big.bin", uploadId: "up-race" }))
+        }
+
+        return xml(completeMultipartUploadXml({ bucket: "kura-tester", key: "docs/big.bin", etag: "final" }))
+      }),
+      http.put(url, () => new HttpResponse(null, { status: 200, headers: { ETag: "\"e\"" } })),
+      http.delete(url, ({ request }) => {
+        discards.push(new URL(request.url).searchParams.get("uploadId") ?? "?")
+
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    const upload = startUpload({
+      s3: testS3(),
+      bucket: "kura-tester",
+      key: "docs/big.bin",
+      file: multipartFile(),
+      onProgress: () => undefined,
+    })
+    // Cancel once CreateMultipartUpload is in flight but before its
+    // (delayed) response sets uploadId.
+    await dispatched
+    expect(upload.uploadId()).toBeUndefined()
+    await upload.abort()
+    await expect(upload.done).rejects.toThrow()
+    expect(discards).toEqual(["up-race"])
+  })
+
   test("startUpload_multipartError_keepsServerPartsForResume", async () => {
     const url = `${ENDPOINT}/kura-tester/docs/big.bin`
     const discards: string[] = []

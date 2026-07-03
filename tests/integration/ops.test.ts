@@ -38,6 +38,16 @@ const runOpsDaily = (nowIso: string, extraEnv: Record<string, string> = {}) =>
     },
   })
 
+describe("ops service env passthrough", () => {
+  it("forwards the operator-tunable retention env vars into the ops container", () => {
+    const printenv = (name: string) =>
+      execFileSync("docker", ["exec", "kura-test-ops-1", "printenv", name], { encoding: "utf8" }).trim()
+
+    expect(printenv("KURA_MULTIPART_MAX_AGE_DAYS")).toBe("3")
+    expect(printenv("KURA_AUDIT_RETENTION_DAYS")).toBe("10")
+  })
+})
+
 describe("default quota reconciler", () => {
   it("applies the default quota to buckets without one", async () => {
     const { username } = await setupUser()

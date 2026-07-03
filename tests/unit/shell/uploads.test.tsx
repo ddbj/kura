@@ -139,6 +139,39 @@ describe("UploadsProvider", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
+  test("startUploads_multipartCancelFails_showsErrorToastInstead", async () => {
+    const user = userEvent.setup()
+    const MiB = 1024 * 1024
+    const url = `${ENDPOINT}/${BUCKET}/docs/big.bin`
+    server.use(
+      http.post(url, ({ request }) => {
+        if (new URL(request.url).searchParams.has("uploads")) {
+          return HttpResponse.xml(initiateMultipartUploadXml({
+            bucket: BUCKET, key: "docs/big.bin", uploadId: "up-cancel-fail",
+          }))
+        }
+
+        return HttpResponse.xml(completeMultipartUploadXml({
+          bucket: BUCKET, key: "docs/big.bin", etag: "final",
+        }))
+      }),
+      http.put(url, async () => {
+        await delay(5_000)
+
+        return new HttpResponse(null, { status: 200, headers: { ETag: "\"e\"" } })
+      }),
+      http.delete(url, () => new HttpResponse(null, { status: 500 })),
+    )
+    renderUploads([new File([new Uint8Array(16 * MiB)], "big.bin")])
+
+    await user.click(screen.getByRole("button", { name: "go" }))
+    expect(await screen.findByText("big.bin")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "キャンセル" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/キャンセルに失敗しました/)
+  })
+
   test("startUploads_multipleFiles_showsToastPerFile", async () => {
     const user = userEvent.setup()
     server.use(http.put(`${ENDPOINT}/${BUCKET}/docs/:name`, () =>

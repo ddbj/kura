@@ -12,6 +12,22 @@ set -eu
 : "${KURA_ROOT_SECRET_KEY:?}"
 : "${KURA_FILER_JWT_KEY:?}"
 
+# A non-positive value is indistinguishable from quota-disabled on
+# s3.bucket.list (see quota_reconcile below), so reject it at startup rather
+# than let it silently defeat quota enforcement.
+if [ -n "${KURA_QUOTA_DEFAULT_MB:-}" ]; then
+  case "$KURA_QUOTA_DEFAULT_MB" in
+    *[!0-9]* | '')
+      echo "kura: KURA_QUOTA_DEFAULT_MB must be a positive integer, got '${KURA_QUOTA_DEFAULT_MB}'" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$KURA_QUOTA_DEFAULT_MB" -eq 0 ]; then
+    echo "kura: KURA_QUOTA_DEFAULT_MB must be a positive integer, got '0'" >&2
+    exit 1
+  fi
+fi
+
 mkdir -p /etc/seaweedfs
 
 # Per-user buckets mean one collection per user. The default growth of 7
@@ -180,7 +196,13 @@ EOJSON
 # -op=disable. Bucket names follow S3 naming (no whitespace), so the
 # tab-separated output is safe to parse.
 quota_reconcile() {
-  echo "s3.bucket.list" | weed shell -master localhost:9333 2>/dev/null \
+  # Piping weed shell straight into grep/awk/while would lose its exit status
+  # (the while loop's own status wins), so capture it separately first.
+  if ! list_output=$(echo "s3.bucket.list" | weed shell -master localhost:9333 2>&1); then
+    echo "kura-ops: quota reconcile: s3.bucket.list failed: ${list_output}" >&2
+    return 1
+  fi
+  echo "$list_output" \
     | grep "	size:" | grep -v "	quota:" | awk '{print $1}' \
     | while read -r bucket; do
         echo "s3.bucket.quota -name=${bucket} -op=set -sizeMB=${KURA_QUOTA_DEFAULT_MB:-1048576}" \

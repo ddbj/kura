@@ -48,6 +48,26 @@ describe("ensureOwnBucket", () => {
     server.use(http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 403 })))
     await expect(ensureOwnBucket(client(), BUCKET)).rejects.toThrow()
   })
+
+  test("ensureOwnBucket_createRacedByAnotherTab_treatsExistingAsSuccess", async () => {
+    server.use(
+      http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 404 })),
+      http.put(`${ENDPOINT}/${BUCKET}`, () =>
+        new HttpResponse(s3ErrorXml("BucketAlreadyExists", "already created by another tab"), {
+          status: 409,
+          headers: { "Content-Type": "application/xml" },
+        })),
+    )
+    await expect(ensureOwnBucket(client(), BUCKET)).resolves.toBeUndefined()
+  })
+
+  test("ensureOwnBucket_createForbidden_propagates", async () => {
+    server.use(
+      http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 404 })),
+      http.put(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 403 })),
+    )
+    await expect(ensureOwnBucket(client(), BUCKET)).rejects.toThrow()
+  })
 })
 
 describe("listDirectory", () => {

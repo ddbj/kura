@@ -7,6 +7,8 @@ import { AssumeRoleWithWebIdentityCommand, STSClient } from "@aws-sdk/client-sts
 import { importPKCS8, SignJWT } from "jose"
 import { inject } from "vitest"
 
+import { SEAWEEDFS_S3_CLIENT_OPTIONS } from "~/lib/s3/seaweedfs-compat"
+
 export const USER_ROLE_ARN = "arn:aws:iam::role/KuraUserRole"
 export const ADMIN_ROLE_ARN = "arn:aws:iam::role/KuraAdminRole"
 
@@ -66,11 +68,8 @@ export const assumeRole = async (
 export const s3ClientFor = (creds: AwsCreds) =>
   new S3Client({
     endpoint: inject("s3Endpoint"),
-    region: "us-east-1",
-    forcePathStyle: true,
     credentials: creds,
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    responseChecksumValidation: "WHEN_REQUIRED",
+    ...SEAWEEDFS_S3_CLIENT_OPTIONS,
   })
 
 export const rootS3Client = () =>

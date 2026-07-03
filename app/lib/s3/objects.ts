@@ -16,13 +16,17 @@ export type DirectoryPage = {
   nextToken?: string
 }
 
-const isNotFound = (err: unknown): boolean =>
+const hasHttpStatus = (err: unknown, status: number): boolean =>
   typeof err === "object" && err !== null && "$metadata" in err &&
-  (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode === 404
+  (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode === status
+
+const isNotFound = (err: unknown): boolean => hasHttpStatus(err, 404)
 
 // CreateBucket on an existing bucket returns 409 (BucketAlreadyExists, even
 // for the owner), so existence is checked with HeadBucket first
-// (docs/architecture.md 配置).
+// (docs/architecture.md 配置). Two tabs racing their first access can both
+// pass that HeadBucket check, so the loser's CreateBucket 409 is expected
+// (not the caller's problem) and treated the same as already-existing.
 export const ensureOwnBucket = async (s3: S3Client, bucket: string): Promise<void> => {
   try {
     await s3.send(new HeadBucketCommand({ Bucket: bucket }))
@@ -30,7 +34,11 @@ export const ensureOwnBucket = async (s3: S3Client, bucket: string): Promise<voi
   } catch (err) {
     if (!isNotFound(err)) throw err
   }
-  await s3.send(new CreateBucketCommand({ Bucket: bucket }))
+  try {
+    await s3.send(new CreateBucketCommand({ Bucket: bucket }))
+  } catch (err) {
+    if (!hasHttpStatus(err, 409)) throw err
+  }
 }
 
 export const listDirectory = async (

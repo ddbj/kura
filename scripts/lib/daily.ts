@@ -39,11 +39,19 @@ export const runDaily = async (now: Date): Promise<void> => {
   const buckets = await listBucketNames(s3)
   let ttlDeleted = 0
   let uploadsAborted = 0
+  // One bucket's failure (transient S3 error, etc.) must not cost every other
+  // bucket its TTL sweep/multipart cleanup, nor skip audit log rotation below.
+  const failedBuckets: string[] = []
   for (const bucket of buckets) {
-    if (ttlDays !== null) {
-      ttlDeleted += await sweepBucketTtl(s3, bucket, ttlDays, now)
+    try {
+      if (ttlDays !== null) {
+        ttlDeleted += await sweepBucketTtl(s3, bucket, ttlDays, now)
+      }
+      uploadsAborted += await cleanupBucketUploads(s3, bucket, multipartMaxAgeDays, now)
+    } catch (err) {
+      failedBuckets.push(bucket)
+      console.error(`kura-ops: bucket ${bucket} failed, continuing with the rest:`, err)
     }
-    uploadsAborted += await cleanupBucketUploads(s3, bucket, multipartMaxAgeDays, now)
   }
 
   const logs = await access(auditLogDir).then(
@@ -55,6 +63,15 @@ export const runDaily = async (now: Date): Promise<void> => {
     `kura-ops: daily pass done: buckets=${buckets.length}`
     + ` ttlDeleted=${ttlDays === null ? "off" : ttlDeleted}`
     + ` uploadsAborted=${uploadsAborted}`
-    + ` logs=${logs === null ? "off" : `compressed:${logs.compressed} deleted:${logs.deleted}`}`,
+    + ` logs=${logs === null ? "off" : `compressed:${logs.compressed} deleted:${logs.deleted}`}`
+    + (failedBuckets.length === 0 ? "" : ` failedBuckets=${failedBuckets.join(",")}`),
   )
+
+  // Surfaced after everything else ran, so ops-loop.ts still logs the
+  // failure without it blocking unrelated buckets or audit log rotation.
+  if (failedBuckets.length > 0) {
+    throw new Error(
+      `kura-ops: daily pass had failures in ${failedBuckets.length} bucket(s): ${failedBuckets.join(", ")}`,
+    )
+  }
 }

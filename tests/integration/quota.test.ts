@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -6,6 +10,35 @@ import {
 import { describe, expect, it } from "vitest"
 
 import { eventually, setupUser, weedShell } from "./_helpers"
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
+
+const REQUIRED_ENV = [
+  "KURA_OIDC_ISSUER=x",
+  "KURA_OIDC_CLIENT_ID=x",
+  "KURA_OIDC_JWKS_URI=x",
+  "KURA_STS_SIGNING_KEY=x",
+  "KURA_ROOT_ACCESS_KEY=x",
+  "KURA_ROOT_SECRET_KEY=x",
+  "KURA_FILER_JWT_KEY=x",
+]
+
+// The invalid-value path exits before touching anything SeaweedFS-specific,
+// so a bare shell image is enough to exercise the real entrypoint.sh.
+const runEntrypoint = (quota: string) =>
+  execFileSync("docker", [
+    "run", "--rm",
+    ...REQUIRED_ENV.flatMap((kv) => ["-e", kv]),
+    "-e", `KURA_QUOTA_DEFAULT_MB=${quota}`,
+    "-v", `${join(repoRoot, "seaweedfs", "entrypoint.sh")}:/kura-entrypoint.sh:ro`,
+    "alpine:3", "sh", "/kura-entrypoint.sh",
+  ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+
+describe("quota env startup validation", () => {
+  it.each(["0", "-1", "abc"])("KURA_QUOTA_DEFAULT_MB=%s fails startup", (quota) => {
+    expect(() => runEntrypoint(quota)).toThrowError(/KURA_QUOTA_DEFAULT_MB must be a positive integer/)
+  })
+})
 
 describe("bucket quota", () => {
   it("rejects writes while over quota, keeps read/delete, and recovers", { timeout: 360_000 }, async () => {

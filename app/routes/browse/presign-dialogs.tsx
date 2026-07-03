@@ -5,7 +5,7 @@ import { useAuth } from "react-oidc-context"
 import { useConfig } from "~/lib/config"
 import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
 import type { PresignedShare, PresignMethod } from "~/lib/s3"
-import { freshAccessToken, presignShareUrl } from "~/lib/s3"
+import { accessTokenForDuration, presignShareUrl } from "~/lib/s3"
 import { Button, Callout, CopyField, Modal, ModalBody, ModalFooter, ModalHeader, MonoCode, Select, TextInput } from "~/ui"
 
 const DEFAULT_EXPIRES_S = 900
@@ -18,7 +18,7 @@ const usePresign = (bucket: string, method: PresignMethod) => {
 
   return useMutation({
     mutationFn: async ({ key, expiresInSeconds }: { key: string; expiresInSeconds: number }) => {
-      const token = await freshAccessToken(auth)
+      const token = await accessTokenForDuration(auth, expiresInSeconds)
 
       return presignShareUrl({ endpoint: config.s3Endpoint, token, bucket, key, method, expiresInSeconds })
     },

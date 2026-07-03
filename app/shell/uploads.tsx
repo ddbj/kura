@@ -93,7 +93,20 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const running = transfer.start((progress) => toasts.update(id, { progress }))
-    cancel.abort = () => void running.abort()
+    // The toast's final state for a cancel is decided here, once the
+    // server-side discard actually settles, not by running.done rejecting
+    // (which happens earlier and would race a failed discard).
+    cancel.abort = () => {
+      void running.abort().then(
+        () => toasts.dismiss(id),
+        () => toasts.update(id, {
+          kind: "error",
+          description: t("upload.cancelFailed"),
+          progress: undefined,
+          action: undefined,
+        }),
+      )
+    }
 
     running.done
       .then(() => {
@@ -111,7 +124,6 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       })
       .catch((error: unknown) => {
         if (cancel.requested) {
-          toasts.dismiss(id)
           void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
 
           return

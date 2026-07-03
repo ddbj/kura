@@ -15,6 +15,7 @@ export const en: Resources = {
     failed: "Upload failed",
     resume: "Resume",
     mismatch: "The selected file does not match the interrupted upload",
+    cancelFailed: "Cancel failed. The upload may still be present on the server",
   },
   pendingUploads: {
     title: "Uploads waiting to be resumed",
@@ -23,6 +24,7 @@ export const en: Resources = {
     discard: "Discard",
     discardConfirmTitle: "Discard upload",
     discardConfirmBody: "Discard the interrupted upload of {{name}}. The parts uploaded so far will be lost.",
+    discardFailed: "Failed to discard",
   },
   publish: {
     button: "Public",

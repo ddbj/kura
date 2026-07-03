@@ -5,7 +5,7 @@ import { setupServer } from "msw/node"
 import { afterAll, beforeAll, describe, expect } from "vitest"
 
 import { createS3Client } from "~/lib/s3/client"
-import { applyPublicState, tagQueryKey, tagQueryOptions } from "~/lib/s3/tag-cache"
+import { applyPublicState, beginPublicStateChange, tagQueryKey, tagQueryOptions } from "~/lib/s3/tag-cache"
 import { publishObject, unpublishObject } from "~/lib/s3/tags"
 
 import { getObjectTaggingXml } from "../../../unit/mocks/s3-xml"
@@ -69,14 +69,18 @@ const applyOp = async (queryClient: QueryClient, op: Op): Promise<void> => {
     case "fetch":
       await Promise.all(op.keys.map((key) => queryClient.fetchQuery(tagQueryOptions(s3, BUCKET, key))))
       break
-    case "publish":
+    case "publish": {
+      const token = beginPublicStateChange(BUCKET, op.key)
       await publishObject(s3, BUCKET, op.key)
-      await applyPublicState(queryClient, BUCKET, op.key, true)
+      await applyPublicState(queryClient, BUCKET, op.key, true, token)
       break
-    case "unpublish":
+    }
+    case "unpublish": {
+      const token = beginPublicStateChange(BUCKET, op.key)
       await unpublishObject(s3, BUCKET, op.key)
-      await applyPublicState(queryClient, BUCKET, op.key, false)
+      await applyPublicState(queryClient, BUCKET, op.key, false, token)
       break
+    }
     case "invalidateAll":
       await queryClient.invalidateQueries({ queryKey: ["tag", BUCKET] })
       break
@@ -103,6 +107,26 @@ describe("tag cache properties", () => {
           }
         }
       }
+      queryClient.clear()
+    },
+  )
+
+  // 不変条件: 同じ (bucket, key) への複数回の変更が、発行順と逆順に解決しても、
+  // キャッシュには最後に発行された変更だけが残る。
+  test.prop([fc.array(fc.boolean(), { minLength: 2, maxLength: 5 })], { numRuns: 30 })(
+    "tagCache_sameKeyChangesResolveInReverseIssueOrder_lastIssuedWins",
+    async (makePublicFlags) => {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      const key = "race.txt"
+      const tokens = makePublicFlags.map(() => beginPublicStateChange(BUCKET, key))
+
+      for (let i = makePublicFlags.length - 1; i >= 0; i -= 1) {
+        await applyPublicState(queryClient, BUCKET, key, makePublicFlags[i]!, tokens[i]!)
+      }
+
+      expect(queryClient.getQueryData(tagQueryKey(BUCKET, key))).toBe(makePublicFlags.at(-1))
       queryClient.clear()
     },
   )

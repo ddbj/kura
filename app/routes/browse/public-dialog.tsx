@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { useConfig } from "~/lib/config"
 import { useT } from "~/lib/i18n"
-import { applyPublicState, entryName, publicUrl, publishObject, unpublishObject, useS3 } from "~/lib/s3"
+import { applyPublicState, beginPublicStateChange, entryName, publicUrl, publishObject, unpublishObject, useS3 } from "~/lib/s3"
 import { Button, Callout, CopyField, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
 
 type PublicDialogProps = {
@@ -22,7 +22,11 @@ export const PublicDialog = ({ bucket, targetKey, isPublic, onClose }: PublicDia
   const mutation = useMutation({
     mutationFn: ({ key, makePublic }: { key: string; makePublic: boolean }) =>
       makePublic ? publishObject(s3, bucket, key) : unpublishObject(s3, bucket, key),
-    onSuccess: (_result, { key, makePublic }) => applyPublicState(queryClient, bucket, key, makePublic),
+    // onMutate runs at mutate()-call time (actual issue order), unlike
+    // onSuccess which runs in response-arrival order; see tag-cache.ts.
+    onMutate: ({ key }) => ({ token: beginPublicStateChange(bucket, key) }),
+    onSuccess: (_result, { key, makePublic }, context) =>
+      applyPublicState(queryClient, bucket, key, makePublic, context.token),
   })
 
   const url = targetKey === null ? "" : publicUrl(config.publicBase, bucket, targetKey)
