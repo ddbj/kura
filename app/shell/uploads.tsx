@@ -1,14 +1,20 @@
 import { useQueryClient } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
 import { useT } from "~/lib/i18n"
-import { startUpload } from "~/lib/s3/upload"
+import type { RunningUpload, UploadProgress } from "~/lib/s3"
+import { ResumeMismatchError, resumeUpload, startUpload } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
 import { Button, useToasts } from "~/ui"
 
 type UploadsApi = {
   startUploads: (bucket: string, prefix: string, files: File[]) => void
+  // Continues an interrupted multipart upload found via listPendingUploads.
+  resumePendingUpload: (bucket: string, key: string, uploadId: string, file: File) => void
+  // `${bucket}/${key}` of transfers in flight; the pending-uploads list
+  // filters these out so an active upload never shows as resumable.
+  activeKeys: ReadonlySet<string>
 }
 
 const UploadsContext = createContext<UploadsApi | null>(null)
@@ -22,6 +28,15 @@ export const useUploads = (): UploadsApi => {
   return api
 }
 
+type Transfer = {
+  bucket: string
+  key: string
+  file: File
+  start: (onProgress: (progress: UploadProgress) => void) => RunningUpload
+  // Reuses the failed transfer's toast when resuming from its action button.
+  toastId?: number
+}
+
 // Lives above the route tree so navigating between directories does not
 // unmount in-flight uploads; progress is reported through toasts.
 export const UploadsProvider = ({ children }: { children: ReactNode }) => {
@@ -30,6 +45,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient()
   const t = useT()
   const [activeCount, setActiveCount] = useState(0)
+  const [activeKeys, setActiveKeys] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     if (activeCount === 0) return
@@ -41,72 +57,134 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     return () => window.removeEventListener("beforeunload", warn)
   }, [activeCount])
 
-  const startUploads = useCallback((bucket: string, prefix: string, files: File[]): void => {
-    for (const file of files) {
-      const key = `${prefix}${file.name}`
-      // The cancel action is created before the transfer starts, so it aborts
-      // through this mutable handle.
-      const cancel = { requested: false, abort: (): void => undefined }
+  // The resume action must restart the same transfer (a resume can fail and
+  // offer resuming again), so the callback reaches itself through a ref.
+  const runTransferRef = useRef<(transfer: Transfer) => void>(() => undefined)
+  const runTransfer = useCallback((transfer: Transfer): void => {
+    const { bucket, key, file } = transfer
+    const activeKey = `${bucket}/${key}`
+    // The cancel action is created before the transfer starts, so it aborts
+    // through this mutable handle.
+    const cancel = { requested: false, abort: (): void => undefined }
 
-      setActiveCount((count) => count + 1)
-      const id = toasts.show({
-        kind: "progress",
-        title: file.name,
-        description: key,
-        progress: { loaded: 0, total: file.size },
-        action: (
-          <Button
-            kind="ghost"
-            size="sm"
-            onClick={() => {
-              cancel.requested = true
-              cancel.abort()
-            }}
-          >
-            {t("common.cancel")}
-          </Button>
-        ),
+    setActiveCount((count) => count + 1)
+    setActiveKeys((keys) => new Set(keys).add(activeKey))
+    const progressToast = {
+      kind: "progress" as const,
+      title: file.name,
+      description: key,
+      progress: { loaded: 0, total: file.size },
+      action: (
+        <Button
+          kind="ghost"
+          size="sm"
+          onClick={() => {
+            cancel.requested = true
+            cancel.abort()
+          }}
+        >
+          {t("common.cancel")}
+        </Button>
+      ),
+    }
+    const id = transfer.toastId ?? toasts.show(progressToast)
+    if (transfer.toastId !== undefined) {
+      toasts.update(id, progressToast)
+    }
+
+    const running = transfer.start((progress) => toasts.update(id, { progress }))
+    cancel.abort = () => void running.abort()
+
+    running.done
+      .then(() => {
+        toasts.update(id, {
+          kind: "success",
+          description: t("upload.done"),
+          progress: undefined,
+          action: undefined,
+        })
+
+        return Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["objects", bucket] }),
+          queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] }),
+        ])
       })
+      .catch((error: unknown) => {
+        if (cancel.requested) {
+          toasts.dismiss(id)
+          void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
 
-      const running = startUpload({
-        s3,
+          return
+        }
+        // Failures leave the parts on the server; when the upload id is
+        // known the toast offers to resume right away (the File is still in
+        // memory). A content mismatch would fail again with the same file,
+        // so it gets no resume action.
+        const uploadId = running.uploadId()
+        const mismatch = error instanceof ResumeMismatchError
+        const message = error instanceof Error ? error.message : String(error)
+        toasts.update(id, {
+          kind: "error",
+          description: mismatch ? t("upload.mismatch") : `${t("upload.failed")}: ${message}`,
+          progress: undefined,
+          action: uploadId === undefined || mismatch
+            ? undefined
+            : (
+              <Button
+                kind="ghost"
+                size="sm"
+                onClick={() => runTransferRef.current({
+                  bucket,
+                  key,
+                  file,
+                  toastId: id,
+                  start: (onProgress) =>
+                    resumeUpload({ s3, bucket, key, uploadId, file, onProgress }),
+                })}
+              >
+                {t("upload.resume")}
+              </Button>
+            ),
+        })
+        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+      })
+      .finally(() => {
+        setActiveCount((count) => count - 1)
+        setActiveKeys((keys) => {
+          const next = new Set(keys)
+          next.delete(activeKey)
+
+          return next
+        })
+      })
+  }, [s3, toasts, queryClient, t])
+
+  useEffect(() => {
+    runTransferRef.current = runTransfer
+  }, [runTransfer])
+
+  const api = useMemo<UploadsApi>(() => ({
+    startUploads: (bucket, prefix, files) => {
+      for (const file of files) {
+        const key = `${prefix}${file.name}`
+        runTransfer({
+          bucket,
+          key,
+          file,
+          start: (onProgress) => startUpload({ s3, bucket, key, file, onProgress }),
+        })
+      }
+    },
+    resumePendingUpload: (bucket, key, uploadId, file) => {
+      runTransfer({
         bucket,
         key,
         file,
-        onProgress: (progress) => toasts.update(id, { progress }),
+        start: (onProgress) => resumeUpload({ s3, bucket, key, uploadId, file, onProgress }),
       })
-      cancel.abort = () => void running.abort()
-
-      running.done
-        .then(() => {
-          toasts.update(id, {
-            kind: "success",
-            description: t("upload.done"),
-            progress: undefined,
-            action: undefined,
-          })
-
-          return queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-        })
-        .catch((error: unknown) => {
-          if (cancel.requested) {
-            toasts.dismiss(id)
-
-            return
-          }
-          const message = error instanceof Error ? error.message : String(error)
-          toasts.update(id, {
-            kind: "error",
-            description: `${t("upload.failed")}: ${message}`,
-            progress: undefined,
-            action: undefined,
-          })
-        })
-        .finally(() => setActiveCount((count) => count - 1))
-    }
-  }, [s3, toasts, queryClient, t])
-
-  const api = useMemo(() => ({ startUploads }), [startUploads])
+    },
+    activeKeys,
+  }), [runTransfer, s3, activeKeys])
 
   return <UploadsContext.Provider value={api}>{children}</UploadsContext.Provider>
 }

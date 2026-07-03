@@ -29,7 +29,11 @@ services:
       KURA_STS_SIGNING_KEY: ${KURA_STS_SIGNING_KEY}
       KURA_ROOT_ACCESS_KEY: ${KURA_ROOT_ACCESS_KEY}
       KURA_ROOT_SECRET_KEY: ${KURA_ROOT_SECRET_KEY}
+      KURA_FILER_JWT_KEY: ${KURA_FILER_JWT_KEY}
       KURA_ADMIN_SUBS: ${KURA_ADMIN_SUBS:-}
+      # default-quota reconciler (entrypoint.sh, docs/operations.md)
+      KURA_QUOTA_DEFAULT_MB: ${KURA_QUOTA_DEFAULT_MB:-1048576}
+      KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}
     volumes:
       - ./seaweedfs/entrypoint.sh:/kura/entrypoint.sh:ro
       - seaweedfs-data:/data
@@ -53,6 +57,9 @@ services:
       - ./nginx/kura.conf.template:/etc/nginx/templates/default.conf.template:ro
       # SPA build output (npm run build). Build before compose up.
       - ./build/client:/usr/share/nginx/html:ro
+      # Public-delivery audit log; the worker (uid 101) must be able to write
+      # here (docs/operations.md)
+      - ${KURA_LOG_DIR:-./logs}:/var/log/kura
     environment:
       KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
       KURA_OIDC_CLIENT_ID: ${KURA_OIDC_CLIENT_ID}
@@ -69,6 +76,26 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+
+  # 日次の運用タスク: file TTL 削除・放置 multipart 掃除・監査ログの
+  # 圧縮/期限削除 (docs/operations.md)。node は TS を直接実行できる
+  ops:
+    image: node:24-alpine
+    command: ["node", "/kura/scripts/ops-loop.ts"]
+    environment:
+      # compose 内部から S3 へ直接届く endpoint（env ファイルの値はホスト向け）
+      KURA_S3_ENDPOINT: http://seaweedfs:8333
+      KURA_ROOT_ACCESS_KEY: ${KURA_ROOT_ACCESS_KEY}
+      KURA_ROOT_SECRET_KEY: ${KURA_ROOT_SECRET_KEY}
+      KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
+      KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./scripts:/kura/scripts:ro
+      - ./node_modules:/kura/node_modules:ro
+      - ${KURA_LOG_DIR:-./logs}:/var/log/kura
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
 
   # テスト時のみ: 自前鍵の JWKS を SeaweedFS の OIDC provider へ配信する
   jwks:

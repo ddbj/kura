@@ -26,6 +26,8 @@ export default defineConfig({
         },
       },
       {
+        // The resume flow (app/lib/s3) runs against the real SeaweedFS here.
+        resolve: { alias: { "~": appDir } },
         test: {
           name: "integration",
           environment: "node",

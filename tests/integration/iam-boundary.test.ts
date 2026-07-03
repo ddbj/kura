@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectTaggingCommand,
+  ListMultipartUploadsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   PutObjectTaggingCommand,
@@ -82,6 +83,9 @@ describe("IAM policy boundary", () => {
     ).rejects.toMatchObject(accessDenied)
     await expect(
       alice.s3.send(new DeleteObjectCommand({ Bucket: bob.username, Key: "secret.txt" })),
+    ).rejects.toMatchObject(accessDenied)
+    await expect(
+      alice.s3.send(new ListMultipartUploadsCommand({ Bucket: bob.username })),
     ).rejects.toMatchObject(accessDenied)
   })
 

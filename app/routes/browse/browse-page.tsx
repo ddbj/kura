@@ -11,6 +11,7 @@ import { Button, Callout, FilePickButton } from "~/ui"
 
 import { DeleteDialog } from "./delete-dialog"
 import { ObjectList } from "./object-list"
+import { PendingUploads } from "./pending-uploads"
 import { PrefixBreadcrumb } from "./prefix-breadcrumb"
 import { PresignGetDialog, PresignPutDialog } from "./presign-dialogs"
 import { PublicDialog } from "./public-dialog"
@@ -101,6 +102,7 @@ const BrowseContent = ({ prefix }: { prefix: string }) => {
           </FilePickButton>
         </div>
       </div>
+      <PendingUploads bucket={username} prefix={prefix} />
       {dirs.length === 0 && files.length === 0
         ? <p className="text-ink-soft">{t("browse.empty")}</p>
         : (

@@ -1,12 +1,15 @@
+import { readdir, readFile } from "node:fs/promises"
+import { join } from "node:path"
+
 import {
   DeleteObjectTaggingCommand,
   PutObjectCommand,
   PutObjectTaggingCommand,
   type S3Client,
 } from "@aws-sdk/client-s3"
-import { describe, expect, it } from "vitest"
+import { describe, expect, inject, it } from "vitest"
 
-import { publicUrl, putText, setupUser, uniqueUser } from "./_helpers"
+import { eventually, publicUrl, putText, setupUser, uniqueUser } from "./_helpers"
 
 const publish = (s3: S3Client, bucket: string, key: string) =>
   s3.send(
@@ -131,5 +134,55 @@ describe("public delivery", () => {
     expect((await fetch(publicUrl(username, "dir"))).status).toBe(404)
     expect((await fetch(publicUrl(username, "dir/"))).status).toBe(404)
     expect((await fetch(`${publicUrl(username, "x")}/../`)).status).toBe(404)
+  })
+})
+
+// Public delivery writes an audit log to a date-stamped file (KURA_LOG_DIR,
+// docs/operations.md). Requests hitting other locations (SPA, assets) must
+// stay out of it.
+describe("public delivery audit log", () => {
+  const auditLines = async (needle: string): Promise<string[]> => {
+    const dir = join(process.cwd(), "tests", "setup", ".logs")
+    const files = (await readdir(dir)).filter((f) => /^access-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+    const contents = await Promise.all(files.map((f) => readFile(join(dir, f), "utf8")))
+
+    return contents.flatMap((text) => text.split("\n")).filter((line) => line.includes(needle))
+  }
+
+  it("records downloads and 404s with client IP from X-Forwarded-For", async () => {
+    const { username, s3 } = await setupUser()
+    const key = "audit/file 1.txt"
+    const encodedKey = "audit/file%201.txt"
+    await putText(s3, username, key, "audited")
+    await publish(s3, username, key)
+
+    const ok = await fetch(publicUrl(username, encodedKey), {
+      headers: { "X-Forwarded-For": "192.0.2.7" },
+    })
+    expect(ok.status).toBe(200)
+    const missing = await fetch(publicUrl(username, "audit/nope.txt"))
+    expect(missing.status).toBe(404)
+
+    const [okLine] = await eventually(async () => {
+      const lines = await auditLines(`GET /${username}/${encodedKey}`)
+      expect(lines).toHaveLength(1)
+
+      return lines
+    }, 10_000, 500)
+    // The escaped request line preserves the encoded URI for user attribution.
+    expect(okLine).toContain("\t192.0.2.7\t")
+    expect(okLine).toContain("\t200\t")
+
+    const [missLine] = await auditLines(`GET /${username}/audit/nope.txt`)
+    expect(missLine).toContain("\t404\t")
+  })
+
+  it("does not log SPA and asset requests to the audit file", async () => {
+    const marker = `_config.json?audit-probe=${uniqueUser()}`
+    const res = await fetch(`${inject("publicBase")}/${marker}`)
+    expect(res.status).toBe(200)
+
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    expect(await auditLines(marker)).toHaveLength(0)
   })
 })

@@ -61,6 +61,7 @@ SeaweedFS の設定:
 
 - iam.json: OIDC provider（issuer = DDBJ Keycloak realm、clientId、jwksUri）、roleMapping、`sts.signingKey`（固定値を secret 注入。[operations.md](./operations.md) 参照）
 - s3.json: admin (root) identity のみ（運用専用。通常経路では使わない）。anonymous identity は置かない（公開配信は nginx -> filer で完結するため）
+- security.toml: `jwt.filer_signing.key`（固定値を secret 注入）。filer の HTTP write と IAM gRPC service を Bearer token 必須にする（設定しないと IAM gRPC が無認証で listen する）。cluster 内のコンポーネントは同じ設定ファイルの鍵で自動署名する。read 用の鍵（`jwt.filer_signing.read.key`）は設定しない: 公開配信（nginx -> filer の GET / HEAD）は匿名のままにする必要があるため
 
 ## 公開方式（object tag）
 
@@ -129,6 +130,8 @@ CORS:
 - auth: react-oidc-context（PKCE、automaticSilentRenew。public client への refresh token grant で更新する）
 - 初回利用: HeadBucket で自分の bucket の存在を確認し、無ければ CreateBucket する（「配置」参照）
 - upload: AWS SDK lib-storage の multipart upload。credentials provider が token の silent renew -> STS 再取得を行い、1 時間を超える upload でも credentials を切らさない
+- upload の中断と再開（resume）: エラーで中断した upload はアップロード済みの part をサーバに残し（`leavePartsOnError`）、続きから再開できる。明示的なキャンセルだけが part を破棄する（`AbortMultipartUpload`）。再開経路は自前実装（lib-storage は resume 非対応）: `ListParts` で完了済み part を得て、ファイルサイズから決定論的に再導出した part 割りに対して残りの part を `UploadPart` し、`CompleteMultipartUpload` で仕上げる。同一セッション内の失敗は進捗 Toast の「再開」から（File はメモリ上にある）、リロード後は一覧画面の「再開待ちのアップロード」（`ListMultipartUploads`。SeaweedFS は開始時刻を返さないため、直近の活動は part の LastModified から導出する）でファイルを選び直して再開する
+- resume の同一ファイル検証: 完了済み part の ETag（SeaweedFS では part 内容の MD5）とローカルファイルの該当 range の MD5 を照合してから完成させる。照合は残り part のアップロードと並行に走り、不一致なら中断して part を残す（サイズが同じでも内容が変わったファイルによるオブジェクト破損を防ぐ）。放置された part は運用の日次掃除が回収する（[operations.md](./operations.md)）
 - publish / unpublish: `PutObjectTagging` / `DeleteObjectTagging`。公開バッジは表示中 directory の object にだけ `GetObjectTagging` を並列・遅延発行してキャッシュする（list 応答に tag は乗らないため。ページング前提で実用十分）
 - TTL 有効時は各ファイルの有効期限を一覧に表示する
 - design system: db-portal（BSI）の design system を使う。色は BSI 紫（`#6F4392`）

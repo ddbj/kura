@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -37,6 +37,12 @@ const setup = async (project: TestProject) => {
   // so docker does not make a root-owned directory when tests run pre-build.
   mkdirSync(join(repoRoot, "build", "client"), { recursive: true })
 
+  // Audit log directory (KURA_LOG_DIR in env.test). Date-stamped log paths
+  // are opened by the nginx worker (uid 101), which needs write access.
+  const logDir = join(repoRoot, "tests", "setup", ".logs")
+  mkdirSync(logDir, { recursive: true })
+  chmodSync(logDir, 0o777)
+
   const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true })
   const jwk = { ...(await exportJWK(publicKey)), kid: "kura-test", alg: "RS256", use: "sig" }
   const jwksDir = join(repoRoot, "tests", "setup", ".jwks")
@@ -51,6 +57,7 @@ const setup = async (project: TestProject) => {
     KURA_STS_SIGNING_KEY: randomBytes(32).toString("base64"),
     KURA_ROOT_ACCESS_KEY: `root-${randomBytes(8).toString("hex")}`,
     KURA_ROOT_SECRET_KEY: randomBytes(24).toString("base64"),
+    KURA_FILER_JWT_KEY: randomBytes(32).toString("base64"),
     KURA_ADMIN_SUBS: adminSub,
   }
   const env = { ...process.env, ...secrets }

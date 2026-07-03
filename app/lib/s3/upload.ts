@@ -1,6 +1,8 @@
 import type { S3Client } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
 
+import { abortPendingUpload } from "./multipart"
+
 const MiB = 1024 * 1024
 const DEFAULT_PART_SIZE = 8 * MiB
 const MAX_PARTS = 10_000
@@ -14,9 +16,13 @@ export type UploadProgress = { loaded: number; total: number }
 
 export type RunningUpload = {
   done: Promise<void>
-  // Stops in-flight parts and aborts the multipart upload on S3 (no leftover
-  // parts); done rejects afterwards.
+  // Explicit cancel: stops in-flight parts and discards the parts already on
+  // the server; done rejects afterwards. Failures other than cancel keep the
+  // parts so the upload can be resumed (app/lib/s3/resume.ts).
   abort: () => Promise<void>
+  // The multipart upload id, once known. Single PUTs (small files) never get
+  // one; they leave nothing behind to resume or discard.
+  uploadId: () => string | undefined
 }
 
 export const startUpload = ({ s3, bucket, key, file, onProgress }: {
@@ -35,13 +41,29 @@ export const startUpload = ({ s3, bucket, key, file, onProgress }: {
       ...(file.type === "" ? {} : { ContentType: file.type }),
     },
     partSize: computePartSize(file.size),
+    // Errors keep the completed parts on the server for resume.
+    leavePartsOnError: true,
   })
   upload.on("httpUploadProgress", (progress) => {
     onProgress({ loaded: progress.loaded ?? 0, total: progress.total ?? file.size })
   })
 
+  const done = upload.done().then(() => undefined)
+
   return {
-    done: upload.done().then(() => undefined),
-    abort: () => upload.abort(),
+    done,
+    // With leavePartsOnError, upload.abort() only stops the transfer; the
+    // server-side discard is on us. The uploadId is re-read after done
+    // settles to close the race with a cancel before CreateMultipartUpload
+    // finished.
+    abort: async () => {
+      await upload.abort()
+      await done.catch(() => undefined)
+      const uploadId = upload.uploadId
+      if (uploadId !== undefined) {
+        await abortPendingUpload(s3, bucket, key, uploadId)
+      }
+    },
+    uploadId: () => upload.uploadId,
   }
 }

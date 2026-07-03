@@ -13,6 +13,16 @@ export type Resources = {
     button: string
     done: string
     failed: string
+    resume: string
+    mismatch: string
+  }
+  pendingUploads: {
+    title: string
+    uploadedInfo: string
+    pickToResume: string
+    discard: string
+    discardConfirmTitle: string
+    discardConfirmBody: string
   }
   publish: {
     button: string
@@ -96,6 +106,16 @@ export const ja: Resources = {
     button: "アップロード",
     done: "アップロード完了",
     failed: "アップロードに失敗しました",
+    resume: "再開",
+    mismatch: "選択したファイルは中断したアップロードと一致しません",
+  },
+  pendingUploads: {
+    title: "再開待ちのアップロード",
+    uploadedInfo: "{{size}} アップロード済み・最終 {{datetime}}",
+    pickToResume: "ファイルを選んで再開",
+    discard: "破棄",
+    discardConfirmTitle: "アップロードを破棄",
+    discardConfirmBody: "{{name}} の中断したアップロードを破棄します。アップロード済みの部分は失われます。",
   },
   publish: {
     button: "公開",

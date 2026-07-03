@@ -10,6 +10,21 @@ upstream kura_filer {
   server seaweedfs:8888;
 }
 
+# Audit log for public delivery (docs/operations.md). The date-stamped file
+# path rotates the log daily without logrotate or reopen signals; the ops
+# service compresses and expires old files. X-Forwarded-For carries the real
+# client IP when the DDBJ gateway fronts this server.
+log_format kura_audit '$time_iso8601\t$http_x_forwarded_for\t$remote_addr\t'
+                      '"$request"\t$status\t$body_bytes_sent\t"$http_user_agent"';
+
+map $time_iso8601 $kura_log_date {
+  default "date-unknown";
+  "~^(?<kura_date>\d{4}-\d{2}-\d{2})" $kura_date;
+}
+
+# Variable log paths are opened per request by the worker; cache the handles.
+open_log_file_cache max=8 inactive=60s;
+
 server {
   listen 8080;
   server_name _;
@@ -56,6 +71,9 @@ server {
   # Public delivery: /<user>/<path>. The username segment follows S3 bucket
   # naming, so reserved paths starting with "_" can never collide with it.
   location ~ "^/(?<kura_user>[a-z0-9][a-z0-9.-]{1,62})/(?<kura_path>.+)$" {
+    access_log /var/log/nginx/access.log main;
+    access_log /var/log/kura/access-$kura_log_date.log kura_audit;
+
     auth_request /_kura_tag;
     auth_request_set $kura_public $upstream_http_x_amz_tagging_kura_public;
 
@@ -69,6 +87,9 @@ server {
   }
 
   location @kura_deliver {
+    access_log /var/log/nginx/access.log main;
+    access_log /var/log/kura/access-$kura_log_date.log kura_audit;
+
     if ($kura_public != "true") {
       return 404;
     }
@@ -100,6 +121,8 @@ server {
   }
 
   location @kura_notfound {
+    access_log /var/log/nginx/access.log main;
+    access_log /var/log/kura/access-$kura_log_date.log kura_audit;
     return 404;
   }
 }

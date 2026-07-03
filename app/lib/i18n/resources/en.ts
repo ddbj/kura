@@ -13,6 +13,16 @@ export const en: Resources = {
     button: "Upload",
     done: "Upload complete",
     failed: "Upload failed",
+    resume: "Resume",
+    mismatch: "The selected file does not match the interrupted upload",
+  },
+  pendingUploads: {
+    title: "Uploads waiting to be resumed",
+    uploadedInfo: "{{size}} uploaded, last activity {{datetime}}",
+    pickToResume: "Pick the file to resume",
+    discard: "Discard",
+    discardConfirmTitle: "Discard upload",
+    discardConfirmBody: "Discard the interrupted upload of {{name}}. The parts uploaded so far will be lost.",
   },
   publish: {
     button: "Public",

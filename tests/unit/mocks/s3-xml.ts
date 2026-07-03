@@ -55,3 +55,68 @@ export const getObjectTaggingXml = (tags: { key: string; value: string }[]): str
 
 export const s3ErrorXml = (code: string, message: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <Error><Code>${escapeXml(code)}</Code><Message>${escapeXml(message)}</Message></Error>`
+
+type ListedUpload = {
+  key: string
+  uploadId: string
+}
+
+// SeaweedFS 形状: Upload に Initiated が無い（実測固定化済み。s3-flows）
+export const listMultipartUploadsXml = ({ bucket, uploads, nextKeyMarker, nextUploadIdMarker }: {
+  bucket: string
+  uploads: ListedUpload[]
+  nextKeyMarker?: string
+  nextUploadIdMarker?: string
+}): string => `<?xml version="1.0" encoding="UTF-8"?>
+<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Bucket>${escapeXml(bucket)}</Bucket>
+  <IsTruncated>${nextKeyMarker === undefined ? "false" : "true"}</IsTruncated>
+  ${nextKeyMarker === undefined ? "" : `<NextKeyMarker>${escapeXml(nextKeyMarker)}</NextKeyMarker>`}
+  ${nextUploadIdMarker === undefined ? "" : `<NextUploadIdMarker>${escapeXml(nextUploadIdMarker)}</NextUploadIdMarker>`}
+  ${uploads.map((u) => `<Upload><Key>${escapeXml(u.key)}</Key><UploadId>${escapeXml(u.uploadId)}</UploadId></Upload>`).join("\n  ")}
+</ListMultipartUploadsResult>`
+
+type ListedPart = {
+  partNumber: number
+  size: number
+  etag: string
+  lastModified?: string
+}
+
+export const listPartsXml = ({ bucket, key, uploadId, parts, nextPartNumberMarker }: {
+  bucket: string
+  key: string
+  uploadId: string
+  parts: ListedPart[]
+  nextPartNumberMarker?: number
+}): string => `<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Bucket>${escapeXml(bucket)}</Bucket>
+  <Key>${escapeXml(key)}</Key>
+  <UploadId>${escapeXml(uploadId)}</UploadId>
+  <IsTruncated>${nextPartNumberMarker === undefined ? "false" : "true"}</IsTruncated>
+  ${nextPartNumberMarker === undefined ? "" : `<NextPartNumberMarker>${nextPartNumberMarker}</NextPartNumberMarker>`}
+  ${parts.map((p) => `<Part><PartNumber>${p.partNumber}</PartNumber><Size>${p.size}</Size><ETag>&quot;${escapeXml(p.etag)}&quot;</ETag>${p.lastModified === undefined ? "" : `<LastModified>${p.lastModified}</LastModified>`}</Part>`).join("\n  ")}
+</ListPartsResult>`
+
+export const initiateMultipartUploadXml = ({ bucket, key, uploadId }: {
+  bucket: string
+  key: string
+  uploadId: string
+}): string => `<?xml version="1.0" encoding="UTF-8"?>
+<InitiateMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Bucket>${escapeXml(bucket)}</Bucket>
+  <Key>${escapeXml(key)}</Key>
+  <UploadId>${escapeXml(uploadId)}</UploadId>
+</InitiateMultipartUploadResult>`
+
+export const completeMultipartUploadXml = ({ bucket, key, etag }: {
+  bucket: string
+  key: string
+  etag: string
+}): string => `<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Bucket>${escapeXml(bucket)}</Bucket>
+  <Key>${escapeXml(key)}</Key>
+  <ETag>&quot;${escapeXml(etag)}&quot;</ETag>
+</CompleteMultipartUploadResult>`

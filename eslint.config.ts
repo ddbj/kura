@@ -141,4 +141,11 @@ export default tseslint.config(
       "no-console": "off",
     },
   },
+  {
+    // 運用スクリプト: 実行ログは console に出す
+    files: ["scripts/**/*.ts"],
+    rules: {
+      "no-console": "off",
+    },
+  },
 )

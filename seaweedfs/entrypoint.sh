@@ -10,6 +10,7 @@ set -eu
 : "${KURA_STS_SIGNING_KEY:?}"
 : "${KURA_ROOT_ACCESS_KEY:?}"
 : "${KURA_ROOT_SECRET_KEY:?}"
+: "${KURA_FILER_JWT_KEY:?}"
 
 mkdir -p /etc/seaweedfs
 
@@ -22,6 +23,15 @@ copy_1 = 1
 copy_2 = 2
 copy_3 = 3
 copy_other = 1
+EOTOML
+
+# The filer write-signing key puts the filer IAM gRPC service (and filer HTTP
+# writes) behind a Bearer token; in-cluster components sign with this same
+# file. The read key stays unset so public delivery (nginx -> filer GET/HEAD)
+# remains anonymous.
+cat > /etc/seaweedfs/security.toml <<EOTOML
+[jwt.filer_signing]
+key = "${KURA_FILER_JWT_KEY}"
 EOTOML
 
 # KURA_ADMIN_SUBS: comma-separated Keycloak sub UUIDs -> JSON string array.
@@ -162,5 +172,29 @@ cat > /etc/seaweedfs/iam.json <<EOJSON
   ]
 }
 EOJSON
+
+# Default-quota reconciler (docs/operations.md): SeaweedFS has no native
+# default quota for new buckets, so periodically set it on buckets without
+# one. s3.bucket.list omits the quota field for unset buckets; disabled
+# (negative) quotas also show no field, which is why kura ops never use
+# -op=disable. Bucket names follow S3 naming (no whitespace), so the
+# tab-separated output is safe to parse.
+quota_reconcile() {
+  echo "s3.bucket.list" | weed shell -master localhost:9333 2>/dev/null \
+    | grep "	size:" | grep -v "	quota:" | awk '{print $1}' \
+    | while read -r bucket; do
+        echo "s3.bucket.quota -name=${bucket} -op=set -sizeMB=${KURA_QUOTA_DEFAULT_MB:-1048576}" \
+          | weed shell -master localhost:9333 \
+          && echo "kura-ops: applied default quota to ${bucket}"
+      done
+}
+
+(
+  sleep 10
+  while true; do
+    quota_reconcile || echo "kura-ops: quota reconcile failed" >&2
+    sleep "${KURA_OPS_INTERVAL_SECONDS:-86400}"
+  done
+) &
 
 exec /entrypoint.sh "$@"

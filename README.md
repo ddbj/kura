@@ -22,6 +22,7 @@ npm install
 npm test                 # 全テスト (unit / pbt / integration。integration は docker compose を自動起動)
 npm run test:unit        # frontend の unit + PBT のみ (docker 不要)
 npm run test:integration # 設定群のテストのみ (SeaweedFS + nginx を env.test で自動起動)
+npm run test:e2e         # E2E (起動済みの dev compose + staging Keycloak が必要。docs/testing.md)
 npm run typecheck
 npm run lint
 ```

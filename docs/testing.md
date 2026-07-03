@@ -38,10 +38,13 @@ nginx + filer の経路で、公開配信の enforcement を自動検証する:
 実 SeaweedFS に対して主要フローを検証する:
 
 - STS `AssumeRoleWithWebIdentity` -> multipart upload -> download
-- 中断した multipart upload を新しい一時 credentials から再開できること
+- 中断した multipart upload を新しい一時 credentials から再開できること（低レベル API と、SPA の resume 実装そのもの（発見 -> MD5 照合 -> 続行 -> 完成、内容が違うファイルの拒否、破棄）の両方）
+- in-flight multipart upload の一覧（`ListMultipartUploads`）の形（Prefix フィルタ、Initiated が無いこと、part ETag = MD5）
 - publish / unpublish（tagging）の往復
 - 一時 credentials による presigned URL（GET / PUT）と、署名なしリクエストの拒否
 - quota 超過での write 拒否、超過中の read / delete、削除 + vacuum 後の自動解除
+- 運用タスク: default quota reconciler が未設定 bucket に quota を付けること、file TTL sweep が期限超過の object だけを消すこと（TTL 無効時は何もしないこと）、放置 multipart 掃除が猶予内の upload を残すこと、監査ログの日次圧縮・保持期限削除
+- 監査ログ: 公開配信の 200 / 404 が日付ファイルに client IP（X-Forwarded-For）・encoded URI 付きで記録され、SPA への request が混入しないこと
 
 ## frontend のテスト
 
@@ -54,7 +57,7 @@ nginx + filer の経路で、公開配信の enforcement を自動検証する:
   - filename validation の境界値
   - i18n resources の ja / en パリティ（キー集合一致・空文字禁止・翻訳漏れ検知）
   - 公開バッジのキャッシュ・遅延取得ロジックの不変条件
-- E2E（Playwright）: 主要ユースケースをブラウザで通す。DDBJ staging へのログインを含む E2E は専用のテストユーザーを用いる（用意方法は未確定）
+- E2E（Playwright、`tests/e2e/`）: 4 ユースケース（upload / download / 公開 / presign）を実ブラウザで通す。起動済みの dev compose（nginx 配信）と DDBJ staging Keycloak を使い、staging の専用テストユーザーでログインする（資格情報は git 管理外の `.env` の `E2E_USERNAME` / `E2E_PASSWORD`）。`npm run test:e2e` で実行する。staging へのネットワーク到達が必要なため `npm test` には含めない
 
 ## mock の境界
 

@@ -8,7 +8,12 @@ import { Button } from "~/ui"
 
 import { seedAuthenticatedUser } from "../_helpers/oidc"
 import { renderWithStub, testConfig } from "../_helpers/render"
-import { stsAssumeRoleXml } from "../mocks/s3-xml"
+import {
+  completeMultipartUploadXml,
+  initiateMultipartUploadXml,
+  listPartsXml,
+  stsAssumeRoleXml,
+} from "../mocks/s3-xml"
 import { server } from "../mocks/server"
 
 const ENDPOINT = testConfig.s3Endpoint
@@ -68,7 +73,55 @@ describe("UploadsProvider", () => {
     const alert = await screen.findByRole("alert")
     expect(alert).toHaveTextContent("broken.txt")
     expect(alert).toHaveTextContent(/アップロードに失敗しました/)
+    // A single PUT leaves nothing on the server, so there is nothing to resume.
+    expect(screen.queryByRole("button", { name: "再開" })).not.toBeInTheDocument()
   })
+
+  test("startUploads_multipartFailure_offersResumeThatFinishes", async () => {
+    const user = userEvent.setup()
+    const MiB = 1024 * 1024
+    const url = `${ENDPOINT}/${BUCKET}/docs/big.bin`
+    server.use(
+      http.post(url, ({ request }) => {
+        if (new URL(request.url).searchParams.has("uploads")) {
+          return HttpResponse.xml(initiateMultipartUploadXml({
+            bucket: BUCKET, key: "docs/big.bin", uploadId: "up-9",
+          }))
+        }
+
+        return HttpResponse.xml(completeMultipartUploadXml({
+          bucket: BUCKET, key: "docs/big.bin", etag: "final",
+        }))
+      }),
+      http.put(url, () => new HttpResponse(null, { status: 500 })),
+    )
+    renderUploads([new File([new Uint8Array(16 * MiB)], "big.bin")])
+
+    await user.click(screen.getByRole("button", { name: "go" }))
+    // The multipart failure keeps the parts, so the error toast offers resuming.
+    const resumeButton = await screen.findByRole(
+      "button",
+      { name: "再開" },
+      { timeout: 20_000 },
+    )
+
+    // The server recovers; no parts made it, so resume re-uploads everything.
+    const resumedParts: string[] = []
+    server.use(
+      http.get(url, () => HttpResponse.xml(listPartsXml({
+        bucket: BUCKET, key: "docs/big.bin", uploadId: "up-9", parts: [],
+      }))),
+      http.put(url, ({ request }) => {
+        resumedParts.push(new URL(request.url).searchParams.get("partNumber") ?? "?")
+
+        return new HttpResponse(null, { status: 200, headers: { ETag: "\"e\"" } })
+      }),
+    )
+    await user.click(resumeButton)
+
+    expect(await screen.findByText("アップロード完了", {}, { timeout: 20_000 })).toBeInTheDocument()
+    expect(resumedParts.sort()).toEqual(["1", "2"])
+  }, 60_000)
 
   test("startUploads_cancel_dismissesToast", async () => {
     const user = userEvent.setup()
