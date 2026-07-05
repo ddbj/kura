@@ -1,5 +1,7 @@
 import { access } from "node:fs/promises"
 
+import type { S3Client } from "@aws-sdk/client-s3"
+
 import { rotateAuditLogs } from "./audit-logs.ts"
 import { cleanupBucketUploads } from "./multipart.ts"
 import { listBucketNames, opsS3Client } from "./s3.ts"
@@ -29,13 +31,12 @@ const optionalDaysEnv = (name: string): number | null => {
 
 // One daily ops pass (docs/operations.md): file-TTL sweep (when enabled),
 // stale multipart cleanup, and audit log rotation.
-export const runDaily = async (now: Date): Promise<void> => {
+export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise<void> => {
   const ttlDays = optionalDaysEnv("KURA_FILE_TTL_DAYS")
   const multipartMaxAgeDays = daysEnv("KURA_MULTIPART_MAX_AGE_DAYS", 7)
   const auditRetentionDays = daysEnv("KURA_AUDIT_RETENTION_DAYS", 1095)
   const auditLogDir = process.env["KURA_AUDIT_LOG_DIR"] ?? "/var/log/kura"
 
-  const s3 = opsS3Client()
   const buckets = await listBucketNames(s3)
   let ttlDeleted = 0
   let uploadsAborted = 0

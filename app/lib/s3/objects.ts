@@ -69,10 +69,15 @@ export const deleteObject = async (s3: S3Client, bucket: string, key: string): P
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
 }
 
+// RFC 5987 attr-char excludes several characters encodeURIComponent leaves
+// unescaped, including "'" (which would collide with the UTF-8'' delimiter).
+const encodeRfc5987ValueChars = (value: string): string =>
+  encodeURIComponent(value).replace(/['()*!]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+
 // The bytes flow browser <- SeaweedFS directly; the SPA only mints the URL.
 export const presignDownloadUrl = (s3: S3Client, bucket: string, key: string): Promise<string> =>
   getSignedUrl(s3, new GetObjectCommand({
     Bucket: bucket,
     Key: key,
-    ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(entryName(key))}`,
+    ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeRfc5987ValueChars(entryName(key))}`,
   }), { expiresIn: 300 })

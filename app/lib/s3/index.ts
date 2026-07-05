@@ -8,7 +8,14 @@ export { type PresignedShare, type PresignMethod, presignShareUrl } from "./pres
 export { publicUrl } from "./public-url"
 export { planResume, type PlanResumeResult, type ResumePlan, resumeUpload } from "./resume"
 export { assumeRoleWithToken, type StsCredentials, USER_ROLE_ARN } from "./sts"
-export { applyPublicState, beginPublicStateChange, tagQueryKey, tagQueryOptions, useObjectPublicFlags } from "./tag-cache"
+export {
+  applyPublicState,
+  beginPublicStateChange,
+  revertPublicStateOnFailure,
+  tagQueryKey,
+  tagQueryOptions,
+  useObjectPublicFlags,
+} from "./tag-cache"
 export { getObjectIsPublic, isPublicTagging, publishObject, unpublishObject } from "./tags"
 export { computePartSize, type RunningUpload, startUpload, type UploadProgress } from "./upload"
 export { accessTokenForDuration, freshAccessToken, useS3 } from "./use-s3"

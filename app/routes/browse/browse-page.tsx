@@ -7,7 +7,7 @@ import { useT } from "~/lib/i18n"
 import type { FileEntry } from "~/lib/s3"
 import { deleteObject, ensureOwnBucket, isUsableBucketName, listDirectory, useObjectPublicFlags, useS3 } from "~/lib/s3"
 import { RequireAuth, useUploads } from "~/shell"
-import { Button, Callout, FilePickButton } from "~/ui"
+import { Button, Callout, FilePickButton, Heading } from "~/ui"
 
 import { DeleteDialog } from "./delete-dialog"
 import { ObjectList } from "./object-list"
@@ -93,6 +93,7 @@ const BrowseContent = ({ prefix }: { prefix: string }) => {
 
   return (
     <div className="p-6">
+      <Heading as="h1" size="h2" className="mb-4">{t("browse.pageTitle")}</Heading>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <PrefixBreadcrumb prefix={prefix} />
         <div className="flex flex-wrap items-center gap-2">

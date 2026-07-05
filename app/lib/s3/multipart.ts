@@ -81,8 +81,8 @@ export const listUploadedParts = async (
 }
 
 const isNoSuchUpload = (err: unknown): boolean =>
-  typeof err === "object" && err !== null && "$metadata" in err &&
-  (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode === 404
+  typeof err === "object" && err !== null && "name" in err &&
+  (err as { name: unknown }).name === "NoSuchUpload"
 
 // Discards an interrupted upload and the space its parts hold. Racing a
 // duplicate discard (or the ops cleanup) is fine: already-gone is success.

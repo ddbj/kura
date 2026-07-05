@@ -18,12 +18,6 @@ type TagProps =
     children: ReactNode
   }
   | {
-    kind: "brand"
-    size?: TagSize
-    mono?: boolean
-    children: ReactNode
-  }
-  | {
     kind: "source"
     name: SourceName
     source?: undefined
@@ -88,14 +82,6 @@ export const Tag = (props: TagProps) => {
   if (props.kind === "status") {
     return (
       <span className={cn(baseClass, family, sizeClass[size], statusClass[props.tone])}>
-        {props.children}
-      </span>
-    )
-  }
-
-  if (props.kind === "brand") {
-    return (
-      <span className={cn(baseClass, family, sizeClass[size], "bg-brand-soft text-brand-deep")}>
         {props.children}
       </span>
     )

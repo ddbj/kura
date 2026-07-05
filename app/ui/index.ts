@@ -5,26 +5,7 @@ export { CopyField } from "./copy-field"
 export { FilePickButton } from "./file-pick-button"
 export { Heading } from "./heading"
 export { IconButton } from "./icon-button"
-export {
-  AlertIcon,
-  ArrowLeftIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CloseIcon,
-  ExternalIcon,
-  FileTextIcon,
-  FolderIcon,
-  GitHubIcon,
-  GlobeIcon,
-  HashIcon,
-  HelpIcon,
-  InfoIcon,
-  LockClosedIcon,
-  LockOpenIcon,
-  MenuIcon,
-  SearchIcon,
-  UserIcon,
-} from "./icons"
+export { ChevronDownIcon, CloseIcon, ExternalIcon, FolderIcon, GlobeIcon } from "./icons"
 export { Modal, ModalBody, ModalFooter, ModalHeader } from "./modal"
 export { MonoCode } from "./mono-code"
 export { Page } from "./page"

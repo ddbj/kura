@@ -78,6 +78,7 @@ export type Resources = {
     unsupportedUsernameBody: string
   }
   browse: {
+    pageTitle: string
     root: string
     breadcrumbLabel: string
     empty: string
@@ -86,6 +87,7 @@ export type Resources = {
     lastModified: string
     expiresAt: string
     download: string
+    downloadFailed: string
     delete: string
     loadMore: string
     listErrorTitle: string
@@ -174,6 +176,7 @@ export const ja: Resources = {
       "ユーザー名 {{username}} は S3 バケット命名規則 (小文字英数と . - のみ、3-63 文字、先頭末尾は英数字) に適合しないため、kura の領域を作成できません。",
   },
   browse: {
+    pageTitle: "マイファイル",
     root: "ホーム",
     breadcrumbLabel: "現在のパス",
     empty: "ファイルはまだありません。",
@@ -182,6 +185,7 @@ export const ja: Resources = {
     lastModified: "更新日時",
     expiresAt: "有効期限",
     download: "ダウンロード",
+    downloadFailed: "ダウンロード URL の発行に失敗しました",
     delete: "削除",
     loadMore: "さらに表示",
     listErrorTitle: "一覧の取得に失敗しました",

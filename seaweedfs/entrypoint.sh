@@ -56,6 +56,8 @@ EOTOML
 admin_subs_json=""
 IFS=','
 for sub in ${KURA_ADMIN_SUBS:-}; do
+  # awk trims surrounding whitespace so "a, b" and "a,b" parse the same.
+  sub=$(printf '%s' "$sub" | awk '{$1=$1; print}')
   [ -n "$sub" ] || continue
   admin_subs_json="${admin_subs_json:+${admin_subs_json}, }\"${sub}\""
 done
@@ -211,11 +213,38 @@ quota_reconcile() {
       done
 }
 
+# Waits until weed shell can reach the master (not up yet when this
+# entrypoint starts) before the first quota reconcile; gives up after ~60s
+# and proceeds anyway, matching quota_reconcile's own log-and-continue
+# resilience.
+wait_for_master() {
+  i=0
+  while [ "$i" -lt 30 ]; do
+    if echo "s3.bucket.list" | weed shell -master localhost:9333 >/dev/null 2>&1; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 2
+  done
+  echo "kura-ops: master not reachable after 60s, proceeding anyway" >&2
+}
+
 (
-  sleep 10
+  wait_for_master
   while true; do
-    quota_reconcile || echo "kura-ops: quota reconcile failed" >&2
-    sleep "${KURA_OPS_INTERVAL_SECONDS:-86400}"
+    interval="${KURA_OPS_INTERVAL_SECONDS:-86400}"
+    if quota_reconcile; then
+      sleep "$interval"
+    else
+      echo "kura-ops: quota reconcile failed" >&2
+      # Retry sooner than a full interval, capped to the interval itself so
+      # short test intervals are not stretched out by the retry backoff.
+      if [ "$interval" -lt 300 ]; then
+        sleep "$interval"
+      else
+        sleep 300
+      fi
+    fi
   done
 ) &
 

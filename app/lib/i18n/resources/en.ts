@@ -79,6 +79,7 @@ export const en: Resources = {
       "The username {{username}} does not conform to the S3 bucket naming rules (lowercase letters, digits, . and - only; 3-63 characters; must start and end with a letter or digit), so a kura storage area cannot be created.",
   },
   browse: {
+    pageTitle: "Your files",
     root: "Home",
     breadcrumbLabel: "Current path",
     empty: "No files yet.",
@@ -87,6 +88,7 @@ export const en: Resources = {
     lastModified: "Last modified",
     expiresAt: "Expires",
     download: "Download",
+    downloadFailed: "Failed to issue the download URL",
     delete: "Delete",
     loadMore: "Load more",
     listErrorTitle: "Failed to list files",

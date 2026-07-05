@@ -98,4 +98,13 @@ describe("abortPendingUpload", () => {
       abortPendingUpload(testS3(), "kura-tester", "docs/a.bin", "id-a"),
     ).rejects.toThrow()
   })
+
+  test("abortPendingUpload_unrelated404_throws", async () => {
+    server.use(http.delete(`${ENDPOINT}/kura-tester/docs/a.bin`, () =>
+      xml(s3ErrorXml("NoSuchBucket", "not found"), 404)))
+
+    await expect(
+      abortPendingUpload(testS3(), "kura-tester", "docs/a.bin", "id-a"),
+    ).rejects.toThrow()
+  })
 })

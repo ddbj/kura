@@ -13,8 +13,20 @@ type DeleteDialogProps = {
 export const DeleteDialog = ({ targetKey, deleting, failed, onConfirm, onCancel }: DeleteDialogProps) => {
   const t = useT()
   return (
-    <Modal open={targetKey !== null} onClose={onCancel} ariaLabelledby="delete-dialog-title" width={480}>
-      <ModalHeader title={t("browse.deleteConfirmTitle")} titleId="delete-dialog-title" onClose={onCancel} />
+    <Modal
+      open={targetKey !== null}
+      onClose={onCancel}
+      ariaLabelledby="delete-dialog-title"
+      width={480}
+      closeOnEscape={!deleting}
+      closeOnOverlay={!deleting}
+    >
+      <ModalHeader
+        title={t("browse.deleteConfirmTitle")}
+        titleId="delete-dialog-title"
+        onClose={onCancel}
+        closeLabel={t("common.close")}
+      />
       <ModalBody minHeight={0}>
         <p>{t("browse.deleteConfirmBody", { name: entryName(targetKey ?? "") })}</p>
         {failed ? (

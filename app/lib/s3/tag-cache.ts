@@ -52,6 +52,21 @@ export const applyPublicState = async (
   queryClient.setQueryData(tagQueryKey(bucket, key), isPublic)
 }
 
+// The latest-issued change failing doesn't mean the cache still holds the
+// right value: an earlier change may already have succeeded server-side
+// while its own applyPublicState call lost the token race above. Refetching
+// reconciles the cache with server truth instead of leaving it on a value
+// neither change actually applied.
+export const revertPublicStateOnFailure = async (
+  queryClient: QueryClient,
+  bucket: string,
+  key: string,
+  token: symbol,
+): Promise<void> => {
+  if (latestChangeToken.get(changeMapKey(bucket, key)) !== token) return
+  await queryClient.invalidateQueries({ queryKey: tagQueryKey(bucket, key) })
+}
+
 // Public flags for the objects currently on screen: one parallel lazy query
 // per key; undefined while unknown (not fetched yet or errored).
 export const useObjectPublicFlags = (

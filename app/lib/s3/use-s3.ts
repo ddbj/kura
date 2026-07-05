@@ -12,12 +12,26 @@ import { createStsCredentialsProvider } from "./credentials"
 // mid-action.
 const MIN_TOKEN_REMAINING_S = 120
 
+// A large multipart upload can have many parts in flight at once, each
+// re-invoking the S3 SDK's credentials provider around the same time; without
+// sharing one in-flight renewal, each would independently call signinSilent
+// and race the same refresh token against Keycloak.
+let inFlightRenewal: Promise<string> | null = null
+
 const renewAccessToken = async (auth: AuthContextProps): Promise<string> => {
-  const renewed = await auth.signinSilent()
-  if (renewed === null) {
-    throw new Error("Silent renew did not return a session")
+  if (inFlightRenewal !== null) return inFlightRenewal
+  inFlightRenewal = (async () => {
+    const renewed = await auth.signinSilent()
+    if (renewed === null) {
+      throw new Error("Silent renew did not return a session")
+    }
+    return renewed.access_token
+  })()
+  try {
+    return await inFlightRenewal
+  } finally {
+    inFlightRenewal = null
   }
-  return renewed.access_token
 }
 
 export const freshAccessToken = async (auth: AuthContextProps): Promise<string> => {

@@ -7,7 +7,7 @@ type CalloutTone = "info" | "warn" | "ok"
 type CalloutProps = {
   children: ReactNode
   tone?: CalloutTone
-  role?: "status" | "alert" | "note"
+  role?: "status" | "alert"
   // Rendered flush-right inside the callout (e.g. a retry button). Keeps the
   // action visually tied to the message rather than floating elsewhere.
   action?: ReactNode

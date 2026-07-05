@@ -175,4 +175,12 @@ describe("presignDownloadUrl", () => {
     expect(url.searchParams.get("response-content-disposition")).toContain("attachment")
     expect(url.searchParams.get("response-content-disposition")).toContain(encodeURIComponent("読みもの.txt"))
   })
+
+  test("presignDownloadUrl_filenameWithQuote_escapesRfc5987DelimiterChars", async () => {
+    const url = new URL(await presignDownloadUrl(client(), BUCKET, "docs/it's (final)*.txt"))
+    const disposition = url.searchParams.get("response-content-disposition") ?? ""
+    expect(disposition).toContain("filename*=UTF-8''")
+    const encodedName = disposition.slice(disposition.indexOf("UTF-8''") + "UTF-8''".length)
+    expect(encodedName).not.toMatch(/['()*!]/)
+  })
 })

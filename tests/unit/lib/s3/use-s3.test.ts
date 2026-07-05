@@ -45,4 +45,15 @@ describe("accessTokenForDuration", () => {
     const auth = { user: null, signinSilent: vi.fn().mockResolvedValue(null) } as unknown as AuthContextProps
     await expect(accessTokenForDuration(auth, 900)).rejects.toThrow()
   })
+
+  test("concurrentCallsNeedingRenewal_shareOneSigninSilentCall", async () => {
+    const auth = fakeAuth({ expiresIn: 60 })
+    const [first, second] = await Promise.all([
+      accessTokenForDuration(auth, 900),
+      accessTokenForDuration(auth, 900),
+    ])
+    expect(first).toBe("renewed-token")
+    expect(second).toBe("renewed-token")
+    expect(auth.signinSilent).toHaveBeenCalledOnce()
+  })
 })

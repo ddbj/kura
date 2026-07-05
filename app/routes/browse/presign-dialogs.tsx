@@ -81,7 +81,7 @@ export const PresignGetDialog = ({ bucket, targetKey, onClose }: {
 
   return (
     <Modal open={targetKey !== null} onClose={close} ariaLabelledby="presign-get-title" width={560}>
-      <ModalHeader title={t("presign.getTitle")} titleId="presign-get-title" onClose={close} />
+      <ModalHeader title={t("presign.getTitle")} titleId="presign-get-title" onClose={close} closeLabel={t("common.close")} />
       <ModalBody minHeight={0}>
         <div className="flex flex-col gap-3">
           <MonoCode className="break-all text-fs-body-sm text-ink-mid">{targetKey ?? ""}</MonoCode>
@@ -117,6 +117,8 @@ export const PresignPutDialog = ({ bucket, prefix, open, onClose }: {
   const [filename, setFilename] = useState("")
   const [expiresIn, setExpiresIn] = useState(DEFAULT_EXPIRES_S)
   const presign = usePresign(bucket, "PUT")
+  const trimmedFilename = filename.trim()
+  const filenameInvalid = trimmedFilename === "" || trimmedFilename.includes("/") || trimmedFilename.includes("..")
   const close = () => {
     presign.reset()
     setFilename("")
@@ -126,7 +128,7 @@ export const PresignPutDialog = ({ bucket, prefix, open, onClose }: {
 
   return (
     <Modal open={open} onClose={close} ariaLabelledby="presign-put-title" width={560}>
-      <ModalHeader title={t("presign.putTitle")} titleId="presign-put-title" onClose={close} />
+      <ModalHeader title={t("presign.putTitle")} titleId="presign-put-title" onClose={close} closeLabel={t("common.close")} />
       <ModalBody minHeight={0}>
         <div className="flex flex-col gap-3">
           <Callout tone="info">{t("presign.note")}</Callout>
@@ -144,8 +146,8 @@ export const PresignPutDialog = ({ bucket, prefix, open, onClose }: {
             <ExpiresSelect value={expiresIn} onChange={setExpiresIn} />
             <Button
               size="sm"
-              disabled={presign.isPending || filename === ""}
-              onClick={() => presign.mutate({ key: `${prefix}${filename}`, expiresInSeconds: expiresIn })}
+              disabled={presign.isPending || filenameInvalid}
+              onClick={() => presign.mutate({ key: `${prefix}${trimmedFilename}`, expiresInSeconds: expiresIn })}
             >
               {t("presign.issue")}
             </Button>

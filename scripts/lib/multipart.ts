@@ -7,6 +7,8 @@ import {
 
 import { isOlderThanDays } from "./time.ts"
 
+const isNoSuchUpload = (err: unknown): boolean => err instanceof Error && err.name === "NoSuchUpload"
+
 // The SDK ships no paginator for ListMultipartUploads.
 const listAllUploads = async (s3: S3Client, bucket: string): Promise<MultipartUpload[]> => {
   const uploads: MultipartUpload[] = []
@@ -77,14 +79,23 @@ export const cleanupBucketUploads = async (
       continue
     }
 
-    await s3.send(
-      new AbortMultipartUploadCommand({
-        Bucket: bucket,
-        Key: upload.Key,
-        UploadId: upload.UploadId,
-      }),
-    )
-    aborted += 1
+    try {
+      await s3.send(
+        new AbortMultipartUploadCommand({
+          Bucket: bucket,
+          Key: upload.Key,
+          UploadId: upload.UploadId,
+        }),
+      )
+      aborted += 1
+    } catch (err) {
+      // The client completed the upload between the recheck above and this
+      // abort; nothing left to reclaim, and the rest of the bucket's stale
+      // uploads still need processing.
+      if (!isNoSuchUpload(err)) {
+        throw err
+      }
+    }
   }
 
   return aborted

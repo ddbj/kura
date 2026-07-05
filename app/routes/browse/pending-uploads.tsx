@@ -6,7 +6,7 @@ import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
 import type { PendingUpload } from "~/lib/s3"
 import { abortPendingUpload, listPendingUploads, listUploadedParts, useS3 } from "~/lib/s3"
 import { useUploads } from "~/shell"
-import { Button, Callout, FilePickButton, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
+import { Button, Callout, FilePickButton, Heading, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
 
 // Interrupted multipart uploads under the current prefix, discovered on the
 // server (they survive reloads). Resuming needs the file to be re-selected:
@@ -63,10 +63,10 @@ export const PendingUploads = ({ bucket, prefix }: { bucket: string; prefix: str
   if (uploads.length === 0) return null
 
   return (
-    <section aria-labelledby="pending-uploads-title" className="mb-4 rounded-lg border border-line bg-paper-soft p-4">
-      <h2 id="pending-uploads-title" className="mb-2 text-sm font-semibold text-ink-mid">
+    <section aria-labelledby="pending-uploads-title" className="mb-4 rounded-lg border border-border-soft bg-surface-subtle p-4">
+      <Heading as="h2" size="h3" id="pending-uploads-title" className="mb-2">
         {t("pendingUploads.title")}
-      </h2>
+      </Heading>
       <ul className="flex flex-col gap-2">
         {uploads.map((upload, index) => {
           const info = partInfo[index]?.data
@@ -115,11 +115,14 @@ export const PendingUploads = ({ bucket, prefix }: { bucket: string; prefix: str
         onClose={closeDiscardModal}
         ariaLabelledby="discard-upload-title"
         width={480}
+        closeOnEscape={!discard.isPending}
+        closeOnOverlay={!discard.isPending}
       >
         <ModalHeader
           title={t("pendingUploads.discardConfirmTitle")}
           titleId="discard-upload-title"
           onClose={closeDiscardModal}
+          closeLabel={t("common.close")}
         />
         <ModalBody minHeight={0}>
           <p>{t("pendingUploads.discardConfirmBody", { name: discardTarget?.key.slice(prefix.length) ?? "" })}</p>

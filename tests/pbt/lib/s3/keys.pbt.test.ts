@@ -35,6 +35,13 @@ describe("prefix <-> URL path", () => {
     expect(splatToPrefix(routerDecodedSplat(prefixToUrlPath(prefix)))).toBe(prefix)
   })
 
+  test("prefixToUrlPath_thenRouterDecode_roundTripsThroughInternalEmptySegment", () => {
+    // A key with a "//" (e.g. "a//b/file") carries an empty segment between
+    // two non-empty ones; the round trip must not collapse it away.
+    const prefix = "a//b/"
+    expect(splatToPrefix(routerDecodedSplat(prefixToUrlPath(prefix)))).toBe(prefix)
+  })
+
   test.prop([segments])("prefixToUrlPath_hasNoRawDotSegments", (segs) => {
     const urlSegments = prefixToUrlPath(segmentsToPrefix(segs)).split("/")
     expect(urlSegments).not.toContain(".")

@@ -2,7 +2,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { useConfig } from "~/lib/config"
 import { useT } from "~/lib/i18n"
-import { applyPublicState, beginPublicStateChange, entryName, publicUrl, publishObject, unpublishObject, useS3 } from "~/lib/s3"
+import {
+  applyPublicState,
+  beginPublicStateChange,
+  entryName,
+  publicUrl,
+  publishObject,
+  revertPublicStateOnFailure,
+  unpublishObject,
+  useS3,
+} from "~/lib/s3"
 import { Button, Callout, CopyField, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
 
 type PublicDialogProps = {
@@ -27,6 +36,8 @@ export const PublicDialog = ({ bucket, targetKey, isPublic, onClose }: PublicDia
     onMutate: ({ key }) => ({ token: beginPublicStateChange(bucket, key) }),
     onSuccess: (_result, { key, makePublic }, context) =>
       applyPublicState(queryClient, bucket, key, makePublic, context.token),
+    onError: (_error, { key }, context) =>
+      context === undefined ? undefined : revertPublicStateOnFailure(queryClient, bucket, key, context.token),
   })
 
   const url = targetKey === null ? "" : publicUrl(config.publicBase, bucket, targetKey)
@@ -38,7 +49,7 @@ export const PublicDialog = ({ bucket, targetKey, isPublic, onClose }: PublicDia
 
   return (
     <Modal open={targetKey !== null} onClose={close} ariaLabelledby="public-dialog-title" width={560}>
-      <ModalHeader title={t("publish.title")} titleId="public-dialog-title" onClose={close} />
+      <ModalHeader title={t("publish.title")} titleId="public-dialog-title" onClose={close} closeLabel={t("common.close")} />
       <ModalBody minHeight={0}>
         {isPublic === undefined
           ? <p className="text-ink-soft">{t("publish.loading")}</p>

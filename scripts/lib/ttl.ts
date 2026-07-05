@@ -29,12 +29,20 @@ export const sweepBucketTtl = async (
   let deleted = 0
   for (let i = 0; i < expired.length; i += DELETE_BATCH) {
     const batch = expired.slice(i, i + DELETE_BATCH)
-    const res = await s3.send(
-      new DeleteObjectsCommand({
-        Bucket: bucket,
-        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-      }),
-    )
+    let res
+    try {
+      res = await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+        }),
+      )
+    } catch (err) {
+      // Keeps prior batches' counts intact instead of losing them to a
+      // thrown rejection; this batch's objects are treated as not deleted.
+      console.error(`kura-ops: ttl delete batch failed: ${bucket}: ${String(err)}`)
+      continue
+    }
     const failed = res.Errors ?? []
     for (const error of failed) {
       console.error(`kura-ops: ttl delete failed: ${bucket}/${error.Key ?? "?"}: ${error.Message ?? "?"}`)
