@@ -32,7 +32,7 @@ test("an upload interrupted offline resumes to a byte-identical file", async ({ 
   await resumeButton.click()
   await expect(page.getByText("アップロード完了")).toBeVisible({ timeout: 120_000 })
 
-  const row = page.getByRole("row", { name: new RegExp(name) })
+  const row = page.getByRole("listitem").filter({ hasText: name })
   await expect(row).toBeVisible()
   const downloadPromise = page.waitForEvent("download")
   await row.getByRole("button", { name: "ダウンロード" }).click()

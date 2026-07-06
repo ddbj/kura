@@ -5,7 +5,15 @@ import { useLocation } from "react-router"
 import { useT } from "~/lib/i18n"
 import { Button, Callout } from "~/ui"
 
-export const RequireAuth = ({ children }: { children: ReactNode }) => {
+type RequireAuthProps = {
+  children: ReactNode
+  // Rendered instead of the plain login prompt once signed-out state is
+  // confirmed (e.g. a richer landing page). Loading / error states always use
+  // the default treatment regardless.
+  fallback?: (signin: () => void) => ReactNode
+}
+
+export const RequireAuth = ({ children, fallback }: RequireAuthProps) => {
   const auth = useAuth()
   const t = useT()
   const location = useLocation()
@@ -27,6 +35,7 @@ export const RequireAuth = ({ children }: { children: ReactNode }) => {
   }
 
   if (!auth.isAuthenticated) {
+    if (fallback !== undefined) return <>{fallback(signin)}</>
     return (
       <div className="flex flex-col items-start gap-4 p-6">
         <p>{t("auth.loginRequired")}</p>

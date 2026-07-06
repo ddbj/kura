@@ -6,7 +6,7 @@ import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
 import type { PendingUpload } from "~/lib/s3"
 import { abortPendingUpload, listPendingUploads, listUploadedParts, useS3 } from "~/lib/s3"
 import { useUploads } from "~/shell"
-import { Button, Callout, FilePickButton, Heading, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
+import { Button, Callout, Card, FilePickButton, Heading, Modal, ModalBody, ModalFooter, ModalHeader } from "~/ui"
 
 // Interrupted multipart uploads under the current prefix, discovered on the
 // server (they survive reloads). Resuming needs the file to be re-selected:
@@ -63,7 +63,13 @@ export const PendingUploads = ({ bucket, prefix }: { bucket: string; prefix: str
   if (uploads.length === 0) return null
 
   return (
-    <section aria-labelledby="pending-uploads-title" className="mb-4 rounded-lg border border-border-soft bg-surface-subtle p-4">
+    <Card
+      as="section"
+      aria-labelledby="pending-uploads-title"
+      tone="subtle"
+      padding="md"
+      className="mb-4"
+    >
       <Heading as="h2" size="h3" id="pending-uploads-title" className="mb-2">
         {t("pendingUploads.title")}
       </Heading>
@@ -147,6 +153,6 @@ export const PendingUploads = ({ bucket, prefix }: { bucket: string; prefix: str
           }
         />
       </Modal>
-    </section>
+    </Card>
   )
 }

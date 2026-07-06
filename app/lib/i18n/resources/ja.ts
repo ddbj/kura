@@ -11,6 +11,7 @@ export type Resources = {
   }
   upload: {
     button: string
+    dropHint: string
     done: string
     failed: string
     resume: string
@@ -27,9 +28,9 @@ export type Resources = {
     discardFailed: string
   }
   publish: {
-    button: string
     badge: string
     title: string
+    toggleAriaLabel: string
     loading: string
     publicUrlLabel: string
     makePublicIntro: string
@@ -39,8 +40,6 @@ export type Resources = {
     failed: string
   }
   presign: {
-    button: string
-    putButton: string
     getTitle: string
     putTitle: string
     expiresLabel: string
@@ -79,12 +78,12 @@ export type Resources = {
   }
   browse: {
     pageTitle: string
+    pageDescription: string
     root: string
     breadcrumbLabel: string
+    fileListLabel: string
     empty: string
-    name: string
-    size: string
-    lastModified: string
+    emptyTitle: string
     expiresAt: string
     download: string
     downloadFailed: string
@@ -94,6 +93,19 @@ export type Resources = {
     deleteConfirmTitle: string
     deleteConfirmBody: string
     deleteErrorTitle: string
+  }
+  landing: {
+    eyebrow: string
+    heroLead: string
+    useCasesTitle: string
+    uploadTitle: string
+    uploadBody: string
+    downloadTitle: string
+    downloadBody: string
+    publishTitle: string
+    publishBody: string
+    presignTitle: string
+    presignBody: string
   }
 }
 
@@ -108,6 +120,7 @@ export const ja: Resources = {
   },
   upload: {
     button: "アップロード",
+    dropHint: "ここにドロップしてアップロード",
     done: "アップロード完了",
     failed: "アップロードに失敗しました",
     resume: "再開",
@@ -124,9 +137,9 @@ export const ja: Resources = {
     discardFailed: "破棄に失敗しました",
   },
   publish: {
-    button: "公開",
     badge: "公開中",
     title: "公開設定",
+    toggleAriaLabel: "{{name}} の公開状態を切り替える",
     loading: "公開状態を確認中…",
     publicUrlLabel: "公開 URL",
     makePublicIntro: "{{name}} を公開します。次の URL で誰でも認証なしでダウンロードできるようになります。",
@@ -136,8 +149,6 @@ export const ja: Resources = {
     failed: "公開状態の変更に失敗しました",
   },
   presign: {
-    button: "共有",
-    putButton: "アップロード用 URL",
     getTitle: "共有 URL を発行",
     putTitle: "アップロード用 URL を発行",
     expiresLabel: "有効期間",
@@ -177,12 +188,12 @@ export const ja: Resources = {
   },
   browse: {
     pageTitle: "マイファイル",
+    pageDescription: "アップロードしたファイルの一覧です。ダウンロード・公開・共有 URL の発行をここから行います。ファイルはドラッグ&ドロップでも追加できます。",
     root: "ホーム",
     breadcrumbLabel: "現在のパス",
+    fileListLabel: "ファイル一覧",
     empty: "ファイルはまだありません。",
-    name: "名前",
-    size: "サイズ",
-    lastModified: "更新日時",
+    emptyTitle: "ファイルがありません",
     expiresAt: "有効期限",
     download: "ダウンロード",
     downloadFailed: "ダウンロード URL の発行に失敗しました",
@@ -192,5 +203,18 @@ export const ja: Resources = {
     deleteConfirmTitle: "ファイルを削除",
     deleteConfirmBody: "{{name}} を削除します。この操作は取り消せません。",
     deleteErrorTitle: "削除に失敗しました",
+  },
+  landing: {
+    eyebrow: "DDBJ / NIG",
+    heroLead: "大容量ファイルを、認証付きで安全にやり取りするための場所です。",
+    useCasesTitle: "できること",
+    uploadTitle: "アップロード",
+    uploadBody: "ログインすると、100 GB クラスのファイルもそのままアップロードできます。",
+    downloadTitle: "ダウンロード",
+    downloadBody: "アップロードしたファイルは一覧からいつでもダウンロードできます。",
+    publishTitle: "公開",
+    publishBody: "特定のファイルを、誰でも認証なしでダウンロードできる状態にできます。",
+    presignTitle: "共有 URL の発行",
+    presignBody: "期限付きの URL を発行し、短期間だけファイルを受け渡しできます。",
   },
 }

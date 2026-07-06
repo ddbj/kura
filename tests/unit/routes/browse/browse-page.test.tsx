@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react"
+import { fireEvent, screen, within } from "@testing-library/react"
 import { userEvent } from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { describe, expect, test, vi } from "vitest"
@@ -170,10 +170,10 @@ describe("BrowsePage", () => {
     })
     renderBrowse()
 
-    const pubRow = (await screen.findByRole("cell", { name: /pub\.txt/ })).closest("tr")!
-    await vi.waitFor(() => expect(within(pubRow).getByText("公開中")).toBeInTheDocument())
-    const privRow = screen.getByRole("cell", { name: "priv.txt" }).closest("tr")!
-    expect(within(privRow).queryByText("公開中")).not.toBeInTheDocument()
+    const pubCard = (await screen.findByText("pub.txt")).closest("li")!
+    await vi.waitFor(() => expect(within(pubCard).getByText("公開中")).toBeInTheDocument())
+    const privCard = screen.getByText("priv.txt").closest("li")!
+    expect(within(privCard).queryByText("公開中")).not.toBeInTheDocument()
   })
 
   test("BrowsePage_publishFlow_showsUrlAndUpdatesBadge", async () => {
@@ -187,15 +187,17 @@ describe("BrowsePage", () => {
     }))
     renderBrowse()
 
-    await user.click(await screen.findByRole("button", { name: "公開" }))
-    const dialog = await screen.findByRole("dialog")
     const url = `${testConfig.publicBase}/${BUCKET}/doc.txt`
-    expect(within(dialog).getByText(url)).toBeInTheDocument()
+    expect(await screen.findByText(url)).toBeInTheDocument()
 
-    await user.click(within(dialog).getByRole("button", { name: "公開する" }))
-    expect(await within(dialog).findByRole("textbox", { name: "公開 URL" })).toHaveValue(url)
+    const toggle = await screen.findByRole("switch", { name: /doc\.txt/ })
+    await vi.waitFor(() => expect(toggle).toBeEnabled())
+    await user.click(toggle)
+
+    expect(await screen.findByRole("textbox", { name: "公開 URL" })).toHaveValue(url)
     expect(taggingPuts[0]).toContain("<Key>kura-public</Key>")
     expect(await screen.findByText("公開中")).toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-checked", "true")
   })
 
   test("BrowsePage_unpublishFlow_removesBadge", async () => {
@@ -213,13 +215,14 @@ describe("BrowsePage", () => {
     renderBrowse()
     expect(await screen.findByText("公開中")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "公開" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.click(within(dialog).getByRole("button", { name: "公開停止" }))
+    const toggle = await screen.findByRole("switch", { name: /pub\.txt/ })
+    await vi.waitFor(() => expect(toggle).toBeEnabled())
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    await user.click(toggle)
 
     await vi.waitFor(() => expect(taggingDeletes).toEqual(["pub.txt"]))
     await vi.waitFor(() => expect(screen.queryByText("公開中")).not.toBeInTheDocument())
-    expect(within(dialog).getByRole("button", { name: "公開する" })).toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
   test("BrowsePage_shareFlow_issuesPresignedGetUrl", async () => {
@@ -227,19 +230,17 @@ describe("BrowsePage", () => {
     stubBucket({ objects: [{ key: "data.bin", size: 10, lastModified: "2026-07-01T10:00:00.000Z" }] })
     renderBrowse()
 
-    await user.click(await screen.findByRole("button", { name: "共有" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.click(within(dialog).getByRole("button", { name: "発行" }))
+    const fileCard = (await screen.findByText("data.bin")).closest("li")!
+    await user.click(within(fileCard).getByRole("button", { name: "発行" }))
 
-    const field = await within(dialog).findByRole("textbox", { name: "presigned URL" })
+    const field = await within(fileCard).findByRole("textbox", { name: "presigned URL" })
     const url = new URL((field as HTMLInputElement).value)
     expect(url.origin).toBe(ENDPOINT)
     expect(url.pathname).toBe(`/${BUCKET}/data.bin`)
     expect(url.searchParams.get("X-Amz-Expires")).toBe("900")
     expect(url.searchParams.get("X-Amz-Security-Token")).toBeTruthy()
     expect(url.searchParams.get("X-Amz-Signature")).toBeTruthy()
-    expect(within(dialog).getByText(/頃まで有効/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/実効上限は約 1 時間/)).toBeInTheDocument()
+    expect(within(fileCard).getByText(/頃まで有効/)).toBeInTheDocument()
   })
 
   test("BrowsePage_uploadUrlFlow_issuesPresignedPutUrl", async () => {
@@ -247,33 +248,32 @@ describe("BrowsePage", () => {
     stubBucket({ prefix: "docs/" })
     renderBrowse("docs/")
 
-    await user.click(await screen.findByRole("button", { name: "アップロード用 URL" }))
-    const dialog = await screen.findByRole("dialog")
-    await user.type(within(dialog).getByRole("textbox", { name: "ファイル名" }), "incoming.bin")
-    await user.click(within(dialog).getByRole("button", { name: "発行" }))
+    const panel = await screen.findByRole("region", { name: "アップロード用 URL を発行" })
+    await user.type(within(panel).getByRole("textbox", { name: "ファイル名" }), "incoming.bin")
+    await user.click(within(panel).getByRole("button", { name: "発行" }))
 
-    const field = await within(dialog).findByRole("textbox", { name: "presigned URL" })
+    const field = await within(panel).findByRole("textbox", { name: "presigned URL" })
     const url = new URL((field as HTMLInputElement).value)
     expect(url.pathname).toBe(`/${BUCKET}/docs/incoming.bin`)
     expect(url.searchParams.get("X-Amz-Signature")).toBeTruthy()
-    expect(within(dialog).getByText(/curl -T/)).toBeInTheDocument()
+    expect(within(panel).getByText(/curl -T/)).toBeInTheDocument()
   })
 
-  test("BrowsePage_ttlEnabled_showsExpiryColumn", async () => {
+  test("BrowsePage_ttlEnabled_showsExpiry", async () => {
     stubBucket({ objects: [{ key: "a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }] })
     renderBrowse("", { ...testConfig, fileTtlDays: 30 })
 
-    expect(await screen.findByRole("columnheader", { name: "有効期限" })).toBeInTheDocument()
+    expect(await screen.findByText(/有効期限/)).toBeInTheDocument()
     // 2026-07-01T10:00Z + 30 日 (JST 表示)
     expect(screen.getByText(/2026\/07\/31/)).toBeInTheDocument()
   })
 
-  test("BrowsePage_ttlDisabled_hidesExpiryColumn", async () => {
+  test("BrowsePage_ttlDisabled_hidesExpiry", async () => {
     stubBucket({ objects: [{ key: "a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }] })
     renderBrowse()
 
-    await screen.findByRole("cell", { name: "a.txt" })
-    expect(screen.queryByRole("columnheader", { name: "有効期限" })).not.toBeInTheDocument()
+    await screen.findByText("a.txt")
+    expect(screen.queryByText(/有効期限/)).not.toBeInTheDocument()
   })
 
   test("BrowsePage_upload_putsObjectAndRefreshesList", async () => {
@@ -303,7 +303,48 @@ describe("BrowsePage", () => {
     // Upload completes, the toast flips to success, and the invalidated list
     // shows the new object.
     expect(await screen.findByText("アップロード完了")).toBeInTheDocument()
-    expect(await screen.findByRole("cell", { name: "new.txt" })).toBeInTheDocument()
+    const list = await screen.findByRole("list", { name: "ファイル一覧" })
+    expect(await within(list).findByText("new.txt")).toBeInTheDocument()
+  })
+
+  test("BrowsePage_dragAndDrop_showsHintThenUploads", async () => {
+    let uploaded = false
+    server.use(
+      http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 200 })),
+      http.get(`${ENDPOINT}/${BUCKET}`, () =>
+        HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "",
+          objects: uploaded ? [{ key: "dropped.txt", size: 1, lastModified: "2026-07-02T10:00:00.000Z" }] : [],
+          commonPrefixes: [],
+        }))),
+      http.put(`${ENDPOINT}/${BUCKET}/dropped.txt`, () => {
+        uploaded = true
+        return new HttpResponse(null, { status: 200, headers: { ETag: "\"etag\"" } })
+      }),
+    )
+    renderBrowse()
+    const dropTarget = await screen.findByText("ファイルはまだありません。")
+    const dataTransfer = { files: [new File(["x"], "dropped.txt", { type: "text/plain" })], types: ["Files"] }
+
+    fireEvent.dragEnter(dropTarget, { dataTransfer })
+    expect(await screen.findByText("ここにドロップしてアップロード")).toBeInTheDocument()
+
+    fireEvent.drop(dropTarget, { dataTransfer })
+    expect(screen.queryByText("ここにドロップしてアップロード")).not.toBeInTheDocument()
+
+    expect(await screen.findByText("アップロード完了")).toBeInTheDocument()
+    const list = await screen.findByRole("list", { name: "ファイル一覧" })
+    expect(await within(list).findByText("dropped.txt")).toBeInTheDocument()
+  })
+
+  test("BrowsePage_dragWithoutFiles_doesNotShowHint", async () => {
+    stubBucket()
+    renderBrowse()
+    const dropTarget = await screen.findByText("ファイルはまだありません。")
+
+    fireEvent.dragEnter(dropTarget, { dataTransfer: { files: [], types: ["text/plain"] } })
+    expect(screen.queryByText("ここにドロップしてアップロード")).not.toBeInTheDocument()
   })
 
   test("BrowsePage_unsupportedUsername_showsGuidanceWithoutTouchingS3", async () => {

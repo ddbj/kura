@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { readFileSync } from "node:fs"
 
 import { expect, test } from "@playwright/test"
@@ -33,19 +34,18 @@ test("publishing gives the public URL a 200; unpublishing a 404", async ({ page 
   const before = await page.request.get(publicUrl)
   expect(before.status()).toBe(404)
 
-  await row.getByRole("button", { name: "公開" }).click()
-  await page.getByRole("dialog").getByRole("button", { name: "公開する" }).click()
-  await expect(page.getByRole("dialog").getByRole("button", { name: "公開停止" })).toBeVisible()
+  const toggle = row.getByRole("switch")
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
   const published = await page.request.get(publicUrl)
   expect(published.status()).toBe(200)
   expect(await published.text()).toBe(content)
 
-  await page.getByRole("dialog").getByRole("button", { name: "公開停止" }).click()
-  await expect(page.getByRole("dialog").getByRole("button", { name: "公開する" })).toBeVisible()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "false")
   const after = await page.request.get(publicUrl)
   expect(after.status()).toBe(404)
 
-  await page.keyboard.press("Escape")
   await deleteFile(page, row)
 })
 
@@ -56,14 +56,40 @@ test("filenames with spaces, percent, and unicode survive upload and public deli
   const content = `encoded e2e ${name}`
   const row = await uploadTextFile(page, name, content)
 
-  await row.getByRole("button", { name: "公開" }).click()
-  await page.getByRole("dialog").getByRole("button", { name: "公開する" }).click()
-  await expect(page.getByRole("dialog").getByRole("button", { name: "公開停止" })).toBeVisible()
+  const toggle = row.getByRole("switch")
+  await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
   const published = await page.request.get(`/${e2eUsername()}/${encodeURIComponent(name)}`)
   expect(published.status()).toBe(200)
   expect(await published.text()).toBe(content)
 
-  await page.keyboard.press("Escape")
+  await deleteFile(page, row)
+})
+
+test("dragging a file onto the page uploads it", async ({ page }) => {
+  await login(page)
+  const name = uniqueName("dragdrop")
+  const content = `drag and drop e2e ${name}`
+
+  const dataTransfer = await page.evaluateHandle(
+    ({ name, content }) => {
+      const dt = new DataTransfer()
+      dt.items.add(new File([content], name, { type: "text/plain" }))
+      return dt
+    },
+    { name, content },
+  )
+  // Dispatch on a descendant of the drop area (breadcrumb text), not an
+  // ancestor: native events bubble up, not down, into it.
+  const dropTarget = page.getByText("ホーム")
+  await dropTarget.dispatchEvent("dragenter", { dataTransfer })
+  await expect(page.getByText("ここにドロップしてアップロード")).toBeVisible()
+  await dropTarget.dispatchEvent("drop", { dataTransfer })
+
+  await expect(page.getByText("アップロード完了")).toBeVisible({ timeout: 30_000 })
+  const row = page.getByRole("listitem").filter({ hasText: name })
+  await expect(row).toBeVisible()
+
   await deleteFile(page, row)
 })
 
@@ -73,15 +99,13 @@ test("a presigned GET serves the file to anyone holding the URL", async ({ page 
   const content = `presign e2e ${name}`
   const row = await uploadTextFile(page, name, content)
 
-  await row.getByRole("button", { name: "共有" }).click()
-  await page.getByRole("dialog").getByRole("button", { name: "発行" }).click()
-  const url = await page.getByLabel("presigned URL").inputValue()
+  await row.getByRole("button", { name: "発行" }).click()
+  const url = await row.getByLabel("presigned URL").inputValue()
   expect(url).toContain("X-Amz-Signature=")
 
   const res = await page.request.get(url)
   expect(res.status()).toBe(200)
   expect(await res.text()).toBe(content)
 
-  await page.keyboard.press("Escape")
   await deleteFile(page, row)
 })

@@ -35,7 +35,7 @@ export const uploadTextFile = async (page: Page, name: string, content: string):
     buffer: Buffer.from(content),
   })
   await expect(page.getByText("アップロード完了")).toBeVisible({ timeout: 60_000 })
-  const row = page.getByRole("row", { name: new RegExp(name) })
+  const row = page.getByRole("listitem").filter({ hasText: name })
   await expect(row).toBeVisible()
 
   return row
