@@ -1,39 +1,35 @@
 import type { ReactNode } from "react"
 
 import { cn } from "./cn"
+import { Icon } from "./icon"
 
-type CalloutTone = "info" | "warn" | "ok"
+type Tone = "info" | "warn" | "ok" | "red"
 
-type CalloutProps = {
+type Props = {
+  tone: Tone
   children: ReactNode
-  tone?: CalloutTone
-  role?: "status" | "alert"
-  // Rendered flush-right inside the callout (e.g. a retry button). Keeps the
-  // action visually tied to the message rather than floating elsewhere.
-  action?: ReactNode
+  className?: string
+  role?: "alert" | "status"
 }
 
-const toneClass: Record<CalloutTone, string> = {
-  info: "bg-surface-subtle border-border-soft text-ink-mid",
-  warn: "bg-warn-bg border-warn-border text-warn-fg",
-  ok: "bg-ok-bg border-ok-border text-ok-fg",
+const iconFor: Record<Tone, "globe" | "clock" | "trash" | "up"> = {
+  info: "globe",
+  warn: "clock",
+  ok: "globe",
+  red: "trash",
 }
 
-export const Callout = ({ children, tone = "info", role, action }: CalloutProps) => (
-  <div
-    role={role}
-    className={cn(
-      "px-3.5 py-2.5 border rounded-card text-fs-body-sm leading-relaxed",
-      toneClass[tone],
-    )}
-  >
-    {action !== undefined
-      ? (
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">{children}</div>
-          <div className="shrink-0">{action}</div>
-        </div>
-      )
-      : children}
+const cls: Record<Tone, string> = {
+  info: "banner info",
+  warn: "banner ochre",
+  ok: "banner ok",
+  red: "banner red",
+}
+
+// Full-width inline notice — same styling as handoff banners.
+export const Callout = ({ tone, children, className, role }: Props) => (
+  <div className={cn(cls[tone], className)} role={role}>
+    <Icon name={iconFor[tone]} size={15} />
+    <div>{children}</div>
   </div>
 )

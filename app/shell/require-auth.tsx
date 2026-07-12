@@ -8,8 +8,8 @@ import { Button, Callout } from "~/ui"
 type RequireAuthProps = {
   children: ReactNode
   // Rendered instead of the plain login prompt once signed-out state is
-  // confirmed (e.g. a richer landing page). Loading / error states always use
-  // the default treatment regardless.
+  // confirmed (e.g. the LoginBox landing page). Loading / error states
+  // always use the default treatment regardless.
   fallback?: (signin: () => void) => ReactNode
 }
 
@@ -20,13 +20,13 @@ export const RequireAuth = ({ children, fallback }: RequireAuthProps) => {
   const signin = () => void auth.signinRedirect({ state: location.pathname + location.search })
 
   if (auth.isLoading) {
-    return <p className="p-6 text-ink-soft">{t("common.loading")}</p>
+    return <p className="plain-text">{t("common.loading")}</p>
   }
 
   if (auth.error) {
     return (
-      <div className="flex flex-col items-start gap-4 p-6">
-        <Callout tone="warn" role="alert">
+      <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 14, alignItems: "flex-start" }}>
+        <Callout tone="red" role="alert">
           {t("auth.errorTitle")}: {auth.error.message}
         </Callout>
         <Button onClick={signin}>{t("common.retry")}</Button>
@@ -36,10 +36,11 @@ export const RequireAuth = ({ children, fallback }: RequireAuthProps) => {
 
   if (!auth.isAuthenticated) {
     if (fallback !== undefined) return <>{fallback(signin)}</>
+
     return (
-      <div className="flex flex-col items-start gap-4 p-6">
+      <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 14, alignItems: "flex-start" }}>
         <p>{t("auth.loginRequired")}</p>
-        <Button onClick={signin}>{t("shell.login")}</Button>
+        <Button kind="pri" onClick={signin}>{t("shell.login")}</Button>
       </div>
     )
   }

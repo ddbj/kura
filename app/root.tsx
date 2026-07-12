@@ -1,4 +1,12 @@
+import "@fontsource/public-sans/400.css"
+import "@fontsource/public-sans/500.css"
+import "@fontsource/public-sans/600.css"
+import "@fontsource/public-sans/700.css"
+import "@fontsource/public-sans/800.css"
 import "@fontsource-variable/noto-sans-jp"
+import "@fontsource/ibm-plex-mono/400.css"
+import "@fontsource/ibm-plex-mono/500.css"
+import "@fontsource/ibm-plex-mono/600.css"
 import "./styles/tailwind.css"
 
 import { QueryClientProvider } from "@tanstack/react-query"
@@ -37,7 +45,7 @@ export const Layout = ({ children }: { children: ReactNode }) => (
 
 // Rendered into the prebuilt index.html shell until the clientLoader resolves;
 // it shows before i18n exists, so the text is intentionally untranslated.
-export const HydrateFallback = () => <p className="p-md text-ink-soft">Loading…</p>
+export const HydrateFallback = () => <p className="plain-text">Loading…</p>
 
 export const ErrorBoundary = () => {
   const error = useRouteError()
@@ -46,11 +54,13 @@ export const ErrorBoundary = () => {
     : error instanceof Error
       ? error.message
       : "Unknown error"
-  return <p className="p-md">{message}</p>
+
+  return <p className="plain-text">{message}</p>
 }
 
 const App = ({ loaderData }: Route.ComponentProps) => {
   const [queryClient] = useState(createQueryClient)
+
   return (
     <ConfigProvider value={loaderData}>
       <AuthProvider {...oidcProviderProps(loaderData)}>

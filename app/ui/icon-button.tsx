@@ -1,36 +1,23 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react"
+import type { ButtonHTMLAttributes } from "react"
 
 import { cn } from "./cn"
+import type { IconName } from "./icon"
+import { Icon } from "./icon"
 
-type IconButtonProps = Omit<
-  ButtonHTMLAttributes<HTMLButtonElement>,
-  "className" | "aria-label"
-> & {
+type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type" | "children"> & {
+  icon: IconName
   ariaLabel: string
-  children: ReactNode
+  active?: boolean
   size?: number
 }
 
-export const IconButton = ({
-  ariaLabel,
-  children,
-  disabled,
-  type = "button",
-  size = 26,
-  ...rest
-}: IconButtonProps) => (
+export const IconButton = ({ icon, ariaLabel, active, size = 16, className, ...rest }: Props) => (
   <button
-    {...rest}
-    type={type}
+    type="button"
     aria-label={ariaLabel}
-    disabled={disabled || undefined}
-    aria-disabled={disabled || undefined}
-    className={cn(
-      "p-0 bg-transparent border-0 text-ink-mid cursor-pointer rounded-button inline-flex items-center justify-center",
-      disabled && "cursor-not-allowed opacity-55",
-    )}
-    style={{ width: size, height: size }}
+    className={cn("iconbtn", { on: active === true }, className)}
+    {...rest}
   >
-    {children}
+    <Icon name={icon} size={size} />
   </button>
 )

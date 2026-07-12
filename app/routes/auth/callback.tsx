@@ -12,7 +12,7 @@ const AuthCallback = () => {
 
   if (auth.error) {
     return (
-      <div className="flex flex-col items-start gap-4 p-6">
+      <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 14, alignItems: "flex-start" }}>
         <p role="alert">
           {t("auth.errorTitle")}: {auth.error.message}
         </p>
@@ -25,10 +25,11 @@ const AuthCallback = () => {
     const state = auth.user?.state
     // Same-origin paths only ("//host" would be protocol-relative).
     const returnTo = typeof state === "string" && state.startsWith("/") && !state.startsWith("//") ? state : "/"
+
     return <Navigate to={returnTo} replace />
   }
 
-  return <p className="p-6 text-ink-soft">{t("auth.processingCallback")}</p>
+  return <p className="plain-text">{t("auth.processingCallback")}</p>
 }
 
 export default AuthCallback

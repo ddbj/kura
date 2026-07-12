@@ -6,6 +6,7 @@ export { abortPendingUpload, listPendingUploads, listUploadedParts, type Pending
 export { deleteObject, type DirectoryPage, ensureOwnBucket, type FileEntry, listDirectory, presignDownloadUrl } from "./objects"
 export { type PresignedShare, type PresignMethod, presignShareUrl } from "./presign"
 export { publicUrl } from "./public-url"
+export { DEFAULT_QUOTA_BYTES, listBucketTotalBytes } from "./quota"
 export { planResume, type PlanResumeResult, type ResumePlan, resumeUpload } from "./resume"
 export { assumeRoleWithToken, type StsCredentials, USER_ROLE_ARN } from "./sts"
 export {
