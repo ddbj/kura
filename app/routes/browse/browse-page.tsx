@@ -1,6 +1,5 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { DragEvent } from "react"
+import type { DragEvent, MouseEvent as ReactMouseEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "react-oidc-context"
 import { Link, useNavigate } from "react-router"
@@ -44,8 +43,15 @@ import {
   Tag,
 } from "~/ui"
 
+import { CopyModal } from "./copy-modal"
 import { DeleteModal } from "./delete-modal"
+import { FolderDeleteModal } from "./folder-delete-modal"
+import { FolderMoveModal } from "./folder-move-modal"
+import { FolderRenameModal } from "./folder-rename-modal"
 import { LoginBox } from "./login"
+import { MoveModal } from "./move-modal"
+import { NewFolderModal } from "./new-folder-modal"
+import { RenameModal } from "./rename-modal"
 import { ShareModal } from "./share-modal"
 import { UnsupportedUsername } from "./unsupported-username"
 import { UploadCard } from "./upload-card"
@@ -168,13 +174,23 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
   >(null)
   const [deleteTargets, setDeleteTargets] = useState<{ bucket: string; key: string; name: string; size: number; isPublic?: boolean }[] | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [newFolderOpen, setNewFolderOpen] = useState(false)
+  const [expandedRows, setExpandedRows] = useState<ReadonlySet<string>>(new Set())
+  const [openFolderMenu, setOpenFolderMenu] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [moveTarget, setMoveTarget] = useState<string | null>(null)
+  const [copyTarget, setCopyTarget] = useState<string | null>(null)
+  const [folderDeleteTarget, setFolderDeleteTarget] = useState<{ prefix: string; name: string } | null>(null)
+  const [folderRenameTarget, setFolderRenameTarget] = useState<{ prefix: string; name: string } | null>(null)
+  const [folderMoveTarget, setFolderMoveTarget] = useState<{ prefix: string; name: string } | null>(null)
 
-  // Row-menu / user-menu close on outside click
+  // Row-menu / folder-menu / user-menu close on outside click
   useEffect(() => {
-    if (openRowMenu === null && !uploadMenuOpen) return
+    if (openRowMenu === null && !uploadMenuOpen && openFolderMenu === null) return
     const onClick = () => {
       setOpenRowMenu(null)
       setUploadMenuOpen(false)
+      setOpenFolderMenu(null)
     }
     // Delay so the click that opened doesn't close instantly.
     const t = setTimeout(() => document.addEventListener("click", onClick), 0)
@@ -183,7 +199,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
       clearTimeout(t)
       document.removeEventListener("click", onClick)
     }
-  }, [openRowMenu, uploadMenuOpen])
+  }, [openRowMenu, uploadMenuOpen, openFolderMenu])
 
   const used = usage.data ?? 0
   const total = DEFAULT_QUOTA_BYTES
@@ -235,6 +251,26 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
 
       return next
     })
+  }
+
+  const toggleExpanded = (key: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+
+      return next
+    })
+  }
+
+  // Row click toggles the pubpanel / presignpanel, but never when the user
+  // clicked into an interactive descendant (checkbox, action button, kebab,
+  // filename link). closest() walks up from the click target and returns null
+  // on a non-interactive area — that's the toggle zone.
+  const onRowActivate = (event: ReactMouseEvent<HTMLDivElement>, key: string) => {
+    const target = event.target as HTMLElement
+    if (target.closest("button, a, input") !== null) return
+    toggleExpanded(key)
   }
 
   const download = async (key: string) => {
@@ -315,14 +351,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
     if (event.currentTarget === event.target) setIsDragging(false)
   }
 
-  const createFolder = async () => {
-    const name = window.prompt("新しいフォルダの名前")
-    if (name === null || name.trim() === "") return
-    // Spec-defined placeholder — architecture.md § 配置 (rewrite-plan.md footnote).
-    const key = `${prefix}${name.trim()}/.keep`
-    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: new Uint8Array(0) }))
-    await queryClient.invalidateQueries({ queryKey: ["objects", bucket, prefix] })
-  }
+  const existingFolderNames = useMemo(() => dirs.map((d) => dirName(d)), [dirs])
 
   // Breadcrumb pieces
   const segments = prefixToSegments(prefix)
@@ -369,7 +398,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
           })}
         </div>
         <div className="actions">
-          <Button size="sm" onClick={() => void createFolder()}>＋ 新規フォルダ</Button>
+          <Button size="sm" onClick={() => setNewFolderOpen(true)}>＋ 新規フォルダ</Button>
           <div style={{ position: "relative" }}>
             <Button
               kind="pri"
@@ -449,7 +478,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
               <b>{selection.size}件を選択中</b>
               <Button kind="ghost" size="sm" onClick={clearSelection}>選択解除</Button>
               <span style={{ marginLeft: "auto" }} />
-              <Button kind="po" size="sm" onClick={() => openShare([...selection])}>共有</Button>
+              <Button kind="po" size="sm" onClick={() => openShare([...selection])}>公開する</Button>
               <Button kind="do" size="sm" onClick={() => openDelete([...selection])}>削除</Button>
             </div>
           )}
@@ -528,6 +557,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                 {dirs.filter((d) => search === "" || dirName(d).toLowerCase().includes(search.toLowerCase())).map((dirPrefix) => {
                   const name = dirName(dirPrefix)
                   const href = `/_browse/${segments.join("/")}${segments.length === 0 ? "" : "/"}${name}/`
+                  const isFolderMenuOpen = openFolderMenu === dirPrefix
 
                   return (
                     <div className="row sel" key={dirPrefix}>
@@ -546,7 +576,32 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                       <div className="c-pub" />
                       <div className="c-size">—</div>
                       <div className="c-date">—</div>
-                      <div className="c-act" />
+                      <div className="c-act">
+                        <IconButton
+                          icon="more"
+                          ariaLabel={`${name} の操作`}
+                          active={isFolderMenuOpen}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setOpenFolderMenu(isFolderMenuOpen ? null : dirPrefix)
+                          }}
+                        />
+                        {isFolderMenuOpen ? (
+                          <div className="rowmenu" role="menu" onClick={(event) => event.stopPropagation()}>
+                            <MenuItem onClick={() => { setOpenFolderMenu(null); setFolderRenameTarget({ prefix: dirPrefix, name }) }}>
+                              名前を変更
+                            </MenuItem>
+                            <MenuItem onClick={() => { setOpenFolderMenu(null); setFolderMoveTarget({ prefix: dirPrefix, name }) }}>
+                              移動
+                            </MenuItem>
+                            <div className="sepline" />
+                            <MenuItem danger onClick={() => { setOpenFolderMenu(null); setFolderDeleteTarget({ prefix: dirPrefix, name }) }}>
+                              <Icon name="trash" size={15} />
+                              削除
+                            </MenuItem>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   )
                 })}
@@ -559,15 +614,23 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                   const presigned = presignedByKey.get(key)
                   const isSelected = selection.has(key)
                   const isMenuOpen = openRowMenu === key
+                  const canExpand = isPub || presigned !== undefined
+                  const isExpanded = canExpand && expandedRows.has(key)
                   const rowClass = cn("row sel", {
                     selected: isSelected,
-                    public: isPub && !isSelected,
-                    presigned: !isPub && presigned !== undefined && !isSelected,
+                    public: isPub && !isSelected && isExpanded,
+                    presigned: !isPub && presigned !== undefined && !isSelected && isExpanded,
+                    expandable: canExpand,
+                    expanded: isExpanded,
                   })
 
                   return (
                     <div key={key}>
-                      <div className={rowClass}>
+                      <div
+                        className={rowClass}
+                        onClick={canExpand ? (event) => onRowActivate(event, key) : undefined}
+                        aria-expanded={canExpand ? isExpanded : undefined}
+                      >
                         <div className="c-sel">
                           <Checkbox checked={isSelected} onChange={() => toggleSelection(key)} ariaLabel={`${name} を選択`} />
                         </div>
@@ -607,9 +670,15 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                                 <Icon name="dl" size={15} />
                                 ダウンロード
                               </MenuItem>
-                              <MenuItem onClick={() => { setOpenRowMenu(null); openShare([key], "temp") }}>
-                                <Icon name="clock" size={15} />
-                                期限つきリンクを発行
+                              <div className="sepline" />
+                              <MenuItem onClick={() => { setOpenRowMenu(null); setRenameTarget(key) }}>
+                                名前を変更
+                              </MenuItem>
+                              <MenuItem onClick={() => { setOpenRowMenu(null); setMoveTarget(key) }}>
+                                移動
+                              </MenuItem>
+                              <MenuItem onClick={() => { setOpenRowMenu(null); setCopyTarget(key) }}>
+                                コピー
                               </MenuItem>
                               <div className="sepline" />
                               <MenuItem danger onClick={() => { setOpenRowMenu(null); openDelete([key]) }}>
@@ -620,7 +689,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                           ) : null}
                         </div>
                       </div>
-                      {isPub ? (
+                      {isPub && isExpanded ? (
                         <div className="pubpanel">
                           <div className="pp-top">
                             <span className="lbl">公開URL — 認証なしで誰でもダウンロードできます</span>
@@ -628,7 +697,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                           <LinkBar url={publicUrl(config.publicBase, bucket, key)} tone="ok" copyLabel="コピー" copiedLabel="コピー済み" />
                         </div>
                       ) : null}
-                      {presigned !== undefined && !isPub ? (
+                      {presigned !== undefined && !isPub && isExpanded ? (
                         <div className="presignpanel">
                           <div className="pp-top">
                             <span className="lbl" style={{ color: "var(--warnFg)" }}>
@@ -675,16 +744,117 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
         open={deleteTargets !== null}
         onClose={() => setDeleteTargets(null)}
         targets={deleteTargets ?? []}
-        onDeleted={async (keys) => {
-          setSelection((prev) => {
-            const next = new Set(prev)
-            for (const k of keys) next.delete(k)
+        onConfirm={() => {
+          const targets = deleteTargets
+          if (targets === null) return
+          void transfersApi
+            .enqueueDelete(bucket, targets.map((x) => ({ key: x.key, size: x.size })))
+            .then((res) => {
+              setSelection((prev) => {
+                const next = new Set(prev)
+                for (const k of res.ok) next.delete(k)
 
-            return next
-          })
-          await queryClient.invalidateQueries({ queryKey: ["objects", bucket, prefix] })
-          await queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+                return next
+              })
+            })
         }}
+      />
+
+      {renameTarget !== null ? (
+        <RenameModal
+          open
+          onClose={() => setRenameTarget(null)}
+          bucket={bucket}
+          srcKey={renameTarget}
+          siblingNames={files.map((f) => entryName(f.key)).filter((n) => n !== entryName(renameTarget))}
+          onConfirm={(destKey) => {
+            const src = renameTarget
+            if (src === null) return
+            void transfersApi.enqueueRename(bucket, src, destKey).catch(() => undefined)
+          }}
+        />
+      ) : null}
+
+      {moveTarget !== null ? (
+        <MoveModal
+          open
+          onClose={() => setMoveTarget(null)}
+          bucket={bucket}
+          srcKey={moveTarget}
+          onConfirm={(destKey) => {
+            const src = moveTarget
+            if (src === null) return
+            void transfersApi.enqueueMove(bucket, src, destKey).catch(() => undefined)
+          }}
+        />
+      ) : null}
+
+      {copyTarget !== null ? (
+        <CopyModal
+          open
+          onClose={() => setCopyTarget(null)}
+          bucket={bucket}
+          srcKey={copyTarget}
+          siblingNames={files.map((f) => entryName(f.key))}
+          onConfirm={(destKey) => {
+            const src = copyTarget
+            if (src === null) return
+            void transfersApi.enqueueCopy(bucket, src, destKey).catch(() => undefined)
+          }}
+        />
+      ) : null}
+
+      {folderDeleteTarget !== null ? (
+        <FolderDeleteModal
+          open
+          onClose={() => setFolderDeleteTarget(null)}
+          folderName={folderDeleteTarget.name}
+          onConfirm={() => {
+            const target = folderDeleteTarget
+            if (target === null) return
+            void transfersApi.enqueueFolderDelete(bucket, target.prefix)
+          }}
+        />
+      ) : null}
+
+      {folderRenameTarget !== null ? (
+        <FolderRenameModal
+          open
+          onClose={() => setFolderRenameTarget(null)}
+          currentName={folderRenameTarget.name}
+          siblingNames={dirs.map((d) => dirName(d)).filter((n) => n !== folderRenameTarget.name)}
+          onConfirm={(newName) => {
+            const target = folderRenameTarget
+            if (target === null) return
+            const parentPrefixOfTarget = target.prefix.slice(0, target.prefix.length - target.name.length - 1)
+            const dest = `${parentPrefixOfTarget}${newName}/`
+            void transfersApi.enqueueFolderMove(bucket, target.prefix, dest, "folder-rename")
+          }}
+        />
+      ) : null}
+
+      {folderMoveTarget !== null ? (
+        <FolderMoveModal
+          open
+          onClose={() => setFolderMoveTarget(null)}
+          bucket={bucket}
+          srcPrefix={folderMoveTarget.prefix}
+          onConfirm={(destParent) => {
+            const target = folderMoveTarget
+            if (target === null) return
+            const dest = `${destParent}${target.name}/`
+            void transfersApi.enqueueFolderMove(bucket, target.prefix, dest, "folder-move")
+          }}
+        />
+      ) : null}
+
+      <NewFolderModal
+        open={newFolderOpen}
+        onClose={() => setNewFolderOpen(false)}
+        bucket={bucket}
+        prefix={prefix}
+        existingNames={existingFolderNames}
+        onCreated={() => queryClient.invalidateQueries({ queryKey: ["objects", bucket, prefix] })}
       />
 
       {/* Reserve room below the card for row menus that overflow the card edge (design_handoff #1 uses height:190px). */}

@@ -1,7 +1,3 @@
-import { useState } from "react"
-
-import { deleteObject } from "~/lib/s3"
-import { useS3 } from "~/lib/s3/use-s3"
 import { Button, Icon, Modal } from "~/ui"
 
 type Target = {
@@ -16,7 +12,7 @@ type Props = {
   open: boolean
   onClose: () => void
   targets: Target[]
-  onDeleted: (keys: string[]) => void
+  onConfirm: () => void
 }
 
 const formatBytes = (n: number): string => {
@@ -30,28 +26,13 @@ const formatBytes = (n: number): string => {
   return `${g.toFixed(g < 10 ? 1 : 0)} GB`
 }
 
-// Design_handoff frame 9.
-export const DeleteModal = ({ open, onClose, targets, onDeleted }: Props) => {
-  const s3 = useS3()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | undefined>()
-
-  const onSubmit = async () => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      const done: string[] = []
-      for (const target of targets) {
-        await deleteObject(s3, target.bucket, target.key)
-        done.push(target.key)
-      }
-      onDeleted(done)
-      onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+// Delete is destructive — this modal only confirms intent. The actual delete
+// runs as a tray operation (enqueueDelete) so progress and partial-failure
+// state show up alongside uploads instead of inside the modal.
+export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
+  const submit = () => {
+    onConfirm()
+    onClose()
   }
 
   return (
@@ -77,12 +58,9 @@ export const DeleteModal = ({ open, onClose, targets, onDeleted }: Props) => {
         <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />
         <div>削除するとすぐに消え、元には戻せません。公開中のファイルは公開も止まります。</div>
       </div>
-      {error !== undefined ? <p className="err">{error}</p> : null}
       <div className="mfoot">
         <Button onClick={onClose}>キャンセル</Button>
-        <Button kind="dangerbox" disabled={busy} onClick={() => void onSubmit()}>
-          {busy ? "削除中…" : "削除"}
-        </Button>
+        <Button kind="dangerbox" onClick={submit}>削除</Button>
       </div>
     </Modal>
   )

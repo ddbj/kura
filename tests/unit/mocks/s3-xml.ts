@@ -56,6 +56,23 @@ export const getObjectTaggingXml = (tags: { key: string; value: string }[]): str
 export const s3ErrorXml = (code: string, message: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <Error><Code>${escapeXml(code)}</Code><Message>${escapeXml(message)}</Message></Error>`
 
+export const copyObjectXml = (etag: string, lastModified: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+<CopyObjectResult>
+  <ETag>&quot;${escapeXml(etag)}&quot;</ETag>
+  <LastModified>${lastModified}</LastModified>
+</CopyObjectResult>`
+
+type DeleteResultInput = {
+  deleted: string[]
+  errors?: { key: string; code: string; message: string }[]
+}
+
+export const deleteObjectsXml = ({ deleted, errors }: DeleteResultInput): string => `<?xml version="1.0" encoding="UTF-8"?>
+<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  ${deleted.map((k) => `<Deleted><Key>${escapeXml(k)}</Key></Deleted>`).join("\n  ")}
+  ${(errors ?? []).map((e) => `<Error><Key>${escapeXml(e.key)}</Key><Code>${escapeXml(e.code)}</Code><Message>${escapeXml(e.message)}</Message></Error>`).join("\n  ")}
+</DeleteResult>`
+
 type ListedUpload = {
   key: string
   uploadId: string

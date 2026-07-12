@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
 import type { RunningUpload, UploadProgress } from "~/lib/s3"
-import { ResumeMismatchError, resumeUpload, startUpload } from "~/lib/s3"
+import { copyObject, deleteObjects, listAllUnderPrefix, renameObject, ResumeMismatchError, resumeUpload, startUpload } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
 
 export type TransferState =
@@ -16,20 +16,39 @@ export type TransferState =
   | "failed"
   | "done"
 
+export type OperationKind =
+  | "upload"
+  | "delete"
+  | "rename"
+  | "move"
+  | "copy"
+  | "folder-delete"
+  | "folder-rename"
+  | "folder-move"
+
 export type Transfer = {
   id: string
+  kind: OperationKind
   bucket: string
+  // upload: destination key; delete (bulk): representative key; rename/move/copy: source key.
   key: string
   name: string
+  // upload: file bytes. Other kinds: 0 (progress is item-based).
   size: number
   state: TransferState
+  // upload: loaded bytes. Other kinds: items completed.
   loaded: number
+  // upload: total bytes. Other kinds: items total.
   total: number
   speedBps?: number | undefined
   error?: string | undefined
   isFolder?: boolean | undefined
   fileCount?: number | undefined
+  destKey?: string | undefined
 }
+
+export type DeleteTarget = { key: string; size: number }
+export type BatchOutcome<T> = { ok: T[]; failed: { key: string; message: string }[] }
 
 type TransfersApi = {
   transfers: readonly Transfer[]
@@ -46,6 +65,16 @@ type TransfersApi = {
   // there is no in-flight work.
   dismissAll: () => void
   resumePending: (bucket: string, key: string, uploadId: string, file: File) => void
+  // Non-upload operations. Each returns a promise so callers can await
+  // completion for query invalidation while the tray shows progress.
+  enqueueDelete: (bucket: string, targets: DeleteTarget[]) => Promise<BatchOutcome<string>>
+  enqueueRename: (bucket: string, srcKey: string, destKey: string) => Promise<void>
+  enqueueMove: (bucket: string, srcKey: string, destKey: string) => Promise<void>
+  enqueueCopy: (bucket: string, srcKey: string, destKey: string) => Promise<void>
+  enqueueFolderDelete: (bucket: string, prefix: string) => Promise<BatchOutcome<string>>
+  // srcPrefix / destPrefix both end with "/". Used for both rename (same
+  // parent, different name) and move (different parent, same name).
+  enqueueFolderMove: (bucket: string, srcPrefix: string, destPrefix: string, kind: "folder-rename" | "folder-move") => Promise<BatchOutcome<string>>
 }
 
 const TransfersContext = createContext<TransfersApi | null>(null)
@@ -83,10 +112,17 @@ const renameKey = (key: string): string => {
   return `${dir}${stem}-${stamp}${ext}`
 }
 
+const entryName = (key: string): string => key.slice(key.lastIndexOf("/") + 1)
+
 // Runs uploads sequentially by default to keep the "queued" state honest and
 // avoid saturating the network. lib-storage itself parallelizes parts inside a
 // single upload, so throughput is retained.
 const MAX_CONCURRENT = 1
+
+// Concurrency for the per-item loops inside a folder-scoped operation
+// (delete / move). Small enough not to hammer the filer, big enough to hide
+// per-request latency on a many-file folder.
+const FOLDER_ITEM_CONCURRENCY = 5
 
 // How long a completed row lingers so the user can register "完了" before the
 // row (and eventually the whole upcard) is auto-dismissed. Failed / conflict
@@ -94,6 +130,40 @@ const MAX_CONCURRENT = 1
 const AUTO_DISMISS_MS = 4000
 
 type Running = { id: string; abort: () => Promise<void> }
+
+let sequence = 0
+const nextId = (kind: OperationKind): string => {
+  sequence += 1
+
+  return `${kind}-${Date.now()}-${sequence}`
+}
+
+// Runs an async worker over items with a fixed concurrency cap. Each worker
+// gets a chance to fail independently and their failures are collected instead
+// of aborting the whole batch — matches DeleteObjects's per-key error model.
+const runBatch = async <T,>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+  onEach: (item: T, index: number, result: { ok: true } | { ok: false; message: string }) => void,
+): Promise<void> => {
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const i = cursor
+      cursor += 1
+      if (i >= items.length) return
+      const item = items[i] as T
+      try {
+        await worker(item, i)
+        onEach(item, i, { ok: true })
+      } catch (err) {
+        onEach(item, i, { ok: false, message: err instanceof Error ? err.message : String(err) })
+      }
+    }
+  })
+  await Promise.all(runners)
+}
 
 export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const s3 = useS3()
@@ -112,6 +182,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const activeKeys = useMemo(() => {
     const set = new Set<string>()
     for (const t of transfers) {
+      if (t.kind !== "upload") continue
       if (t.state === "uploading" || t.state === "queued" || t.state === "paused" || t.state === "checking") {
         set.add(`${t.bucket}/${t.key}`)
       }
@@ -187,6 +258,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         updateOne(id, { state: "done", loaded: file.size, total: file.size })
         void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+        void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
         // Auto-dismiss completed rows so the upcard collapses once everything
         // succeeds. Failures / conflicts stick until the user acts on them.
         setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
@@ -208,7 +280,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         runningMap.current.delete(id)
         runningCountRef.current -= 1
         // Kick the queue: if any queued transfers remain, promote one.
-        const next = transfersRef.current.find((t) => t.state === "queued")
+        const next = transfersRef.current.find((t) => t.state === "queued" && t.kind === "upload")
         if (next !== undefined && runningCountRef.current < MAX_CONCURRENT) {
           runTransferRef.current(next.id, next.key)
         }
@@ -224,6 +296,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     const now = Date.now()
     const added: Transfer[] = files.map((file, i) => ({
       id: `${now}-${i}-${file.name}`,
+      kind: "upload",
       bucket,
       key: `${prefix}${file.name}`,
       name: file.name,
@@ -334,6 +407,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     filesRef.current.set(id, file)
     const t: Transfer = {
       id,
+      kind: "upload",
       bucket,
       key,
       name: file.name,
@@ -362,6 +436,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         updateOne(id, { state: "done", loaded: file.size, total: file.size })
         void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+        void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
         setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
       })
       .catch((error: unknown) => {
@@ -383,6 +458,193 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       })
   }, [s3, queryClient, updateOne, removeOne])
 
+  const finishOperation = useCallback((id: string, error?: string) => {
+    if (error === undefined) {
+      // Read total from React's own latest state (not transfersRef, which
+      // effect-updated refs may still be catching up on).
+      setTransfers((prev) => prev.map((t) => t.id === id ? { ...t, state: "done", loaded: t.total } : t))
+      setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
+    } else {
+      updateOne(id, { state: "failed", error })
+    }
+  }, [updateOne, removeOne])
+
+  const enqueueDelete = useCallback(async (bucket: string, targets: DeleteTarget[]): Promise<BatchOutcome<string>> => {
+    if (targets.length === 0) return { ok: [], failed: [] }
+    const id = nextId("delete")
+    const primary = targets[0] as DeleteTarget
+    const displayName = targets.length === 1 ? entryName(primary.key) : `${targets.length} 件のファイル`
+    const t: Transfer = {
+      id,
+      kind: "delete",
+      bucket,
+      key: primary.key,
+      name: displayName,
+      size: 0,
+      state: "uploading",
+      loaded: 0,
+      total: targets.length,
+    }
+    setTransfers((prev) => [...prev, t])
+    try {
+      const res = await deleteObjects(s3, bucket, targets.map((x) => x.key))
+      updateOne(id, { loaded: res.deleted.length })
+      if (res.failed.length > 0) {
+        finishOperation(id, `${res.failed.length} 件の削除に失敗しました`)
+      } else {
+        finishOperation(id)
+      }
+      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
+      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+
+      return { ok: res.deleted, failed: res.failed }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      finishOperation(id, message)
+
+      return { ok: [], failed: targets.map((x) => ({ key: x.key, message })) }
+    }
+  }, [s3, queryClient, updateOne, finishOperation])
+
+  const runSingleOp = useCallback(async (
+    bucket: string,
+    kind: "rename" | "move" | "copy",
+    srcKey: string,
+    destKey: string,
+    action: () => Promise<void>,
+  ): Promise<void> => {
+    const id = nextId(kind)
+    const t: Transfer = {
+      id,
+      kind,
+      bucket,
+      key: srcKey,
+      destKey,
+      name: entryName(srcKey),
+      size: 0,
+      state: "uploading",
+      loaded: 0,
+      total: 1,
+    }
+    setTransfers((prev) => [...prev, t])
+    try {
+      await action()
+      updateOne(id, { loaded: 1 })
+      finishOperation(id)
+      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
+      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      finishOperation(id, message)
+      throw err
+    }
+  }, [queryClient, updateOne, finishOperation])
+
+  const enqueueRename = useCallback(async (bucket: string, srcKey: string, destKey: string): Promise<void> => {
+    await runSingleOp(bucket, "rename", srcKey, destKey, () => renameObject(s3, bucket, srcKey, destKey))
+  }, [s3, runSingleOp])
+
+  const enqueueMove = useCallback(async (bucket: string, srcKey: string, destKey: string): Promise<void> => {
+    await runSingleOp(bucket, "move", srcKey, destKey, () => renameObject(s3, bucket, srcKey, destKey))
+  }, [s3, runSingleOp])
+
+  const enqueueCopy = useCallback(async (bucket: string, srcKey: string, destKey: string): Promise<void> => {
+    await runSingleOp(bucket, "copy", srcKey, destKey, () => copyObject(s3, bucket, srcKey, destKey))
+  }, [s3, runSingleOp])
+
+  const enqueueFolderDelete = useCallback(async (bucket: string, prefix: string): Promise<BatchOutcome<string>> => {
+    const id = nextId("folder-delete")
+    const displayName = prefix === "" ? bucket : (prefix.slice(0, -1).split("/").pop() ?? prefix)
+    const t: Transfer = {
+      id,
+      kind: "folder-delete",
+      bucket,
+      key: prefix,
+      name: displayName,
+      size: 0,
+      state: "uploading",
+      loaded: 0,
+      total: 0,
+      isFolder: true,
+    }
+    setTransfers((prev) => [...prev, t])
+    try {
+      const entries = await listAllUnderPrefix(s3, bucket, prefix)
+      updateOne(id, { total: entries.length, fileCount: entries.length })
+      const res = await deleteObjects(s3, bucket, entries.map((e) => e.key))
+      updateOne(id, { loaded: res.deleted.length })
+      if (res.failed.length > 0) {
+        finishOperation(id, `${res.failed.length} 件の削除に失敗しました`)
+      } else {
+        finishOperation(id)
+      }
+      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
+      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+
+      return { ok: res.deleted, failed: res.failed }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      finishOperation(id, message)
+
+      return { ok: [], failed: [{ key: prefix, message }] }
+    }
+  }, [s3, queryClient, updateOne, finishOperation])
+
+  const enqueueFolderMove = useCallback(async (
+    bucket: string,
+    srcPrefix: string,
+    destPrefix: string,
+    kind: "folder-rename" | "folder-move",
+  ): Promise<BatchOutcome<string>> => {
+    const id = nextId(kind)
+    const displayName = srcPrefix === "" ? bucket : (srcPrefix.slice(0, -1).split("/").pop() ?? srcPrefix)
+    const t: Transfer = {
+      id,
+      kind,
+      bucket,
+      key: srcPrefix,
+      destKey: destPrefix,
+      name: displayName,
+      size: 0,
+      state: "uploading",
+      loaded: 0,
+      total: 0,
+      isFolder: true,
+    }
+    setTransfers((prev) => [...prev, t])
+    try {
+      const entries = await listAllUnderPrefix(s3, bucket, srcPrefix)
+      updateOne(id, { total: entries.length, fileCount: entries.length })
+      const ok: string[] = []
+      const failed: { key: string; message: string }[] = []
+      let done = 0
+      await runBatch(entries, FOLDER_ITEM_CONCURRENCY, async (entry) => {
+        const relative = entry.key.slice(srcPrefix.length)
+        const dest = `${destPrefix}${relative}`
+        await renameObject(s3, bucket, entry.key, dest)
+      }, (entry, _i, result) => {
+        done += 1
+        updateOne(id, { loaded: done })
+        if (result.ok) ok.push(entry.key)
+        else failed.push({ key: entry.key, message: result.message })
+      })
+      if (failed.length > 0) {
+        finishOperation(id, `${failed.length} 件の移動に失敗しました`)
+      } else {
+        finishOperation(id)
+      }
+      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
+      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+
+      return { ok, failed }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      finishOperation(id, message)
+
+      return { ok: [], failed: [{ key: srcPrefix, message }] }
+    }
+  }, [s3, queryClient, updateOne, finishOperation])
+
   const api = useMemo<TransfersApi>(() => ({
     transfers,
     activeKeys,
@@ -395,7 +657,13 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     cancelAll,
     dismissAll,
     resumePending,
-  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, resumePending])
+    enqueueDelete,
+    enqueueRename,
+    enqueueMove,
+    enqueueCopy,
+    enqueueFolderDelete,
+    enqueueFolderMove,
+  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove])
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>
 }

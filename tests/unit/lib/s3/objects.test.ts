@@ -1,9 +1,19 @@
 import { http, HttpResponse } from "msw"
 import { describe, expect, test } from "vitest"
 
-import { createS3Client, deleteObject, ensureOwnBucket, listDirectory, presignDownloadUrl } from "~/lib/s3"
+import {
+  copyObject,
+  createS3Client,
+  deleteObject,
+  deleteObjects,
+  ensureOwnBucket,
+  listAllUnderPrefix,
+  listDirectory,
+  presignDownloadUrl,
+  renameObject,
+} from "~/lib/s3"
 
-import { listObjectsV2Xml, s3ErrorXml } from "../../mocks/s3-xml"
+import { copyObjectXml, deleteObjectsXml, listObjectsV2Xml, s3ErrorXml } from "../../mocks/s3-xml"
 import { server } from "../../mocks/server"
 
 const ENDPOINT = "http://localhost:28333"
@@ -162,6 +172,177 @@ describe("deleteObject", () => {
     )
     await deleteObject(client(), BUCKET, "docs/old.txt")
     expect(deleted).toEqual(["docs/old.txt"])
+  })
+})
+
+describe("copyObject", () => {
+  test("copyObject_sendsCopySourceHeaderAndTaggingCopy", async () => {
+    let copySource: string | null = null
+    let taggingDirective: string | null = null
+    let metadataDirective: string | null = null
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/:key+`, ({ request }) => {
+        copySource = request.headers.get("x-amz-copy-source")
+        taggingDirective = request.headers.get("x-amz-tagging-directive")
+        metadataDirective = request.headers.get("x-amz-metadata-directive")
+        return HttpResponse.xml(copyObjectXml("etag", "2026-07-13T00:00:00.000Z"))
+      }),
+    )
+    await copyObject(client(), BUCKET, "docs/old.txt", "docs/new.txt")
+    expect(copySource).toBe(`${BUCKET}/docs/old.txt`)
+    expect(taggingDirective).toBe("COPY")
+    expect(metadataDirective).toBe("COPY")
+  })
+
+  test("copyObject_encodesNonAsciiKey", async () => {
+    let copySource: string | null = null
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/:key+`, ({ request }) => {
+        copySource = request.headers.get("x-amz-copy-source")
+        return HttpResponse.xml(copyObjectXml("etag", "2026-07-13T00:00:00.000Z"))
+      }),
+    )
+    await copyObject(client(), BUCKET, "docs/読みもの.txt", "docs/新.txt")
+    // percent-encoded, "/" preserved
+    expect(copySource).toBe(`${BUCKET}/docs/${encodeURIComponent("読みもの.txt")}`)
+  })
+
+  test("copyObject_serverError_propagates", async () => {
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/:key+`, () =>
+        new HttpResponse(s3ErrorXml("AccessDenied", "no"), { status: 403, headers: { "Content-Type": "application/xml" } })),
+    )
+    await expect(copyObject(client(), BUCKET, "a", "b")).rejects.toThrow()
+  })
+})
+
+describe("deleteObjects", () => {
+  test("deleteObjects_batchesUpTo1000AndAggregates", async () => {
+    let batchCount = 0
+    server.use(
+      http.post(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
+        const url = new URL(request.url)
+        if (!url.searchParams.has("delete")) return new HttpResponse(null, { status: 400 })
+        batchCount += 1
+        const start = (batchCount - 1) * 1000
+        const end = Math.min(start + 1000, 1500)
+        const deleted = Array.from({ length: end - start }, (_, i) => `k${start + i}`)
+        return HttpResponse.xml(deleteObjectsXml({ deleted }))
+      }),
+    )
+    const keys = Array.from({ length: 1500 }, (_, i) => `k${i}`)
+    const res = await deleteObjects(client(), BUCKET, keys)
+    expect(batchCount).toBe(2)
+    expect(res.deleted.length).toBe(1500)
+    expect(res.failed).toEqual([])
+  })
+
+  test("deleteObjects_reportsPerKeyErrors", async () => {
+    server.use(
+      http.post(`${ENDPOINT}/${BUCKET}`, () =>
+        HttpResponse.xml(deleteObjectsXml({
+          deleted: ["a"],
+          errors: [{ key: "b", code: "AccessDenied", message: "nope" }],
+        }))),
+    )
+    const res = await deleteObjects(client(), BUCKET, ["a", "b"])
+    expect(res.deleted).toEqual(["a"])
+    expect(res.failed).toEqual([{ key: "b", message: "nope" }])
+  })
+
+  test("deleteObjects_emptyKeys_isNoop", async () => {
+    let hit = 0
+    server.use(
+      http.post(`${ENDPOINT}/${BUCKET}`, () => { hit += 1; return HttpResponse.xml(deleteObjectsXml({ deleted: [] })) }),
+    )
+    const res = await deleteObjects(client(), BUCKET, [])
+    expect(hit).toBe(0)
+    expect(res).toEqual({ deleted: [], failed: [] })
+  })
+})
+
+describe("renameObject", () => {
+  test("renameObject_copiesThenDeletesSource", async () => {
+    const events: string[] = []
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/new.txt`, () => {
+        events.push("copy")
+        return HttpResponse.xml(copyObjectXml("etag", "2026-07-13T00:00:00.000Z"))
+      }),
+      http.delete(`${ENDPOINT}/${BUCKET}/old.txt`, () => {
+        events.push("delete")
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    await renameObject(client(), BUCKET, "old.txt", "new.txt")
+    expect(events).toEqual(["copy", "delete"])
+  })
+
+  test("renameObject_copyFails_skipsDelete", async () => {
+    let deleteHit = 0
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/new.txt`, () =>
+        new HttpResponse(s3ErrorXml("AccessDenied", "no"), { status: 403, headers: { "Content-Type": "application/xml" } })),
+      http.delete(`${ENDPOINT}/${BUCKET}/old.txt`, () => { deleteHit += 1; return new HttpResponse(null, { status: 204 }) }),
+    )
+    await expect(renameObject(client(), BUCKET, "old.txt", "new.txt")).rejects.toThrow()
+    expect(deleteHit).toBe(0)
+  })
+
+  test("renameObject_sameKey_isNoop", async () => {
+    let hit = 0
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/:key+`, () => { hit += 1; return HttpResponse.xml(copyObjectXml("etag", "2026-07-13T00:00:00.000Z")) }),
+      http.delete(`${ENDPOINT}/${BUCKET}/:key+`, () => { hit += 1; return new HttpResponse(null, { status: 204 }) }),
+    )
+    await renameObject(client(), BUCKET, "same.txt", "same.txt")
+    expect(hit).toBe(0)
+  })
+})
+
+describe("listAllUnderPrefix", () => {
+  test("listAllUnderPrefix_paginatesUntilExhausted", async () => {
+    const seenTokens: (string | null)[] = []
+    const seenDelimiters: (string | null)[] = []
+    let call = 0
+    server.use(
+      http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
+        const url = new URL(request.url)
+        seenDelimiters.push(url.searchParams.get("delimiter"))
+        seenTokens.push(url.searchParams.get("continuation-token"))
+        call += 1
+        return HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "docs/",
+          objects: call === 1
+            ? [{ key: "docs/a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }]
+            : [{ key: "docs/b.txt", size: 2, lastModified: "2026-07-01T10:00:00.000Z" }],
+          commonPrefixes: [],
+          ...(call === 1 ? { nextContinuationToken: "next" } : {}),
+        }))
+      }),
+    )
+    const entries = await listAllUnderPrefix(client(), BUCKET, "docs/")
+    expect(entries).toEqual([{ key: "docs/a.txt", size: 1 }, { key: "docs/b.txt", size: 2 }])
+    expect(seenDelimiters).toEqual([null, null])
+    expect(seenTokens).toEqual([null, "next"])
+  })
+
+  test("listAllUnderPrefix_includesKeepMarker", async () => {
+    server.use(
+      http.get(`${ENDPOINT}/${BUCKET}`, () =>
+        HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "docs/",
+          objects: [
+            { key: "docs/.keep", size: 0, lastModified: "2026-07-01T10:00:00.000Z" },
+            { key: "docs/a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" },
+          ],
+          commonPrefixes: [],
+        }))),
+    )
+    const entries = await listAllUnderPrefix(client(), BUCKET, "docs/")
+    expect(entries.map((e) => e.key)).toEqual(["docs/.keep", "docs/a.txt"])
   })
 })
 

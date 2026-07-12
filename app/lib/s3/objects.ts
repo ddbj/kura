@@ -1,5 +1,5 @@
 import type { S3Client } from "@aws-sdk/client-s3"
-import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, ListObjectsV2Command } from "@aws-sdk/client-s3"
+import { CopyObjectCommand, CreateBucketCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadBucketCommand, ListObjectsV2Command } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 import { entryName } from "./keys"
@@ -67,6 +67,99 @@ export const listDirectory = async (
 
 export const deleteObject = async (s3: S3Client, bucket: string, key: string): Promise<void> => {
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+}
+
+// CopySource carries the key inside a URL, so keys with non-ASCII or "?"/"#"
+// must be percent-encoded per segment (keeping "/" as the separator).
+const encodeCopySourceKey = (key: string): string =>
+  key.split("/").map(encodeURIComponent).join("/")
+
+// Server-side copy. TaggingDirective=COPY / MetadataDirective=COPY inherit
+// from the source, so the public tag ("kura-public=true") survives rename /
+// move and objects don't silently go private.
+export const copyObject = async (
+  s3: S3Client,
+  bucket: string,
+  srcKey: string,
+  destKey: string,
+): Promise<void> => {
+  await s3.send(new CopyObjectCommand({
+    Bucket: bucket,
+    Key: destKey,
+    CopySource: `${bucket}/${encodeCopySourceKey(srcKey)}`,
+    TaggingDirective: "COPY",
+    MetadataDirective: "COPY",
+  }))
+}
+
+export type DeleteObjectsResult = {
+  deleted: string[]
+  failed: { key: string; message: string }[]
+}
+
+// S3 caps DeleteObjects at 1000 keys per request; chunk transparently.
+const DELETE_CHUNK = 1000
+
+export const deleteObjects = async (
+  s3: S3Client,
+  bucket: string,
+  keys: readonly string[],
+): Promise<DeleteObjectsResult> => {
+  const deleted: string[] = []
+  const failed: { key: string; message: string }[] = []
+  for (let i = 0; i < keys.length; i += DELETE_CHUNK) {
+    const chunk = keys.slice(i, i + DELETE_CHUNK)
+    const res = await s3.send(new DeleteObjectsCommand({
+      Bucket: bucket,
+      Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: false },
+    }))
+    for (const d of res.Deleted ?? []) if (d.Key !== undefined) deleted.push(d.Key)
+    for (const e of res.Errors ?? []) {
+      if (e.Key === undefined) continue
+      failed.push({ key: e.Key, message: e.Message ?? e.Code ?? "unknown" })
+    }
+  }
+
+  return { deleted, failed }
+}
+
+// S3 has no atomic rename: CopyObject then DeleteObject. A crash between them
+// leaves both copies; callers get best-effort semantics.
+export const renameObject = async (
+  s3: S3Client,
+  bucket: string,
+  srcKey: string,
+  destKey: string,
+): Promise<void> => {
+  if (srcKey === destKey) return
+  await copyObject(s3, bucket, srcKey, destKey)
+  await deleteObject(s3, bucket, srcKey)
+}
+
+// Full recursive listing under prefix (no Delimiter), paginated with
+// ContinuationToken. Includes marker entries like ".keep" — the caller
+// decides whether to filter them.
+export const listAllUnderPrefix = async (
+  s3: S3Client,
+  bucket: string,
+  prefix: string,
+): Promise<{ key: string; size: number }[]> => {
+  const results: { key: string; size: number }[] = []
+  let token: string | undefined
+  do {
+    const res = await s3.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      ...(token === undefined ? {} : { ContinuationToken: token }),
+    }))
+    for (const o of res.Contents ?? []) {
+      if (o.Key === undefined) continue
+      results.push({ key: o.Key, size: o.Size ?? 0 })
+    }
+    token = res.NextContinuationToken
+  } while (token !== undefined)
+
+  return results
 }
 
 // RFC 5987 attr-char excludes several characters encodeURIComponent leaves
