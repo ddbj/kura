@@ -1,0 +1,39 @@
+# rootless podman-compose overlay. compose.yml と合わせて使う:
+#   podman-compose --env-file env.production --env-file .env \
+#     -f compose.yml -f compose.podman.yml up -d --wait
+#
+# rootless podman では default の userns で container uid 101 が /etc/subuid
+# の mapping (uid 101 -> host uid 222700100) に落ちるため、kura-init の
+# `install -d -o 101 -g 101 /var/log/kura` はそのまま通る。逆に keep-id を
+# 指定すると container uid が全て host uid にまとまり、nginx worker (101)
+# 用の chown が壊れるので付けない。
+#
+# label=disable は SELinux 環境向けの慣習 (Ubuntu の a012 は SELinux 無効
+# なので実害なし、他 DDBJ サービスと足並みを揃える)。
+
+services:
+  kura-init:
+    security_opt:
+      - label=disable
+
+  seaweedfs:
+    security_opt:
+      - label=disable
+
+  nginx:
+    security_opt:
+      - label=disable
+
+  ops:
+    security_opt:
+      - label=disable
+
+# base compose.yml の named volume `seaweedfs-data` の裏側を bind mount に
+# 差し替える。運用者が data の実体を任意 path (Lustre 上の
+# ~/kura-prod/data/seaweedfs など) に置ける。
+volumes:
+  seaweedfs-data:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${KURA_SEAWEEDFS_DATA_DIR}
