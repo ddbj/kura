@@ -157,7 +157,7 @@ export const ja: Resources = {
     issue: "発行",
     urlLabel: "presigned URL",
     expiresAt: "{{datetime}} 頃まで有効",
-    note: "presigned URL は短期の受け渡し用です。発行に使うセッションの残り時間で頭打ちになるため、実効上限は約 1 時間です。長期の共有には公開を使ってください。",
+    note: "presigned URL は短期の受け渡し用です。発行に使うセッションの残り時間で頭打ちになるため、実効上限は約 12 時間です。長期の共有には公開を使ってください。",
     filenameLabel: "ファイル名",
     putUsage: "この URL に対して HTTP PUT でアップロードできます。",
     failed: "URL の発行に失敗しました",

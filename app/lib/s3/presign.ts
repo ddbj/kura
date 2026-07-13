@@ -14,7 +14,7 @@ export type PresignedShare = {
 }
 
 // Mint a fresh STS session per issued URL so the requested lifetime is capped
-// only by the session length (~1h with the kura client token lifespan).
+// only by the session length (~12h with the kura client token lifespan).
 export const presignShareUrl = async ({ endpoint, token, bucket, key, method, expiresInSeconds }: {
   endpoint: string
   token: string

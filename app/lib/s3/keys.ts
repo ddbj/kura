@@ -15,11 +15,15 @@ export const entryName = (key: string): string => key.slice(key.lastIndexOf("/")
 export const dirName = (dirPrefix: string): string => entryName(dirPrefix.slice(0, -1))
 
 // "." / ".." segments survive percent-encoding as dot segments and would be
-// rewritten by browser/proxy path normalization, so force the %2E form.
+// rewritten by browser/proxy path normalization; a segment ending in a dot
+// ("abc.") can trip the same normalization on some proxies. Force any
+// trailing dot(s) into %2E so the segment survives verbatim.
 const encodeSegment = (segment: string): string => {
   if (segment === ".") return "%2E"
   if (segment === "..") return "%2E%2E"
-  return encodeURIComponent(segment)
+  const encoded = encodeURIComponent(segment)
+
+  return encoded.replace(/\.+$/, (match) => "%2E".repeat(match.length))
 }
 
 export const prefixToUrlPath = (prefix: string): string =>
@@ -34,3 +38,20 @@ export const keyToUrlPath = (key: string): string =>
 // rather than one empty segment, matching prefixToSegments("").
 export const splatToPrefix = (splat: string): string =>
   segmentsToPrefix(splat === "" ? [] : splat.split("/"))
+
+// encodeURIComponent leaves the RFC 3986 sub-delims !*'() unescaped. S3
+// CopySource keys and RFC 5987 filename* both need those percent-encoded too
+// (a stray ' would collide with the UTF-8'' delimiter, ( ) can trigger
+// aggressive proxy filters, and * / ! are reserved in several contexts).
+const escapeSubDelims = (encoded: string): string =>
+  encoded.replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+
+// Encodes a key for use inside a URL path (CopySource, presign path), keeping
+// "/" as the segment separator.
+export const encodeStrictKey = (key: string): string =>
+  key.split("/").map((seg) => escapeSubDelims(encodeURIComponent(seg))).join("/")
+
+// Encodes a filename for use as an RFC 5987 filename* value (no "/" preserved,
+// the whole string is a single token).
+export const encodeFilenameStrict = (filename: string): string =>
+  escapeSubDelims(encodeURIComponent(filename))

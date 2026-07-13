@@ -10,8 +10,7 @@ type Props = {
   open: boolean
   onClose: () => void
   bucket: string
-  // srcKey is a file key. For folders, use FolderMoveModal (same UX, uses
-  // srcPrefix and disables descendants).
+  // srcKey is a file key. For folders, use FolderMoveModal.
   srcKey: string
   onConfirm: (destKey: string) => void
 }
@@ -84,31 +83,31 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
         <div className="mh">
           <b id="move-title">移動</b>
         </div>
-        <div className="field">
-          <label className="flabel">対象</label>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--ink)", padding: "6px 0" }}>{name}</div>
-        </div>
-        <div className="field">
-          <label className="flabel">移動先</label>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              fontFamily: "var(--mono)",
-              fontSize: 12.5,
-            }}>
-              <Icon name="folder" size={14} />
-              <span title={displayPath} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
-            </div>
-            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>選ぶ…</Button>
+        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
+        <div className="flist">
+          <div className="frow">
+            <span className="fn" title={srcKey}>{name}</span>
           </div>
-          {error !== undefined ? <p className="ferr">{error}</p> : null}
         </div>
+        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>移動先</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+          <div style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            fontFamily: "var(--mono)",
+            fontSize: 12.5,
+          }}>
+            <Icon name="folder" size={14} />
+            <span title={displayPath} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
+          </div>
+          <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>選ぶ…</Button>
+        </div>
+        {error !== undefined ? <p className="ferr">{error}</p> : null}
         <div className="mfoot">
           <Button onClick={onClose} disabled={busy}>キャンセル</Button>
           <Button kind="pri" disabled={busy} onClick={() => void submit()}>

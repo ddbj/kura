@@ -207,6 +207,24 @@ describe("copyObject", () => {
     expect(copySource).toBe(`${BUCKET}/docs/${encodeURIComponent("読みもの.txt")}`)
   })
 
+  test("copyObject_escapesSubDelimsInCopySource", async () => {
+    // encodeURIComponent leaves !*'() alone. Those characters unescaped in
+    // CopySource risk aggressive proxy rewrites and, for "'", would collide
+    // with RFC 5987 delimiters — encode them explicitly like presign does.
+    let copySource: string | null = null
+    server.use(
+      http.put(`${ENDPOINT}/${BUCKET}/:key+`, ({ request }) => {
+        copySource = request.headers.get("x-amz-copy-source")
+        return HttpResponse.xml(copyObjectXml("etag", "2026-07-13T00:00:00.000Z"))
+      }),
+    )
+    await copyObject(client(), BUCKET, "docs/it's (final)*.txt", "docs/new.txt")
+    const encodedName = "it%27s%20%28final%29%2A.txt"
+    expect(copySource).toBe(`${BUCKET}/docs/${encodedName}`)
+    // Belt and braces: none of the raw sub-delims survive in the header.
+    expect(copySource).not.toMatch(/['()*!]/)
+  })
+
   test("copyObject_serverError_propagates", async () => {
     server.use(
       http.put(`${ENDPOINT}/${BUCKET}/:key+`, () =>
@@ -258,6 +276,38 @@ describe("deleteObjects", () => {
     const res = await deleteObjects(client(), BUCKET, [])
     expect(hit).toBe(0)
     expect(res).toEqual({ deleted: [], failed: [] })
+  })
+
+  test("deleteObjects_chunkFailure_keepsPriorChunkSuccesses", async () => {
+    // A DeleteObjects request failing (network / 4xx) previously threw and
+    // dropped every prior chunk's successes. Aggregate per chunk instead:
+    // the caller sees the first chunk as deleted and the second chunk's keys
+    // as failed with the response message, so a retry only needs to cover
+    // the failed subset. (Use 400 to sidestep the SDK's 5xx retry, so this
+    // test observes exactly one request per chunk.)
+    let firstDone = false
+    server.use(
+      http.post(`${ENDPOINT}/${BUCKET}`, () => {
+        if (!firstDone) {
+          firstDone = true
+          const deleted = Array.from({ length: 1000 }, (_, i) => `k${i}`)
+          return HttpResponse.xml(deleteObjectsXml({ deleted }))
+        }
+
+        return new HttpResponse(s3ErrorXml("MalformedXML", "bad request"), {
+          status: 400,
+          headers: { "Content-Type": "application/xml" },
+        })
+      }),
+    )
+
+    const keys = Array.from({ length: 1500 }, (_, i) => `k${i}`)
+    const res = await deleteObjects(client(), BUCKET, keys)
+    expect(res.deleted.length).toBe(1000)
+    expect(res.deleted).toEqual(keys.slice(0, 1000))
+    expect(res.failed.length).toBe(500)
+    expect(res.failed.map((f) => f.key)).toEqual(keys.slice(1000))
+    for (const f of res.failed) expect(f.message.length).toBeGreaterThan(0)
   })
 })
 
@@ -343,6 +393,49 @@ describe("listAllUnderPrefix", () => {
     )
     const entries = await listAllUnderPrefix(client(), BUCKET, "docs/")
     expect(entries.map((e) => e.key)).toEqual(["docs/.keep", "docs/a.txt"])
+  })
+
+  test("listAllUnderPrefix_truncatedWithoutNextToken_stopsInsteadOfLooping", async () => {
+    let calls = 0
+    server.use(
+      http.get(`${ENDPOINT}/${BUCKET}`, () => {
+        calls += 1
+        return HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "docs/",
+          objects: [{ key: "docs/a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }],
+          commonPrefixes: [],
+          truncatedNoToken: true,
+        }))
+      }),
+    )
+    const entries = await listAllUnderPrefix(client(), BUCKET, "docs/")
+    expect(entries.map((e) => e.key)).toEqual(["docs/a.txt"])
+    expect(calls).toBe(1)
+  })
+})
+
+describe("listDirectory (Size handling)", () => {
+  test("listDirectory_omittedSize_returnsUndefinedInsteadOfZero", async () => {
+    // Silently coercing a missing <Size> to 0 hides a broken listing under a
+    // valid-looking total; expose it as undefined so callers can decide.
+    server.use(
+      http.get(`${ENDPOINT}/${BUCKET}`, () =>
+        HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "docs/",
+          objects: [
+            { key: "docs/normal.txt", size: 42, lastModified: "2026-07-01T10:00:00.000Z" },
+            { key: "docs/broken.bin", lastModified: "2026-07-01T10:00:00.000Z" },
+          ],
+          commonPrefixes: [],
+        }))),
+    )
+    const page = await listDirectory(client(), BUCKET, "docs/")
+    expect(page.files).toEqual([
+      { key: "docs/normal.txt", size: 42, lastModified: new Date("2026-07-01T10:00:00.000Z") },
+      { key: "docs/broken.bin", size: undefined, lastModified: new Date("2026-07-01T10:00:00.000Z") },
+    ])
   })
 })
 

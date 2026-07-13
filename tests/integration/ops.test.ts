@@ -33,7 +33,7 @@ const runOpsDaily = (nowIso: string, extraEnv: Record<string, string> = {}) =>
       KURA_ROOT_ACCESS_KEY: inject("rootAccessKey"),
       KURA_ROOT_SECRET_KEY: inject("rootSecretKey"),
       KURA_FILE_TTL_DAYS: "30",
-      KURA_AUDIT_LOG_DIR: join(tmpdir(), "kura-audit-disabled"),
+      KURA_LOG_DIR: join(tmpdir(), "kura-audit-disabled"),
       ...extraEnv,
     },
   })
@@ -121,11 +121,16 @@ describe("stale multipart cleanup", () => {
 })
 
 describe("audit log rotation", () => {
+  // Retention is pinned at a small, exact value so the "just inside" /
+  // "just outside" boundary is one day apart, not "5 days of margin".
+  const RETENTION_DAYS = 10
+
   it("compresses finished days and deletes files past retention", async () => {
     const dir = await mkdtemp(join(tmpdir(), "kura-audit-"))
     const today = new Date().toISOString().slice(0, 10)
     const oldDay = new Date(Date.now() - 8 * DAY_MS).toISOString().slice(0, 10)
-    const ancientDay = new Date(Date.now() - 1100 * DAY_MS).toISOString().slice(0, 10)
+    // Explicitly past retention (11 days ago vs 10-day window).
+    const ancientDay = new Date(Date.now() - (RETENTION_DAYS + 1) * DAY_MS).toISOString().slice(0, 10)
     await writeFile(join(dir, `access-${today}.log`), "today line\n")
     await writeFile(join(dir, `access-${oldDay}.log`), "old line\n")
     await writeFile(join(dir, `access-${ancientDay}.log`), "ancient line\n")
@@ -133,7 +138,8 @@ describe("audit log rotation", () => {
 
     runOpsDaily(new Date().toISOString(), {
       KURA_FILE_TTL_DAYS: "",
-      KURA_AUDIT_LOG_DIR: dir,
+      KURA_LOG_DIR: dir,
+      KURA_AUDIT_RETENTION_DAYS: String(RETENTION_DAYS),
     })
 
     expect((await readdir(dir)).sort()).toEqual([
@@ -143,5 +149,24 @@ describe("audit log rotation", () => {
     ])
     const unzipped = gunzipSync(await readFile(join(dir, `access-${oldDay}.log.gz`)))
     expect(unzipped.toString()).toBe("old line\n")
+  })
+
+  it("keeps a log that is still inside the retention window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kura-audit-"))
+    // One day inside the window: must survive (as its .gz form).
+    const withinWindow = new Date(Date.now() - (RETENTION_DAYS - 1) * DAY_MS)
+      .toISOString().slice(0, 10)
+    await writeFile(join(dir, `access-${withinWindow}.log`), "in window\n")
+
+    runOpsDaily(new Date().toISOString(), {
+      KURA_FILE_TTL_DAYS: "",
+      KURA_LOG_DIR: dir,
+      KURA_AUDIT_RETENTION_DAYS: String(RETENTION_DAYS),
+    })
+
+    // Compressed (past today), but not deleted.
+    expect((await readdir(dir)).sort()).toEqual([`access-${withinWindow}.log.gz`])
+    const unzipped = gunzipSync(await readFile(join(dir, `access-${withinWindow}.log.gz`)))
+    expect(unzipped.toString()).toBe("in window\n")
   })
 })

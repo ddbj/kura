@@ -178,11 +178,25 @@ describe("public delivery audit log", () => {
   })
 
   it("does not log SPA and asset requests to the audit file", async () => {
-    const marker = `_config.json?audit-probe=${uniqueUser()}`
-    const res = await fetch(`${inject("publicBase")}/${marker}`)
-    expect(res.status).toBe(200)
+    const probe = `_config.json?audit-probe=${uniqueUser()}`
+    const probeRes = await fetch(`${inject("publicBase")}/${probe}`)
+    expect(probeRes.status).toBe(200)
 
-    await new Promise((resolve) => setTimeout(resolve, 1_000))
-    expect(await auditLines(marker)).toHaveLength(0)
+    // Fire a second request that IS audited (a valid user path returns 404
+    // via the auth_request), then wait for its line to appear. Once it has
+    // appeared, any log line the probe would have written is already on
+    // disk too — nginx serialises access log writes per worker.
+    const syncKey = `audit-sync-${uniqueUser()}.txt`
+    const syncPath = `${uniqueUser()}/${syncKey}`
+    const syncRes = await fetch(`${inject("publicBase")}/${syncPath}`)
+    expect(syncRes.status).toBe(404)
+
+    await eventually(async () => {
+      const lines = await auditLines(`GET /${syncPath}`)
+      expect(lines).toHaveLength(1)
+      return lines
+    }, 10_000, 200)
+
+    expect(await auditLines(probe)).toHaveLength(0)
   })
 })

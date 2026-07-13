@@ -92,10 +92,13 @@ describe("IAM policy boundary", () => {
   it("denies assuming KuraAdminRole with a non-admin token", async () => {
     const token = await signToken({ username: uniqueUser() })
 
+    // Trust policy checks oidc:sub against KURA_ADMIN_SUBS; a non-admin sub
+    // returns AccessDenied (403). A 5xx would mean the STS handler crashed
+    // rather than rejecting on policy, so status is asserted concretely.
     await expect(assumeRole(token, ADMIN_ROLE_ARN)).rejects.toMatchObject({
-      $metadata: { httpStatusCode: expect.any(Number) },
+      $metadata: { httpStatusCode: 403 },
+      name: "AccessDenied",
     })
-    await expect(assumeRole(token, ADMIN_ROLE_ARN)).rejects.toThrow()
   })
 
   it("allows a configured admin sub to access any bucket", async () => {
@@ -113,12 +116,22 @@ describe("IAM policy boundary", () => {
   it("rejects tokens with a wrong audience", async () => {
     const token = await signToken({ username: uniqueUser(), aud: "someone-else" })
 
-    await expect(assumeRole(token)).rejects.toThrow()
+    // Audience mismatch is a token validation failure, not a policy failure,
+    // so STS returns InvalidParameterValue (400) rather than 5xx.
+    await expect(assumeRole(token)).rejects.toMatchObject({
+      $metadata: { httpStatusCode: 400 },
+      name: "InvalidParameterValue",
+    })
   })
 
   it("rejects expired tokens", async () => {
     const token = await signToken({ username: uniqueUser(), lifetimeSeconds: -60 })
 
-    await expect(assumeRole(token)).rejects.toThrow()
+    // An expired JWT (exp in the past) surfaces as ExpiredTokenException
+    // (400). A network failure or crash would return no body or 5xx.
+    await expect(assumeRole(token)).rejects.toMatchObject({
+      $metadata: { httpStatusCode: 400 },
+      name: "ExpiredTokenException",
+    })
   })
 })

@@ -1,4 +1,4 @@
-import type { MultipartUpload, S3Client } from "@aws-sdk/client-s3"
+import type { ListMultipartUploadsCommandOutput, MultipartUpload, S3Client } from "@aws-sdk/client-s3"
 import {
   AbortMultipartUploadCommand,
   ListMultipartUploadsCommand,
@@ -9,25 +9,33 @@ import { isOlderThanDays } from "./time.ts"
 
 const isNoSuchUpload = (err: unknown): boolean => err instanceof Error && err.name === "NoSuchUpload"
 
-// The SDK ships no paginator for ListMultipartUploads.
+const truthy = (value: string | undefined): value is string =>
+  value !== undefined && value !== ""
+
+// The SDK ships no paginator for ListMultipartUploads, and SeaweedFS has been
+// observed replying with IsTruncated=true and no Next*Marker — the naive
+// "stop when IsTruncated is false" loop reissues the same request forever.
+// Advance only while a Next* marker is truthy.
 const listAllUploads = async (s3: S3Client, bucket: string): Promise<MultipartUpload[]> => {
   const uploads: MultipartUpload[] = []
   let keyMarker: string | undefined
   let uploadIdMarker: string | undefined
   for (;;) {
-    const page = await s3.send(
+    const page: ListMultipartUploadsCommandOutput = await s3.send(
       new ListMultipartUploadsCommand({
         Bucket: bucket,
-        KeyMarker: keyMarker,
-        UploadIdMarker: uploadIdMarker,
+        ...(truthy(keyMarker) ? { KeyMarker: keyMarker } : {}),
+        ...(truthy(uploadIdMarker) ? { UploadIdMarker: uploadIdMarker } : {}),
       }),
     )
     uploads.push(...(page.Uploads ?? []))
-    if (page.IsTruncated !== true) {
+    const nextKeyMarker = page.NextKeyMarker
+    const nextUploadIdMarker = page.NextUploadIdMarker
+    if (!truthy(nextKeyMarker) && !truthy(nextUploadIdMarker)) {
       return uploads
     }
-    keyMarker = page.NextKeyMarker
-    uploadIdMarker = page.NextUploadIdMarker
+    keyMarker = truthy(nextKeyMarker) ? nextKeyMarker : undefined
+    uploadIdMarker = truthy(nextUploadIdMarker) ? nextUploadIdMarker : undefined
   }
 }
 

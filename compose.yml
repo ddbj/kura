@@ -1,8 +1,19 @@
 name: kura
 
 services:
+  # Prepares the audit log directory (mounted into nginx and ops) so the nginx
+  # worker (uid 101) can create the date-stamped access-*.log files under it
+  # (docs/operations.md). Runs to completion before nginx/ops start.
+  kura-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "install -d -o 101 -g 101 -m 0755 /var/log/kura"]
+    volumes:
+      - ${KURA_LOG_DIR:-./logs}:/var/log/kura
+    restart: "no"
+
   seaweedfs:
     image: chrislusf/seaweedfs:4.37
+    restart: unless-stopped
     entrypoint: ["/bin/sh", "/kura/entrypoint.sh"]
     command:
       - server
@@ -52,13 +63,14 @@ services:
 
   nginx:
     image: nginx:1.29-alpine
+    restart: unless-stopped
     volumes:
       # The image entrypoint envsubsts templates/*.template into conf.d
       - ./nginx/kura.conf.template:/etc/nginx/templates/default.conf.template:ro
       # SPA build output (npm run build). Build before compose up.
       - ./build/client:/usr/share/nginx/html:ro
       # Public-delivery audit log; the worker (uid 101) must be able to write
-      # here (docs/operations.md)
+      # here (docs/operations.md). kura-init prepares the directory.
       - ${KURA_LOG_DIR:-./logs}:/var/log/kura
     environment:
       KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
@@ -69,6 +81,8 @@ services:
     ports:
       - "${KURA_HTTP_PORT}:8080"
     depends_on:
+      kura-init:
+        condition: service_completed_successfully
       seaweedfs:
         condition: service_healthy
     healthcheck:
@@ -81,6 +95,7 @@ services:
   # 圧縮/期限削除 (docs/operations.md)。node は TS を直接実行できる
   ops:
     image: node:24-alpine
+    restart: unless-stopped
     command: ["node", "/kura/scripts/ops-loop.ts"]
     environment:
       # compose 内部から S3 へ直接届く endpoint（env ファイルの値はホスト向け）
@@ -90,12 +105,16 @@ services:
       KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
       KURA_MULTIPART_MAX_AGE_DAYS: ${KURA_MULTIPART_MAX_AGE_DAYS:-}
       KURA_AUDIT_RETENTION_DAYS: ${KURA_AUDIT_RETENTION_DAYS:-}
+      KURA_AUDIT_ROTATE_LAG_SECONDS: ${KURA_AUDIT_ROTATE_LAG_SECONDS:-}
       KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}
+      KURA_LOG_DIR: /var/log/kura
     volumes:
       - ./scripts:/kura/scripts:ro
       - ./node_modules:/kura/node_modules:ro
       - ${KURA_LOG_DIR:-./logs}:/var/log/kura
     depends_on:
+      kura-init:
+        condition: service_completed_successfully
       seaweedfs:
         condition: service_healthy
 

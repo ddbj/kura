@@ -12,9 +12,18 @@ type Props = {
 }
 
 // Portal + Esc-to-close + focus trap + click-outside dismisses.
+// The focus / keyboard effect depends only on `open` so that a parent that
+// re-renders (typically because a controlled input inside the modal changes)
+// does not re-run the initial focus placement — that would steal focus back
+// to the first focusable element on every keystroke. onClose is read via a
+// ref so its identity may change freely between renders.
 export const Modal = ({ open, onClose, labelledBy, className, children }: Props) => {
   const modalRef = useRef<HTMLDivElement>(null)
   const previousActive = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return
@@ -27,7 +36,7 @@ export const Modal = ({ open, onClose, labelledBy, className, children }: Props)
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault()
-        onClose()
+        onCloseRef.current()
 
         return
       }
@@ -53,7 +62,7 @@ export const Modal = ({ open, onClose, labelledBy, className, children }: Props)
       document.removeEventListener("keydown", onKey)
       previousActive.current?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
   if (typeof document === "undefined") return null

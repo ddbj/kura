@@ -2,6 +2,14 @@
 // side keeps no trace of a presign, so the "期限つき" lens (design_handoff #1)
 // is populated from this store. Cleared on page reload — matching the
 // per-session promise made by the UI.
+//
+// Trust boundary: sessionStorage under a same-origin XSS is exposed. The
+// stored `url` includes the SigV4 signature and STS session token; treat this
+// as short-lived material that must never be read into the DOM without the
+// same trust as the current STS session (i.e. render only for the owner). Do
+// not persist beyond sessionStorage and do not migrate to localStorage. If
+// the sensitivity envelope tightens, drop `url` from the schema and rebuild
+// the display URL on demand with a fresh STS + presign.
 
 const STORAGE_KEY = "kura.presigned"
 

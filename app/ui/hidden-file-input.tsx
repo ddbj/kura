@@ -6,6 +6,8 @@ type Props = {
 }
 
 // Hidden file / folder picker triggered programmatically by a Button click.
+// Clears value after each selection so the same file can be picked again in a
+// row — without this, the browser sees "no change" and skips the change event.
 export const HiddenFileInput = forwardRef<HTMLInputElement, Props>(
   ({ onChoose, directory }, ref) => (
     <input
@@ -18,9 +20,11 @@ export const HiddenFileInput = forwardRef<HTMLInputElement, Props>(
       // @ts-expect-error non-standard attribute for folder pickers
       webkitdirectory={directory === true ? "" : undefined}
       onChange={(event) => {
-        if (event.target.files !== null && event.target.files.length > 0) {
-          onChoose(event.target.files)
+        const files = event.target.files
+        if (files !== null && files.length > 0) {
+          onChoose(files)
         }
+        event.target.value = ""
       }}
     />
   ),

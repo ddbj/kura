@@ -1,3 +1,4 @@
+import { formatBytes } from "~/lib/format"
 import type { OperationKind, Transfer } from "~/shell"
 import { Button, Icon, type IconName, Tag } from "~/ui"
 
@@ -23,19 +24,6 @@ type Props = {
   onSaveAs: (id: string) => void
   onSkip: (id: string) => void
   onDismissAll: () => void
-}
-
-const formatBytes = (n: number): string => {
-  if (n < 1024) return `${n} B`
-  const k = n / 1024
-  if (k < 1024) return `${k.toFixed(k < 10 ? 1 : 0)} KB`
-  const m = k / 1024
-  if (m < 1024) return `${m.toFixed(m < 10 ? 1 : 0)} MB`
-  const g = m / 1024
-  if (g < 1024) return `${g.toFixed(g < 10 ? 1 : 0)} GB`
-  const tt = g / 1024
-
-  return `${tt.toFixed(tt < 10 ? 1 : 0)} TB`
 }
 
 const formatSpeed = (bps: number | undefined): string => {
@@ -153,6 +141,7 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
           ? (t.state === "uploading" || t.state === "checking" || t.state === "queued" || isDone)
           : (t.total > 0 && (t.state === "uploading" || isDone))
         const showRetry = t.kind === "upload" && t.state === "failed"
+        const retryLabel = showRetry && t.uploadId !== undefined ? "再開" : "再試行"
         const showConflict = t.kind === "upload" && t.state === "conflict"
 
         return (
@@ -186,7 +175,7 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
                 : t.state === "queued"
                   ? <Button kind="do" size="sm" onClick={() => onCancel(t.id)}>キャンセル</Button>
                   : showRetry
-                    ? <Button kind="po" size="sm" onClick={() => onRetry(t.id)}>再試行</Button>
+                    ? <Button kind="po" size="sm" onClick={() => onRetry(t.id)}>{retryLabel}</Button>
                     : showConflict
                       ? (
                         <>

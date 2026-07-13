@@ -1,8 +1,8 @@
 #!/bin/sh
-# Generates s3.json / iam.json from environment variables, then hands off to
-# the stock SeaweedFS entrypoint. IAM policy variables like
+# Generates s3.json / iam.json / security.toml from environment variables,
+# then hands off to the stock SeaweedFS entrypoint. IAM policy variables like
 # ${jwt:preferred_username} are escaped so they reach the JSON literally.
-set -eu
+set -euo pipefail
 
 : "${KURA_OIDC_ISSUER:?}"
 : "${KURA_OIDC_CLIENT_ID:?}"
@@ -28,6 +28,30 @@ if [ -n "${KURA_QUOTA_DEFAULT_MB:-}" ]; then
   fi
 fi
 
+# Secrets can contain any byte including " and \; embedding them raw into the
+# generated JSON/TOML would break parsing. This escapes them per the JSON
+# string spec (TOML basic strings accept the same subset).
+json_escape() {
+  printf '%s' "$1" | awk '
+    NR > 1 { printf "\\n" }
+    {
+      gsub(/\\/, "\\\\\\\\")
+      gsub(/"/, "\\\\\"")
+      gsub(/\r/, "\\r")
+      gsub(/\t/, "\\t")
+      printf "%s", $0
+    }
+  '
+}
+
+oidc_issuer_json=$(json_escape "$KURA_OIDC_ISSUER")
+oidc_client_id_json=$(json_escape "$KURA_OIDC_CLIENT_ID")
+oidc_jwks_uri_json=$(json_escape "$KURA_OIDC_JWKS_URI")
+sts_signing_key_json=$(json_escape "$KURA_STS_SIGNING_KEY")
+root_access_key_json=$(json_escape "$KURA_ROOT_ACCESS_KEY")
+root_secret_key_json=$(json_escape "$KURA_ROOT_SECRET_KEY")
+filer_jwt_key_json=$(json_escape "$KURA_FILER_JWT_KEY")
+
 mkdir -p /etc/seaweedfs
 
 # Per-user buckets mean one collection per user. The default growth of 7
@@ -47,22 +71,28 @@ EOTOML
 # remains anonymous.
 cat > /etc/seaweedfs/security.toml <<EOTOML
 [jwt.filer_signing]
-key = "${KURA_FILER_JWT_KEY}"
+key = "${filer_jwt_key_json}"
 EOTOML
 
-# KURA_ADMIN_SUBS: comma-separated Keycloak sub UUIDs -> JSON string array.
-# Empty list falls back to a value no real sub can match, so KuraAdminRole
-# becomes unassumable rather than open.
+# KURA_ADMIN_SUBS: comma-separated Keycloak sub UUIDs -> JSON string array of
+# escaped values. When empty, the KuraAdminRole trust policy takes a sentinel
+# value that no real Keycloak sub can ever match (Keycloak issues UUIDs, which
+# cannot contain ":"), leaving the role unassumable.
 admin_subs_json=""
+# Disable pathname globbing around the split so commas alone (from IFS) drive
+# it; a bare "*" in KURA_ADMIN_SUBS would otherwise expand against the cwd.
+set -f
 IFS=','
 for sub in ${KURA_ADMIN_SUBS:-}; do
   # awk trims surrounding whitespace so "a, b" and "a,b" parse the same.
   sub=$(printf '%s' "$sub" | awk '{$1=$1; print}')
   [ -n "$sub" ] || continue
-  admin_subs_json="${admin_subs_json:+${admin_subs_json}, }\"${sub}\""
+  sub_json=$(json_escape "$sub")
+  admin_subs_json="${admin_subs_json:+${admin_subs_json}, }\"${sub_json}\""
 done
 unset IFS
-[ -n "$admin_subs_json" ] || admin_subs_json='"unassigned"'
+set +f
+[ -n "$admin_subs_json" ] || admin_subs_json='"::disabled::"'
 
 cat > /etc/seaweedfs/s3.json <<EOJSON
 {
@@ -70,7 +100,7 @@ cat > /etc/seaweedfs/s3.json <<EOJSON
     {
       "name": "kura-root",
       "credentials": [
-        { "accessKey": "${KURA_ROOT_ACCESS_KEY}", "secretKey": "${KURA_ROOT_SECRET_KEY}" }
+        { "accessKey": "${root_access_key_json}", "secretKey": "${root_secret_key_json}" }
       ],
       "actions": ["Admin", "Read", "List", "Tagging", "Write"]
     }
@@ -84,16 +114,16 @@ cat > /etc/seaweedfs/iam.json <<EOJSON
     "tokenDuration": "1h",
     "maxSessionLength": "12h",
     "issuer": "kura-sts",
-    "signingKey": "${KURA_STS_SIGNING_KEY}"
+    "signingKey": "${sts_signing_key_json}"
   },
   "providers": [
     {
       "name": "keycloak",
       "type": "oidc",
       "config": {
-        "issuer": "${KURA_OIDC_ISSUER}",
-        "clientId": "${KURA_OIDC_CLIENT_ID}",
-        "jwksUri": "${KURA_OIDC_JWKS_URI}",
+        "issuer": "${oidc_issuer_json}",
+        "clientId": "${oidc_client_id_json}",
+        "jwksUri": "${oidc_jwks_uri_json}",
         "roleMapping": {
           "rules": [],
           "defaultRole": "arn:aws:iam::role/KuraUserRole"
@@ -204,13 +234,21 @@ quota_reconcile() {
     echo "kura-ops: quota reconcile: s3.bucket.list failed: ${list_output}" >&2
     return 1
   fi
-  echo "$list_output" \
-    | grep "	size:" | grep -v "	quota:" | awk '{print $1}' \
-    | while read -r bucket; do
-        echo "s3.bucket.quota -name=${bucket} -op=set -sizeMB=${KURA_QUOTA_DEFAULT_MB:-1048576}" \
-          | weed shell -master localhost:9333 \
-          && echo "kura-ops: applied default quota to ${bucket}"
-      done
+  # Individual bucket set failures must not hide behind the last iteration's
+  # exit status; count them and surface a non-zero exit so ops-loop's
+  # retry-backoff kicks in instead of the full interval.
+  failures=0
+  buckets=$(echo "$list_output" | grep "	size:" | grep -v "	quota:" | awk '{print $1}')
+  for bucket in $buckets; do
+    if echo "s3.bucket.quota -name=${bucket} -op=set -sizeMB=${KURA_QUOTA_DEFAULT_MB:-1048576}" \
+      | weed shell -master localhost:9333; then
+      echo "kura-ops: applied default quota to ${bucket}"
+    else
+      failures=$((failures + 1))
+      echo "kura-ops: quota reconcile: set failed for ${bucket}" >&2
+    fi
+  done
+  [ "$failures" -eq 0 ]
 }
 
 # Waits until weed shell can reach the master (not up yet when this

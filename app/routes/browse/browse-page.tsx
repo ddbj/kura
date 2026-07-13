@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "react-oidc-context"
 import { Link, useNavigate } from "react-router"
 
 import { usernameFromAccessToken } from "~/lib/auth/token"
 import { useConfig } from "~/lib/config"
+import { formatBytes } from "~/lib/format"
 import {
+  abortPendingUpload,
   applyPublicState,
   beginPublicStateChange,
   DEFAULT_QUOTA_BYTES,
@@ -16,7 +18,11 @@ import {
   isUsableBucketName,
   listBucketTotalBytes,
   listDirectory,
+  listPendingUploads,
+  listUploadedParts,
+  planResume,
   prefixToSegments,
+  prefixToUrlPath,
   presignDownloadUrl,
   publicUrl,
   revertPublicStateOnFailure,
@@ -86,19 +92,6 @@ type SortKey = "name" | "size" | "updated"
 type SortDir = "asc" | "desc"
 type Lens = "all" | "public" | "timed"
 
-const formatBytes = (n: number, digits = 1): string => {
-  if (n < 1024) return `${n} B`
-  const k = n / 1024
-  if (k < 1024) return `${k.toFixed(k < 10 ? digits : 0)} KB`
-  const m = k / 1024
-  if (m < 1024) return `${m.toFixed(m < 10 ? digits : 0)} MB`
-  const g = m / 1024
-  if (g < 1024) return `${g.toFixed(g < 10 ? digits : 0)} GB`
-  const tt = g / 1024
-
-  return `${tt.toFixed(digits < 2 ? digits : 2)} TB`
-}
-
 const formatShortDate = (d: Date): string => {
   const mm = String(d.getMonth() + 1).padStart(2, "0")
   const dd = String(d.getDate()).padStart(2, "0")
@@ -106,7 +99,50 @@ const formatShortDate = (d: Date): string => {
   return `${mm}/${dd}`
 }
 
-const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
+// One shared ticker at page level drives every "残り N 分" / "あと N 日" cell,
+// instead of each row starting its own setInterval. Nulls until first mount so
+// server rendering (should we ever wire it up) doesn't diverge from the client.
+const NowContext = createContext<number | null>(null)
+
+const NowProvider = ({ children }: { children: React.ReactNode }) => {
+  const [now, setNow] = useState<number | null>(null)
+  useEffect(() => {
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+
+    return () => clearInterval(id)
+  }, [])
+
+  return <NowContext.Provider value={now}>{children}</NowContext.Provider>
+}
+
+const useNow = (): number | null => useContext(NowContext)
+
+// Extracted so Date.now() lives outside render — the ticker updates every 30s.
+const ExpiresInMinutes = ({ expiresAtMs }: { expiresAtMs: number }) => {
+  const nowMs = useNow() ?? expiresAtMs
+
+  return <>{Math.max(0, Math.round((expiresAtMs - nowMs) / 60000))}</>
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+const TtlExpiry = ({ createdMs, ttlDays }: { createdMs: number; ttlDays: number }) => {
+  const nowMs = useNow()
+  const expiresMs = createdMs + ttlDays * MS_PER_DAY
+  if (nowMs === null) return null
+  const remainingDays = Math.max(0, Math.ceil((expiresMs - nowMs) / MS_PER_DAY))
+
+  return <>あと {remainingDays} 日</>
+}
+
+const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => (
+  <NowProvider>
+    <BrowseInner bucket={bucket} prefix={prefix} />
+  </NowProvider>
+)
+
+const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
   const s3 = useS3()
   const config = useConfig()
   const queryClient = useQueryClient()
@@ -136,24 +172,39 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
     staleTime: 60_000,
   })
 
+  const pendingUploads = useQuery({
+    queryKey: ["pendingUploads", bucket, prefix],
+    queryFn: () => listPendingUploads(s3, bucket, prefix),
+    enabled: bucketReady.data === true,
+    staleTime: 30_000,
+  })
+
   const files = useMemo(() => directory.data?.files ?? [], [directory.data?.files])
   const dirs = useMemo(() => directory.data?.dirs ?? [], [directory.data?.dirs])
   const fileKeys = useMemo(() => files.map((f) => f.key), [files])
   const publicFlags = useObjectPublicFlags(s3, bucket, fileKeys)
 
   // Session-local presigned URL log fuels the "期限つき" lens (design_handoff #1).
+  // The 30 s tick only exists to expire rows past their `expiresAt`; if the log
+  // is empty there is nothing to age, so the interval is a no-op that we skip.
   const [presignedTick, setPresignedTick] = useState(0)
+  const presignedListInitial = useMemo(() => listSessionPresigned(bucket), [bucket])
+  const [hasPresigned, setHasPresigned] = useState(presignedListInitial.length > 0)
   useEffect(() => {
+    if (!hasPresigned) return
     const id = setInterval(() => setPresignedTick((v) => v + 1), 30_000)
 
     return () => clearInterval(id)
-  }, [])
+  }, [hasPresigned])
   const presignedList = useMemo<SessionPresigned[]>(
     () => listSessionPresigned(bucket),
     // presignedTick + bucket both invalidate the memo when a refresh is due.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bucket, presignedTick, transfersApi.transfers.length],
   )
+  useEffect(() => {
+    setHasPresigned(presignedList.length > 0)
+  }, [presignedList.length])
   const presignedByKey = useMemo(() => {
     const m = new Map<string, SessionPresigned>()
     for (const p of presignedList) m.set(p.key, p)
@@ -183,23 +234,71 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
   const [folderDeleteTarget, setFolderDeleteTarget] = useState<{ prefix: string; name: string } | null>(null)
   const [folderRenameTarget, setFolderRenameTarget] = useState<{ prefix: string; name: string } | null>(null)
   const [folderMoveTarget, setFolderMoveTarget] = useState<{ prefix: string; name: string } | null>(null)
+  const [flash, setFlash] = useState<{ tone: "red" | "ok" | "warn"; message: string } | null>(null)
 
-  // Row-menu / folder-menu / user-menu close on outside click
+  const closeAllMenus = useCallback(() => {
+    setOpenRowMenu(null)
+    setUploadMenuOpen(false)
+    setOpenFolderMenu(null)
+  }, [])
+
+  // Row-menu / folder-menu / upload-menu keyboard + outside close. Escape
+  // closes; ArrowUp / ArrowDown move focus between the visible menu's items;
+  // Tab leaves the menu (roving tabindex — focus goes wherever Tab would
+  // normally land next).
   useEffect(() => {
     if (openRowMenu === null && !uploadMenuOpen && openFolderMenu === null) return
-    const onClick = () => {
-      setOpenRowMenu(null)
-      setUploadMenuOpen(false)
-      setOpenFolderMenu(null)
-    }
+    const onClick = () => closeAllMenus()
     // Delay so the click that opened doesn't close instantly.
     const t = setTimeout(() => document.addEventListener("click", onClick), 0)
+
+    const currentMenuItems = (): HTMLElement[] => {
+      const menus = document.querySelectorAll<HTMLElement>("[role=menu]")
+      const items: HTMLElement[] = []
+      for (const menu of Array.from(menus)) {
+        for (const item of Array.from(menu.querySelectorAll<HTMLElement>("[role=menuitem]"))) {
+          items.push(item)
+        }
+      }
+
+      return items
+    }
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        closeAllMenus()
+
+        return
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const items = currentMenuItems()
+        if (items.length === 0) return
+        const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const idx = active === null ? -1 : items.indexOf(active)
+        const nextIdx = event.key === "ArrowDown"
+          ? (idx + 1 + items.length) % items.length
+          : (idx - 1 + items.length) % items.length
+        const next = items[nextIdx]
+        if (next !== undefined) {
+          event.preventDefault()
+          next.focus()
+        }
+
+        return
+      }
+      if (event.key === "Tab") {
+        closeAllMenus()
+      }
+    }
+    document.addEventListener("keydown", onKey)
 
     return () => {
       clearTimeout(t)
       document.removeEventListener("click", onClick)
+      document.removeEventListener("keydown", onKey)
     }
-  }, [openRowMenu, uploadMenuOpen, openFolderMenu])
+  }, [openRowMenu, uploadMenuOpen, openFolderMenu, closeAllMenus])
 
   const used = usage.data ?? 0
   const total = DEFAULT_QUOTA_BYTES
@@ -221,7 +320,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
       const cmp = sort.key === "name"
         ? entryName(a.key).localeCompare(entryName(b.key))
         : sort.key === "size"
-          ? a.size - b.size
+          ? (a.size ?? 0) - (b.size ?? 0)
           : a.lastModified.getTime() - b.lastModified.getTime()
 
       return sort.dir === "asc" ? cmp : -cmp
@@ -278,8 +377,8 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
       const url = await presignDownloadUrl(s3, bucket, key)
       window.location.assign(url)
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("download failed", err)
+      const message = err instanceof Error ? err.message : String(err)
+      setFlash({ tone: "red", message: `ダウンロードに失敗しました: ${message}` })
     }
   }
 
@@ -294,6 +393,10 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
         throw err
       }
     },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      setFlash({ tone: "red", message: `公開停止に失敗しました: ${message}` })
+    },
   })
 
   const openShare = (keys: string[], mode: "pub" | "temp" = "pub") => {
@@ -301,7 +404,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
       const f = files.find((x) => x.key === k)
       if (f === undefined) return []
 
-      return [{ bucket, key: f.key, name: entryName(f.key), size: f.size }]
+      return [{ bucket, key: f.key, name: entryName(f.key), size: f.size ?? 0 }]
     })
     if (targets.length === 0) return
     setShare({ targets, mode })
@@ -312,7 +415,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
       const f = files.find((x) => x.key === k)
       if (f === undefined) return []
 
-      return [{ bucket, key: f.key, name: entryName(f.key), size: f.size, isPublic: publicFlags.get(k) === true }]
+      return [{ bucket, key: f.key, name: entryName(f.key), size: f.size ?? 0, isPublic: publicFlags.get(k) === true }]
     })
     if (targets.length === 0) return
     setDeleteTargets(targets)
@@ -332,10 +435,20 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
     transfersApi.enqueue(bucket, prefix, arr)
   }
 
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+  const onDrop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
     if (overQuota) return
+    const items = event.dataTransfer.items
+    if (items.length > 0 && typeof (items[0] as DataTransferItem).webkitGetAsEntry === "function") {
+      // Directory-capable path: walk each dragged entry and reconstruct File
+      // objects with a `webkitRelativePath` so the transfer preserves the
+      // dropped folder structure.
+      const files = await filesFromDataTransferItems(items)
+      if (files.length > 0) transfersApi.enqueue(bucket, prefix, files)
+
+      return
+    }
     const arr: File[] = []
     for (const item of Array.from(event.dataTransfer.files)) arr.push(item)
     if (arr.length > 0) transfersApi.enqueue(bucket, prefix, arr)
@@ -353,27 +466,97 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
 
   const existingFolderNames = useMemo(() => dirs.map((d) => dirName(d)), [dirs])
 
-  // Breadcrumb pieces
+  // Breadcrumb pieces. prefixToUrlPath percent-encodes each segment so folders
+  // containing `?`, `#`, `%`, ".", "..", `\` don't break the URL.
   const segments = prefixToSegments(prefix)
   const bucketRootHref = "/"
   const segHref = (idx: number): string => {
     const upTo = segments.slice(0, idx + 1)
 
-    return `/_browse/${upTo.join("/")}/`
+    return `/_browse/${prefixToUrlPath(`${upTo.join("/")}/`)}/`
   }
+  const dirHref = (dirPrefix: string): string =>
+    `/_browse/${prefixToUrlPath(dirPrefix)}/`
+
+  // Pending upload resumption. Selecting a matching file plans the resume
+  // against SeaweedFS's part list; the transfers layer runs the rest.
+  const pendingResumeInputRef = useRef<HTMLInputElement>(null)
+  const [pendingResumeTarget, setPendingResumeTarget] = useState<{ key: string; uploadId: string } | null>(null)
+
+  const startResumeForFile = async (file: File) => {
+    const target = pendingResumeTarget
+    if (target === null) return
+    try {
+      const parts = await listUploadedParts(s3, bucket, target.key, target.uploadId)
+      const planned = planResume({ fileSize: file.size, parts })
+      if (!planned.ok) {
+        setFlash({ tone: "red", message: `再開できません: ${planned.reason}` })
+
+        return
+      }
+      transfersApi.resumePending(bucket, target.key, target.uploadId, file)
+      setFlash({ tone: "ok", message: "再開を開始しました" })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setFlash({ tone: "red", message: `再開に失敗しました: ${message}` })
+    } finally {
+      setPendingResumeTarget(null)
+    }
+  }
+
+  const abortPending = async (key: string, uploadId: string) => {
+    try {
+      await abortPendingUpload(s3, bucket, key, uploadId)
+      await queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+      setFlash({ tone: "ok", message: "破棄しました" })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setFlash({ tone: "red", message: `破棄に失敗しました: ${message}` })
+    }
+  }
+
+  const pending = pendingUploads.data ?? []
 
   return (
     <div
       className="wrap"
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
-      onDrop={onDrop}
+      onDrop={(event) => void onDrop(event)}
     >
+      {bucketReady.isError
+        ? (
+          <div style={{ margin: "24px 0 0" }}>
+            <Callout tone="red" role="alert">
+              <div>
+                領域の初期化に失敗しました: {bucketReady.error instanceof Error ? bucketReady.error.message : String(bucketReady.error)}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <Button size="sm" onClick={() => void bucketReady.refetch()}>再試行</Button>
+              </div>
+            </Callout>
+          </div>
+        )
+        : null}
+
       {overQuota
         ? (
           <div className="banner red" style={{ margin: "24px 0 0", alignItems: "center" }}>
             <Icon name="up" size={16} style={{ color: "var(--red)", flex: "none", marginTop: 1 }} />
             <div>容量が上限に達しています。新規アップロードは停止中です。ファイルを削除して空き容量ができれば自動的に再開します。ダウンロード・削除は引き続き行えます。</div>
+          </div>
+        )
+        : null}
+
+      {flash !== null
+        ? (
+          <div style={{ margin: "16px 0 0" }}>
+            <Callout tone={flash.tone} role={flash.tone === "red" ? "alert" : "status"}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1 }}>{flash.message}</span>
+                <Button kind="ghost" size="sm" onClick={() => setFlash(null)}>閉じる</Button>
+              </div>
+            </Callout>
           </div>
         )
         : null}
@@ -470,6 +653,50 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
         )
         : null}
 
+      {pending.length > 0
+        ? (
+          <div className="card" style={{ marginBottom: 14 }} data-testid="pending-uploads">
+            <div className="bulkbar">
+              <b>再開待ちのアップロード</b>
+              <span style={{ color: "var(--inkSoft)" }}>{pending.length}件</span>
+            </div>
+            {pending.map((p) => (
+              <div className="row nosel" key={`${p.key}::${p.uploadId}`}>
+                <div className="c-name">
+                  <Icon name="up" size={16} className="ico" />
+                  <span className="nm" title={p.key}>{entryName(p.key)}</span>
+                </div>
+                <div className="c-pub" />
+                <div className="c-size">—</div>
+                <div className="c-date">—</div>
+                <div className="c-act" style={{ display: "flex", gap: 6 }}>
+                  <Button
+                    kind="po"
+                    size="sm"
+                    onClick={() => {
+                      setPendingResumeTarget({ key: p.key, uploadId: p.uploadId })
+                      pendingResumeInputRef.current?.click()
+                    }}
+                  >
+                    再開
+                  </Button>
+                  <Button kind="stop" size="sm" onClick={() => void abortPending(p.key, p.uploadId)}>
+                    破棄
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <HiddenFileInput
+              ref={pendingResumeInputRef}
+              onChoose={(files) => {
+                const f = files.item(0)
+                if (f !== null) void startResumeForFile(f)
+              }}
+            />
+          </div>
+        )
+        : null}
+
       <div className={cn("card", { menuopen: openRowMenu !== null })}>
         {selection.size === 0
           ? null
@@ -485,7 +712,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
         <div className="thead sel">
           <span>
             <Checkbox
-              checked={selection.size > 0 && selection.size === rows.length}
+              checked={rows.length > 0 && selection.size > 0 && selection.size === rows.length}
               onChange={(next) => {
                 if (next) setSelection(new Set(rows.map((r) => r.key)))
                 else clearSelection()
@@ -515,7 +742,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
             align="right"
             onClick={() => toggleSort("updated")}
           >
-            更新日
+            更新日{config.fileTtlDays === null ? "" : " / 期限"}
           </SortButton>
           <span />
         </div>
@@ -556,7 +783,7 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
               <>
                 {dirs.filter((d) => search === "" || dirName(d).toLowerCase().includes(search.toLowerCase())).map((dirPrefix) => {
                   const name = dirName(dirPrefix)
-                  const href = `/_browse/${segments.join("/")}${segments.length === 0 ? "" : "/"}${name}/`
+                  const href = dirHref(dirPrefix)
                   const isFolderMenuOpen = openFolderMenu === dirPrefix
 
                   return (
@@ -645,8 +872,17 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
                               ? <Tag tone="warn"><Icon name="clock" size={11} />期限つき</Tag>
                               : null}
                         </div>
-                        <div className="c-size">{formatBytes(file.size)}</div>
-                        <div className="c-date">{formatShortDate(file.lastModified)}</div>
+                        <div className="c-size">{file.size === undefined ? "—" : formatBytes(file.size)}</div>
+                        <div className="c-date">
+                          <div>{formatShortDate(file.lastModified)}</div>
+                          {config.fileTtlDays === null
+                            ? null
+                            : (
+                              <div style={{ fontSize: 11, color: "var(--inkSoft)" }}>
+                                <TtlExpiry createdMs={file.lastModified.getTime()} ttlDays={config.fileTtlDays} />
+                              </div>
+                            )}
+                        </div>
                         <div className="c-act">
                           {isPub
                             ? (
@@ -863,17 +1099,74 @@ const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
   )
 }
 
-// Extracted so Date.now() lives outside render — the ticker updates every 30s.
-const ExpiresInMinutes = ({ expiresAtMs }: { expiresAtMs: number }) => {
-  const [now, setNow] = useState<number | null>(null)
-  useEffect(() => {
-    setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), 30_000)
-
-    return () => clearInterval(id)
-  }, [])
-  const nowMs = now ?? expiresAtMs
-
-  return <>{Math.max(0, Math.round((expiresAtMs - nowMs) / 60000))}</>
+// Recursive walk over a DataTransferItemList (drag-and-drop). Each dropped
+// entry is either a File or a directory to enumerate; every reconstructed
+// `File` carries a `webkitRelativePath` so callers can preserve the folder
+// structure when computing S3 keys. Browsers without the non-standard
+// `webkitGetAsEntry` fall through to the caller's non-directory path.
+type FileSystemEntry = {
+  isFile: boolean
+  isDirectory: boolean
+  name: string
+  fullPath: string
+  file?: (cb: (file: File) => void, err: (e: unknown) => void) => void
+  createReader?: () => FileSystemDirectoryReader
 }
 
+type FileSystemDirectoryReader = {
+  readEntries: (cb: (entries: FileSystemEntry[]) => void, err: (e: unknown) => void) => void
+}
+
+const filesFromDataTransferItems = async (items: DataTransferItemList): Promise<File[]> => {
+  const roots: FileSystemEntry[] = []
+  for (const it of Array.from(items)) {
+    // webkitGetAsEntry is non-standard; typed defensively.
+    const entry = (it as unknown as { webkitGetAsEntry: () => FileSystemEntry | null }).webkitGetAsEntry()
+    if (entry !== null && entry !== undefined) roots.push(entry)
+  }
+  const out: File[] = []
+  await Promise.all(roots.map((root) => walkEntry(root, "", out)))
+
+  return out
+}
+
+const walkEntry = async (entry: FileSystemEntry, parentPath: string, out: File[]): Promise<void> => {
+  const readFile = entry.file
+  if (entry.isFile && readFile !== undefined) {
+    const file = await new Promise<File | null>((resolve) => {
+      readFile(resolve, () => resolve(null))
+    })
+    if (file === null) return
+    const rel = `${parentPath}${entry.name}`
+    // Overwrite webkitRelativePath so callers see the drop path, not "" (which
+    // is what a plain File has). Object.defineProperty because the property
+    // is read-only on File.
+    try {
+      Object.defineProperty(file, "webkitRelativePath", { value: rel, configurable: true })
+    } catch {
+      // ignore — some engines refuse to redefine; the file still uploads to
+      // its own name.
+    }
+    out.push(file)
+
+    return
+  }
+  if (entry.isDirectory && entry.createReader !== undefined) {
+    const reader = entry.createReader()
+    const readAll = async (): Promise<FileSystemEntry[]> => {
+      const all: FileSystemEntry[] = []
+      for (;;) {
+        const chunk = await new Promise<FileSystemEntry[]>((resolve) => {
+          reader.readEntries((entries) => resolve(entries), () => resolve([]))
+        })
+        if (chunk.length === 0) break
+        for (const e of chunk) all.push(e)
+      }
+
+      return all
+    }
+    const children = await readAll()
+    const nextParent = `${parentPath}${entry.name}/`
+    await Promise.all(children.map((child) => walkEntry(child, nextParent, out)))
+  }
+}

@@ -22,15 +22,35 @@ export const auditFileDate = (name: string): Date | null => {
 
 const isCompressed = (name: string): boolean => name.endsWith(".gz")
 
+// Seconds since UTC midnight for the given instant.
+const secondsSinceUtcMidnight = (now: Date): number =>
+  now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds()
+
+const isYesterday = (fileDate: Date, now: Date): boolean => {
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const oneDayMs = 24 * 60 * 60 * 1000
+
+  return fileDate.getTime() === todayUtc - oneDayMs
+}
+
 // Compresses finished (non-today) plain logs and deletes files past the
 // retention window. Re-running after a crash is safe: gzip overwrites any
 // partial output before the plain file is removed.
+//
+// nginx opens the date-stamped log path per request and caches the fd in
+// open_log_file_cache (kura.conf.template: inactive=60s). Right after UTC
+// midnight the worker may still hold yesterday's fd; gzipping+unlinking then
+// leaves the worker writing to a deleted inode. rotateLagSeconds delays
+// yesterday's rotation until every cached fd has aged out. Older days are
+// safe to rotate unconditionally.
 export const rotateAuditLogs = async (
   dir: string,
   retentionDays: number,
   now: Date,
+  rotateLagSeconds = 120,
 ): Promise<{ compressed: number; deleted: number }> => {
   const today = now.toISOString().slice(0, 10)
+  const withinLag = secondsSinceUtcMidnight(now) < rotateLagSeconds
   let compressed = 0
   let deleted = 0
 
@@ -48,6 +68,9 @@ export const rotateAuditLogs = async (
     }
 
     if (!isCompressed(name) && !name.startsWith(`access-${today}.`)) {
+      if (withinLag && isYesterday(date, now)) {
+        continue
+      }
       await pipeline(createReadStream(path), createGzip(), createWriteStream(`${path}.gz`))
       await unlink(path)
       compressed += 1

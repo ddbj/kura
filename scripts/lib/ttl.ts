@@ -5,6 +5,13 @@ import { isOlderThanDays } from "./time.ts"
 
 const DELETE_BATCH = 1000
 
+// Folder-persistence marker created by the SPA when a user makes an empty
+// folder (there is no S3 API for empty prefixes; a zero-byte .keep object
+// under the prefix keeps the folder listable). TTL must skip these or empty
+// folders would evaporate on their own age.
+const isFolderKeepMarker = (key: string): boolean =>
+  key === ".keep" || key.endsWith("/.keep")
+
 // Deletes objects past the file TTL (docs/operations.md). Creation time is
 // the S3 LastModified, the same basis as the SPA expiry column.
 export const sweepBucketTtl = async (
@@ -18,6 +25,7 @@ export const sweepBucketTtl = async (
     for (const object of page.Contents ?? []) {
       if (
         object.Key !== undefined
+        && !isFolderKeepMarker(object.Key)
         && object.LastModified !== undefined
         && isOlderThanDays(object.LastModified, ttlDays, now)
       ) {

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "react-oidc-context"
 
 import { useConfig } from "~/lib/config"
+import { formatBytes } from "~/lib/format"
 import {
   accessTokenForDuration,
   applyPublicState,
@@ -31,24 +32,13 @@ type Props = {
 }
 
 type Mode = "pub" | "temp"
-type Ttl = 5 | 15 | 60
+type Ttl = 15 | 60 | 720
 
 type RowState =
   | { phase: "idle" }
   | { phase: "busy" }
   | { phase: "ok"; url: string; expiresAt: Date | null }
   | { phase: "err"; message: string }
-
-const formatBytes = (n: number): string => {
-  if (n < 1024) return `${n} B`
-  const k = n / 1024
-  if (k < 1024) return `${k.toFixed(k < 10 ? 1 : 0)} KB`
-  const m = k / 1024
-  if (m < 1024) return `${m.toFixed(m < 10 ? 1 : 0)} MB`
-  const g = m / 1024
-
-  return `${g.toFixed(g < 10 ? 1 : 0)} GB`
-}
 
 // Design_handoff frames 7 & 8. Runs targets in parallel via allSettled so a
 // single failure doesn't stop the whole batch, and lets the user retry just
@@ -59,7 +49,7 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
   const s3 = useS3()
   const queryClient = useQueryClient()
   const [mode, setMode] = useState<Mode>(initialMode)
-  const [ttl, setTtl] = useState<Ttl>(60)
+  const [ttl, setTtl] = useState<Ttl>(720)
   const [busyBatch, setBusyBatch] = useState(false)
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({})
 
@@ -215,15 +205,15 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
                   onChange={setTtl}
                   ariaLabel="有効期限"
                   options={[
-                    { value: 5, label: "5分" },
                     { value: 15, label: "15分" },
                     { value: 60, label: "1時間" },
+                    { value: 720, label: "12時間" },
                   ]}
                 />
               </div>
               <div className="banner ochre">
                 <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
-                <div>リンクは最長で約{ttl === 60 ? "1時間" : `${ttl}分`}後に切れます。発行したあとに延長や取り消しはできません。</div>
+                <div>リンクは最長で約{ttl === 720 ? "12時間" : ttl === 60 ? "1時間" : `${ttl}分`}後に切れます。発行したあとに延長や取り消しはできません。</div>
               </div>
             </>
           ) : null}

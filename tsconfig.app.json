@@ -28,5 +28,5 @@
     "tests/pbt/**/*",
     ".react-router/types/**/*"
   ],
-  "exclude": ["tests/pbt/scripts/**/*"]
+  "exclude": ["tests/pbt/scripts/**/*", "tests/unit/scripts/**/*"]
 }

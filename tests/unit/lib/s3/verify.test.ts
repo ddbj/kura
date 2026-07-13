@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest"
+import { describe, expect, test } from "vitest"
 
 import { ResumeMismatchError, verifyCompletedParts } from "~/lib/s3/verify"
 
@@ -45,49 +45,29 @@ describe("verifyCompletedParts", () => {
       .rejects.toBeInstanceOf(ResumeMismatchError)
   })
 
-  test("verifyCompletedParts_moreThanConcurrencyLimitParts_runsUpToFourAtOnce", async () => {
+  test("verifyCompletedParts_moreThanConcurrencyLimitParts_verifiesEveryOne", async () => {
+    // Three times the internal concurrency limit (4). "All-match resolves"
+    // proves the whole queue drains, not just the first batch, without
+    // coupling the test to the specific scheduling.
     const partSize = 8
-    const partCount = 6
-    const manyFile = new File([new TextEncoder().encode("0".repeat(partSize * partCount))], "many.bin")
-    const parts = Array.from({ length: partCount }, (_, i) => ({
+    const partCount = 12
+    const manyBytes = new TextEncoder().encode("01234567".repeat(partCount))
+    const manyFile = new File([manyBytes], "many.bin")
+    const matching = Array.from({ length: partCount }, (_, i) => ({
       partNumber: i + 1,
       size: partSize,
-      etag: "\"deadbeef\"", // never matches; only concurrency is under test here
+      etag: `"${MD5_PART1}"`,
     }))
+    await expect(verifyCompletedParts({ file: manyFile, parts: matching, partSize }))
+      .resolves.toBeUndefined()
 
-    const EXPECTED_CONCURRENCY = 4
-    let active = 0
-    let peak = 0
-    let releaseAll: () => void = () => undefined
-    const barrier = new Promise<void>((resolve) => {
-      releaseAll = resolve
-    })
-    const originalStream = Blob.prototype.stream
-    const spy = vi.spyOn(Blob.prototype, "stream").mockImplementation(function (this: Blob) {
-      active += 1
-      peak = Math.max(peak, active)
-      if (active >= EXPECTED_CONCURRENCY) releaseAll()
-      const real = originalStream.call(this)
-
-      return new ReadableStream({
-        async start(controller) {
-          await barrier
-          const reader = real.getReader()
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            controller.enqueue(value)
-          }
-          controller.close()
-          active -= 1
-        },
-      })
-    })
-
-    await verifyCompletedParts({ file: manyFile, parts, partSize }).catch(() => undefined)
-    spy.mockRestore()
-
-    expect(peak).toBe(EXPECTED_CONCURRENCY)
+    // Flip only the last part: if the queue stopped at the first batch, this
+    // mismatch would slip through and the promise would still resolve.
+    const withTailMismatch = matching.map((p, i) =>
+      i === partCount - 1 ? { ...p, etag: `"${MD5_PART2}"` } : p,
+    )
+    await expect(verifyCompletedParts({ file: manyFile, parts: withTailMismatch, partSize }))
+      .rejects.toBeInstanceOf(ResumeMismatchError)
   })
 
   test("verifyCompletedParts_abortedSignal_throws", async () => {

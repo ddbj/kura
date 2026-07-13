@@ -45,6 +45,10 @@ export type Transfer = {
   isFolder?: boolean | undefined
   fileCount?: number | undefined
   destKey?: string | undefined
+  // Set on an upload once its multipart upload id is known. If a transfer
+  // fails with this populated, retry can continue the same multipart via
+  // resumeUpload instead of starting a fresh one.
+  uploadId?: string | undefined
 }
 
 export type DeleteTarget = { key: string; size: number }
@@ -216,6 +220,12 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
 
   const runTransferRef = useRef<(id: string, key: string) => void>(() => undefined)
 
+  const promoteQueuedInto = useCallback((current: readonly Transfer[]): void => {
+    if (runningCountRef.current >= MAX_CONCURRENT) return
+    const next = current.find((t) => t.state === "queued" && t.kind === "upload")
+    if (next !== undefined) runTransferRef.current(next.id, next.key)
+  }, [])
+
   const runTransfer = useCallback((id: string, key: string): void => {
     const file = filesRef.current.get(id)
     if (file === undefined) return
@@ -224,11 +234,12 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     const bucket = transfer.bucket
 
     runningCountRef.current += 1
-    updateOne(id, { state: "uploading", loaded: 0, key, error: undefined })
+    updateOne(id, { state: "uploading", loaded: 0, key, error: undefined, uploadId: undefined })
 
     const cancelState = { requested: false }
     let lastProgressAt = performance.now()
     let lastLoaded = 0
+    let recordedUploadId: string | undefined
     const onProgress = (progress: UploadProgress) => {
       const now = performance.now()
       const dt = now - lastProgressAt
@@ -238,11 +249,19 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         lastProgressAt = now
         lastLoaded = progress.loaded
       }
-      updateOne(id, {
+      // Publish the multipart upload id once it appears so a retry after
+      // failure can call resumeUpload instead of starting fresh.
+      const currentUploadId = running.uploadId()
+      const patch: Partial<Transfer> = {
         loaded: progress.loaded,
         total: progress.total,
-        ...(speedBps === undefined ? {} : { speedBps }),
-      })
+      }
+      if (speedBps !== undefined) patch.speedBps = speedBps
+      if (currentUploadId !== undefined && currentUploadId !== recordedUploadId) {
+        recordedUploadId = currentUploadId
+        patch.uploadId = currentUploadId
+      }
+      updateOne(id, patch)
     }
     const running: RunningUpload = startUpload({ s3, bucket, key, file, onProgress })
     runningMap.current.set(id, {
@@ -255,7 +274,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
 
     running.done
       .then(() => {
-        updateOne(id, { state: "done", loaded: file.size, total: file.size })
+        updateOne(id, { state: "done", loaded: file.size, total: file.size, uploadId: undefined })
         void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
@@ -273,19 +292,24 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         const message = error instanceof ResumeMismatchError
           ? "content mismatch"
           : error instanceof Error ? error.message : String(error)
-        updateOne(id, { state: "failed", error: message })
+        const finalUploadId = running.uploadId()
+        updateOne(id, {
+          state: "failed",
+          error: message,
+          ...(finalUploadId === undefined ? {} : { uploadId: finalUploadId }),
+        })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
       })
       .finally(() => {
         runningMap.current.delete(id)
         runningCountRef.current -= 1
-        // Kick the queue: if any queued transfers remain, promote one.
-        const next = transfersRef.current.find((t) => t.state === "queued" && t.kind === "upload")
-        if (next !== undefined && runningCountRef.current < MAX_CONCURRENT) {
-          runTransferRef.current(next.id, next.key)
-        }
+        // Defer to a macrotask so React has committed the state update we
+        // just enqueued (failed / done) and the transfers effect has synced
+        // transfersRef.current. Promotion inside the setTransfers updater
+        // would be a nested setState — banned by React.
+        setTimeout(() => promoteQueuedInto(transfersRef.current), 0)
       })
-  }, [s3, queryClient, updateOne, removeOne])
+  }, [s3, queryClient, updateOne, removeOne, promoteQueuedInto])
 
   useEffect(() => {
     runTransferRef.current = runTransfer
@@ -364,42 +388,109 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     removeOne(id)
   }, [removeOne])
 
+  const runResume = useCallback((id: string, bucket: string, key: string, uploadId: string, file: File): void => {
+    runningCountRef.current += 1
+    updateOne(id, { state: "uploading", error: undefined, uploadId, key })
+
+    const cancelState = { requested: false }
+    const running: RunningUpload = resumeUpload({
+      s3, bucket, key, uploadId, file,
+      onProgress: (progress) => updateOne(id, { loaded: progress.loaded, total: progress.total }),
+    })
+    runningMap.current.set(id, {
+      id,
+      abort: async () => {
+        cancelState.requested = true
+        await running.abort()
+      },
+    })
+    running.done
+      .then(() => {
+        updateOne(id, { state: "done", loaded: file.size, total: file.size, uploadId: undefined })
+        void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
+        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+        void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+        setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
+      })
+      .catch((error: unknown) => {
+        if (cancelState.requested) {
+          void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+          removeOne(id)
+
+          return
+        }
+        const message = error instanceof ResumeMismatchError
+          ? "content mismatch"
+          : error instanceof Error ? error.message : String(error)
+        updateOne(id, { state: "failed", error: message, uploadId })
+        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+      })
+      .finally(() => {
+        runningMap.current.delete(id)
+        runningCountRef.current -= 1
+        // Defer promotion to after the failed-state commit lands. React
+        // updaters must be pure and shouldn't kick more transfers; a microtask
+        // reads the just-committed transfersRef.
+        queueMicrotask(() => promoteQueuedInto(transfersRef.current))
+      })
+  }, [s3, queryClient, updateOne, removeOne, promoteQueuedInto])
+
   const retry = useCallback((id: string): void => {
     const t = transfersRef.current.find((x) => x.id === id)
     if (t === undefined) return
+    const file = filesRef.current.get(id)
+    // Same-session resume: if the multipart upload id is still recorded and
+    // the File object is still in memory, continue the same upload rather
+    // than starting fresh (which would leave abandoned parts behind).
+    if (t.uploadId !== undefined && file !== undefined) {
+      runResume(id, t.bucket, t.key, t.uploadId, file)
+
+      return
+    }
     updateOne(id, { state: "queued", error: undefined })
     if (runningCountRef.current < MAX_CONCURRENT) {
       runTransferRef.current(id, t.key)
     }
-  }, [updateOne])
+  }, [updateOne, runResume])
 
   const cancelAll = useCallback((): void => {
     for (const [id, r] of runningMap.current.entries()) {
       void r.abort()
       updateOne(id, { state: "failed", error: "cancelled" })
     }
-    setTransfers((prev) => prev.filter((t) =>
-      t.state === "uploading" || t.state === "done" ? true : false,
-    ))
-    for (const t of transfersRef.current) {
-      if (t.state === "queued" || t.state === "checking" || t.state === "conflict" || t.state === "failed" || t.state === "paused") {
-        filesRef.current.delete(t.id)
+    // Filter and clean up files inside the same updater so both operate on
+    // the same snapshot; reading transfersRef in a separate step misses rows
+    // added between the two updates.
+    setTransfers((prev) => {
+      const kept: Transfer[] = []
+      for (const t of prev) {
+        if (t.state === "uploading" || t.state === "done") {
+          kept.push(t)
+        } else {
+          filesRef.current.delete(t.id)
+        }
       }
-    }
+
+      return kept
+    })
   }, [updateOne])
 
   const dismissAll = useCallback((): void => {
     // Wired to the upcard "閉じる" button, which the UI only shows when nothing
     // is uploading / queued / checking. Every remaining row is a settled state
     // (done / failed / conflict / paused) that the user has acknowledged.
-    for (const t of transfersRef.current) {
-      if (t.state !== "uploading" && t.state !== "queued" && t.state !== "checking") {
-        filesRef.current.delete(t.id)
+    setTransfers((prev) => {
+      const kept: Transfer[] = []
+      for (const t of prev) {
+        if (t.state === "uploading" || t.state === "queued" || t.state === "checking") {
+          kept.push(t)
+        } else {
+          filesRef.current.delete(t.id)
+        }
       }
-    }
-    setTransfers((prev) => prev.filter((t) =>
-      t.state === "uploading" || t.state === "queued" || t.state === "checking",
-    ))
+
+      return kept
+    })
   }, [])
 
   const resumePending = useCallback((bucket: string, key: string, uploadId: string, file: File): void => {

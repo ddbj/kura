@@ -20,11 +20,10 @@ export const FolderDeleteModal = ({ open, onClose, folderName, onConfirm }: Prop
       <div className="mh">
         <b id="folder-delete-title">フォルダを削除</b>
       </div>
-      <div className="field">
-        <label className="flabel">対象フォルダ</label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink)", padding: "6px 0" }}>
-          <Icon name="folder" size={16} />
-          <span>{folderName}</span>
+      <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
+      <div className="flist">
+        <div className="frow">
+          <span className="fn"><Icon name="folder" size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />{folderName}</span>
         </div>
       </div>
       <div className="banner red">

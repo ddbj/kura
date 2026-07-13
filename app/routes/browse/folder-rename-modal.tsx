@@ -1,6 +1,4 @@
-import { useEffect, useState } from "react"
-
-import { Button, Modal, TextInput } from "~/ui"
+import { NameEntryModal } from "~/ui"
 
 type Props = {
   open: boolean
@@ -10,64 +8,39 @@ type Props = {
   onConfirm: (newName: string) => void
 }
 
-const validate = (name: string, current: string, siblings: readonly string[]): string | undefined => {
-  const trimmed = name.trim()
-  if (trimmed === "") return "フォルダ名を入力してください"
-  if (trimmed.includes("/")) return "フォルダ名に「/」は使えません"
-  if (trimmed === current) return "元の名前と同じです"
-  if (siblings.includes(trimmed)) return `「${trimmed}」は既にあります`
-
-  return undefined
-}
-
 export const FolderRenameModal = ({ open, onClose, currentName, siblingNames, onConfirm }: Props) => {
-  const [name, setName] = useState(currentName)
-  const [error, setError] = useState<string | undefined>()
+  const validate = (trimmed: string): string | undefined => {
+    if (trimmed === "") return "フォルダ名を入力してください"
+    if (trimmed.includes("/")) return "フォルダ名に「/」は使えません"
+    if (trimmed === currentName) return "元の名前と同じです"
+    if (siblingNames.includes(trimmed)) return `「${trimmed}」は既にあります`
 
-  useEffect(() => {
-    if (open) {
-      setName(currentName)
-      setError(undefined)
-    }
-  }, [open, currentName])
-
-  const submit = () => {
-    const trimmed = name.trim()
-    const validationError = validate(trimmed, currentName, siblingNames)
-    if (validationError !== undefined) {
-      setError(validationError)
-
-      return
-    }
-    onConfirm(trimmed)
-    onClose()
+    return undefined
   }
 
   return (
-    <Modal open={open} onClose={onClose} labelledBy="folder-rename-title">
-      <div className="mh">
-        <b id="folder-rename-title">フォルダ名を変更</b>
-      </div>
-      <div className="field">
-        <label className="flabel" htmlFor="folder-rename-name">新しい名前</label>
-        <TextInput
-          id="folder-rename-name"
-          value={name}
-          error={error !== undefined}
-          onChange={(next) => { setName(next); if (error !== undefined) setError(undefined) }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault()
-              submit()
-            }
-          }}
-        />
-        {error !== undefined ? <p className="ferr">{error}</p> : null}
-      </div>
-      <div className="mfoot">
-        <Button onClick={onClose}>キャンセル</Button>
-        <Button kind="pri" onClick={submit}>変更</Button>
-      </div>
-    </Modal>
+    <NameEntryModal
+      open={open}
+      onClose={onClose}
+      title="フォルダ名を変更"
+      labelledBy="folder-rename-title"
+      targetSlot={
+        <>
+          <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
+          <div className="flist">
+            <div className="frow">
+              <span className="fn">{currentName}</span>
+            </div>
+          </div>
+        </>
+      }
+      inputId="folder-rename-name"
+      inputLabel="新しい名前"
+      placeholder="新しい名前"
+      initialName={() => currentName}
+      validate={validate}
+      onConfirm={onConfirm}
+      submitLabel="変更"
+    />
   )
 }

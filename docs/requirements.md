@@ -20,7 +20,7 @@ kura が提供するのは次の 4 つのみ:
 - 認証は DDBJ account（Keycloak）の OIDC による。kura 独自のアカウントは持たない
 - DDBJ account を持つユーザーは誰でも利用できる
 - ユーザーの識別子は DDBJ account の username（`preferred_username` claim）
-- 管理者（admin）は kura 側の設定に列挙されたユーザーで、全ユーザーの領域を操作できる
+- 管理者（admin）向けの UI は設けない。全 bucket に対する運用操作は kura の root credentials で走るスクリプト（quota 変更・掃除・監査ログ整理）で行う（詳細は [operations.md](./operations.md)）
 
 ## ファイル領域
 
@@ -50,7 +50,7 @@ kura が提供するのは次の 4 つのみ:
 ## presigned URL
 
 - ユーザーは自分のファイルに対して presigned URL（GET / PUT）を発行できる
-- presign は短期の共有・受け渡し専用である。有効期間は発行に使った一時 credentials の残り時間で頭打ちになり、実効上限は約 1 時間（[architecture.md](./architecture.md) の「presign」を参照）
+- presign は短期の共有・受け渡し専用である。有効期間は発行に使った一時 credentials の残り時間で頭打ちになり、実効上限は約 12 時間（[architecture.md](./architecture.md) の「presign」を参照）
 - 長期の共有には presign を使わず、public 化 + 恒久 URL で代替する
 
 ## SP による非対話利用
@@ -61,7 +61,7 @@ kura が提供するのは次の 4 つのみ:
 
 ## quota
 
-- 各ユーザーの領域には容量上限（quota）がある。default は 1 TB で、admin がユーザー単位に変更できる
+- 各ユーザーの領域には容量上限（quota）がある。default は 1 TB で、root credentials で走る運用スクリプトがユーザー単位に変更できる
 - quota を超過すると新規の upload がエラーで拒否される（超過の判定は約 1 分周期で行われる）。download と削除は引き続き行え、削除で quota 内に戻せば upload は自動的に再開できる（ストレージの再整理を待つため反映には遅延がありうる。[operations.md](./operations.md) を参照）
 
 ## 全ファイル TTL

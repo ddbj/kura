@@ -8,6 +8,14 @@ type StsCredentials = {
   expiration: string
 }
 
+export const listBucketsXml = (buckets: readonly { name: string }[]): string => `<?xml version="1.0" encoding="UTF-8"?>
+<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Owner><ID>test</ID><DisplayName>test</DisplayName></Owner>
+  <Buckets>
+    ${buckets.map((b) => `<Bucket><Name>${escapeXml(b.name)}</Name><CreationDate>2026-07-01T00:00:00.000Z</CreationDate></Bucket>`).join("\n    ")}
+  </Buckets>
+</ListAllMyBucketsResult>`
+
 export const stsAssumeRoleXml = ({ accessKeyId, secretAccessKey, sessionToken, expiration }: StsCredentials): string => `<?xml version="1.0" encoding="UTF-8"?>
 <AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
   <AssumeRoleWithWebIdentityResult>
@@ -20,31 +28,38 @@ export const stsAssumeRoleXml = ({ accessKeyId, secretAccessKey, sessionToken, e
   </AssumeRoleWithWebIdentityResult>
 </AssumeRoleWithWebIdentityResponse>`
 
-type ListedObject = {
+type ListedObjectMaybe = {
   key: string
-  size: number
+  size?: number
   lastModified: string
 }
 
 type ListBucketInput = {
   bucket: string
   prefix: string
-  objects: ListedObject[]
+  objects: ListedObjectMaybe[]
   commonPrefixes: string[]
   nextContinuationToken?: string
+  // Force IsTruncated=true even without a NextContinuationToken (reproduces
+  // the SeaweedFS-observed shape that would otherwise loop forever).
+  truncatedNoToken?: boolean
 }
 
-export const listObjectsV2Xml = ({ bucket, prefix, objects, commonPrefixes, nextContinuationToken }: ListBucketInput): string => `<?xml version="1.0" encoding="UTF-8"?>
+export const listObjectsV2Xml = ({ bucket, prefix, objects, commonPrefixes, nextContinuationToken, truncatedNoToken }: ListBucketInput): string => {
+  const isTruncated = truncatedNoToken === true || nextContinuationToken !== undefined
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Name>${escapeXml(bucket)}</Name>
   <Prefix>${escapeXml(prefix)}</Prefix>
   <Delimiter>/</Delimiter>
   <KeyCount>${objects.length + commonPrefixes.length}</KeyCount>
-  <IsTruncated>${nextContinuationToken === undefined ? "false" : "true"}</IsTruncated>
+  <IsTruncated>${isTruncated ? "true" : "false"}</IsTruncated>
   ${nextContinuationToken === undefined ? "" : `<NextContinuationToken>${escapeXml(nextContinuationToken)}</NextContinuationToken>`}
-  ${objects.map((o) => `<Contents><Key>${escapeXml(o.key)}</Key><Size>${o.size}</Size><LastModified>${o.lastModified}</LastModified><ETag>&quot;etag&quot;</ETag><StorageClass>STANDARD</StorageClass></Contents>`).join("\n  ")}
+  ${objects.map((o) => `<Contents><Key>${escapeXml(o.key)}</Key>${o.size === undefined ? "" : `<Size>${o.size}</Size>`}<LastModified>${o.lastModified}</LastModified><ETag>&quot;etag&quot;</ETag><StorageClass>STANDARD</StorageClass></Contents>`).join("\n  ")}
   ${commonPrefixes.map((p) => `<CommonPrefixes><Prefix>${escapeXml(p)}</Prefix></CommonPrefixes>`).join("\n  ")}
 </ListBucketResult>`
+}
 
 export const getObjectTaggingXml = (tags: { key: string; value: string }[]): string => `<?xml version="1.0" encoding="UTF-8"?>
 <Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -78,20 +93,30 @@ type ListedUpload = {
   uploadId: string
 }
 
-// SeaweedFS 形状: Upload に Initiated が無い（実測固定化済み。s3-flows）
-export const listMultipartUploadsXml = ({ bucket, uploads, nextKeyMarker, nextUploadIdMarker }: {
+// ListMultipartUploads wire format: SeaweedFS omits the <Initiated> element
+// per Upload (see docs/architecture.md 配置 / app/lib/s3/multipart.ts:
+// resume recency comes from part LastModified). Kept out of this template
+// so tests never accidentally rely on a timestamp the server never sends.
+export const listMultipartUploadsXml = ({ bucket, uploads, nextKeyMarker, nextUploadIdMarker, truncatedNoMarker }: {
   bucket: string
   uploads: ListedUpload[]
   nextKeyMarker?: string
   nextUploadIdMarker?: string
-}): string => `<?xml version="1.0" encoding="UTF-8"?>
+  // Force IsTruncated=true without either Next* marker (the pagination
+  // no-progress shape the paginator must refuse to re-enter).
+  truncatedNoMarker?: boolean
+}): string => {
+  const isTruncated = truncatedNoMarker === true || nextKeyMarker !== undefined || nextUploadIdMarker !== undefined
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Bucket>${escapeXml(bucket)}</Bucket>
-  <IsTruncated>${nextKeyMarker === undefined ? "false" : "true"}</IsTruncated>
+  <IsTruncated>${isTruncated ? "true" : "false"}</IsTruncated>
   ${nextKeyMarker === undefined ? "" : `<NextKeyMarker>${escapeXml(nextKeyMarker)}</NextKeyMarker>`}
   ${nextUploadIdMarker === undefined ? "" : `<NextUploadIdMarker>${escapeXml(nextUploadIdMarker)}</NextUploadIdMarker>`}
   ${uploads.map((u) => `<Upload><Key>${escapeXml(u.key)}</Key><UploadId>${escapeXml(u.uploadId)}</UploadId></Upload>`).join("\n  ")}
 </ListMultipartUploadsResult>`
+}
 
 type ListedPart = {
   partNumber: number
@@ -100,21 +125,28 @@ type ListedPart = {
   lastModified?: string
 }
 
-export const listPartsXml = ({ bucket, key, uploadId, parts, nextPartNumberMarker }: {
+export const listPartsXml = ({ bucket, key, uploadId, parts, nextPartNumberMarker, truncatedNoMarker }: {
   bucket: string
   key: string
   uploadId: string
   parts: ListedPart[]
   nextPartNumberMarker?: number
-}): string => `<?xml version="1.0" encoding="UTF-8"?>
+  // Force IsTruncated=true without NextPartNumberMarker (pagination
+  // no-progress shape).
+  truncatedNoMarker?: boolean
+}): string => {
+  const isTruncated = truncatedNoMarker === true || nextPartNumberMarker !== undefined
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Bucket>${escapeXml(bucket)}</Bucket>
   <Key>${escapeXml(key)}</Key>
   <UploadId>${escapeXml(uploadId)}</UploadId>
-  <IsTruncated>${nextPartNumberMarker === undefined ? "false" : "true"}</IsTruncated>
+  <IsTruncated>${isTruncated ? "true" : "false"}</IsTruncated>
   ${nextPartNumberMarker === undefined ? "" : `<NextPartNumberMarker>${nextPartNumberMarker}</NextPartNumberMarker>`}
   ${parts.map((p) => `<Part><PartNumber>${p.partNumber}</PartNumber><Size>${p.size}</Size><ETag>&quot;${escapeXml(p.etag)}&quot;</ETag>${p.lastModified === undefined ? "" : `<LastModified>${p.lastModified}</LastModified>`}</Part>`).join("\n  ")}
 </ListPartsResult>`
+}
 
 export const initiateMultipartUploadXml = ({ bucket, key, uploadId }: {
   bucket: string

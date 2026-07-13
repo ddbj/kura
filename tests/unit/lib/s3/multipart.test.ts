@@ -47,6 +47,25 @@ describe("listPendingUploads", () => {
 
     expect(await listPendingUploads(testS3(), "kura-tester", "")).toEqual([])
   })
+
+  test("listPendingUploads_truncatedWithoutNextMarker_stopsInsteadOfLooping", async () => {
+    // SeaweedFS has been observed replying with IsTruncated=true and no
+    // Next* markers; the naive loop reissues the same request forever. The
+    // paginator must treat "no next marker" as end-of-list.
+    let calls = 0
+    server.use(http.get(`${ENDPOINT}/kura-tester`, () => {
+      calls += 1
+      return xml(listMultipartUploadsXml({
+        bucket: "kura-tester",
+        uploads: [{ key: "docs/a.bin", uploadId: "id-a" }],
+        truncatedNoMarker: true,
+      }))
+    }))
+
+    const uploads = await listPendingUploads(testS3(), "kura-tester", "")
+    expect(uploads).toEqual([{ key: "docs/a.bin", uploadId: "id-a" }])
+    expect(calls).toBe(1)
+  })
 })
 
 describe("listUploadedParts", () => {
@@ -78,6 +97,26 @@ describe("listUploadedParts", () => {
       { partNumber: 2, size: 4, etag: "\"e2\"" },
     ])
   })
+
+  test("listUploadedParts_truncatedWithoutNextMarker_stopsInsteadOfLooping", async () => {
+    let calls = 0
+    server.use(http.get(`${ENDPOINT}/kura-tester/docs/a.bin`, () => {
+      calls += 1
+      return xml(listPartsXml({
+        bucket: "kura-tester",
+        key: "docs/a.bin",
+        uploadId: "id-a",
+        parts: [{ partNumber: 1, size: 8, etag: "e1", lastModified: "2026-07-01T00:00:00Z" }],
+        truncatedNoMarker: true,
+      }))
+    }))
+
+    const parts = await listUploadedParts(testS3(), "kura-tester", "docs/a.bin", "id-a")
+    expect(parts).toEqual([
+      { partNumber: 1, size: 8, etag: "\"e1\"", lastModified: new Date("2026-07-01T00:00:00Z") },
+    ])
+    expect(calls).toBe(1)
+  })
 })
 
 describe("abortPendingUpload", () => {
@@ -99,12 +138,16 @@ describe("abortPendingUpload", () => {
     ).rejects.toThrow()
   })
 
-  test("abortPendingUpload_unrelated404_throws", async () => {
+  test("abortPendingUpload_bareNotFound_treatedAsAlreadyGone", async () => {
+    // SeaweedFS has been observed replying to AbortMultipartUpload with a
+    // 404 that carries no NoSuchUpload code (or no XML body at all). Any 404
+    // means the upload is not around to abort, so treat it as idempotent
+    // success — a subsequent client retry does not fail loudly on a race.
     server.use(http.delete(`${ENDPOINT}/kura-tester/docs/a.bin`, () =>
-      xml(s3ErrorXml("NoSuchBucket", "not found"), 404)))
+      new HttpResponse(null, { status: 404 })))
 
     await expect(
       abortPendingUpload(testS3(), "kura-tester", "docs/a.bin", "id-a"),
-    ).rejects.toThrow()
+    ).resolves.toBeUndefined()
   })
 })

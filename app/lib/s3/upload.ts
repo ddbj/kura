@@ -7,11 +7,9 @@ const MiB = 1024 * 1024
 const DEFAULT_PART_SIZE = 8 * MiB
 const MAX_PARTS = 10_000
 
-// lib-storage's done() settles as soon as the abort signal fires, without
-// waiting for an in-flight CreateMultipartUpload; that request keeps running
-// in the background and eventually sets upload.uploadId regardless. Poll for
-// it (bounded by a normal request round trip) so a cancel issued during
-// CreateMultipartUpload still discards the upload once its id is known.
+// Fallback bound for cases where lib-storage does not expose the create
+// promise (older versions): a normal request round trip, but capped so we
+// never linger 15s on a create that has already failed.
 const UPLOAD_ID_POLL_INTERVAL_MS = 200
 const UPLOAD_ID_POLL_TIMEOUT_MS = 15_000
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -33,6 +31,13 @@ export type RunningUpload = {
   // one; they leave nothing behind to resume or discard.
   uploadId: () => string | undefined
 }
+
+// Peek at the CreateMultipartUpload promise lib-storage stashes on the Upload
+// instance. Awaiting it lets abort() exit as soon as the create resolves
+// (uploadId known) or rejects (nothing to discard), instead of polling until
+// timeout. Field is not part of the public API; the fallback covers versions
+// that do not set it.
+type UploadCreateInternals = { createMultiPartPromise?: Promise<unknown> }
 
 export const startUpload = ({ s3, bucket, key, file, onProgress }: {
   s3: S3Client
@@ -67,19 +72,29 @@ export const startUpload = ({ s3, bucket, key, file, onProgress }: {
   return {
     done,
     // With leavePartsOnError, upload.abort() only stops the transfer; the
-    // server-side discard is on us. If CreateMultipartUpload was still
-    // in-flight when cancelled, its id is not known yet, so wait for it
-    // (see UPLOAD_ID_POLL_* above) before deciding there is nothing to discard.
-    // Single-PUT uploads never get one, so skip the wait entirely for those.
+    // server-side discard is on us. lib-storage's done() resolves as soon as
+    // the abort signal fires, without waiting for an in-flight
+    // CreateMultipartUpload — so ask the create promise directly whether it
+    // has settled, and skip the discard when nothing was ever created.
     abort: async () => {
       await upload.abort()
       await done.catch(() => undefined)
-      if (isMultipart) {
+      if (!isMultipart) return
+
+      const createPromise = (upload as unknown as UploadCreateInternals).createMultiPartPromise
+      if (createPromise !== undefined) {
+        // Once the create resolves or rejects, we know exactly whether there
+        // is an uploadId to abort — no need for a timed poll.
+        await createPromise.catch(() => undefined)
+      } else {
+        // Very old lib-storage builds do not expose the create promise; race
+        // upload.uploadId against a bounded deadline.
         const deadline = Date.now() + UPLOAD_ID_POLL_TIMEOUT_MS
         while (upload.uploadId === undefined && Date.now() < deadline) {
           await sleep(UPLOAD_ID_POLL_INTERVAL_MS)
         }
       }
+
       const uploadId = upload.uploadId
       if (uploadId !== undefined) {
         await abortPendingUpload(s3, bucket, key, uploadId)

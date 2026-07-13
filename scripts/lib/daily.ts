@@ -29,13 +29,27 @@ const optionalDaysEnv = (name: string): number | null => {
   return raw === undefined || raw === "" ? null : parseDays(name, raw)
 }
 
+const nonNegativeSecondsEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name]
+  if (raw === undefined || raw === "") {
+    return fallback
+  }
+  const seconds = Number(raw)
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    throw new Error(`${name} must be a non-negative integer, got "${raw}"`)
+  }
+
+  return seconds
+}
+
 // One daily ops pass (docs/operations.md): file-TTL sweep (when enabled),
 // stale multipart cleanup, and audit log rotation.
 export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise<void> => {
   const ttlDays = optionalDaysEnv("KURA_FILE_TTL_DAYS")
   const multipartMaxAgeDays = daysEnv("KURA_MULTIPART_MAX_AGE_DAYS", 7)
   const auditRetentionDays = daysEnv("KURA_AUDIT_RETENTION_DAYS", 1095)
-  const auditLogDir = process.env["KURA_AUDIT_LOG_DIR"] ?? "/var/log/kura"
+  const auditRotateLagSeconds = nonNegativeSecondsEnv("KURA_AUDIT_ROTATE_LAG_SECONDS", 120)
+  const auditLogDir = process.env["KURA_LOG_DIR"] ?? "/var/log/kura"
 
   const buckets = await listBucketNames(s3)
   let ttlDeleted = 0
@@ -56,7 +70,7 @@ export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise
   }
 
   const logs = await access(auditLogDir).then(
-    () => rotateAuditLogs(auditLogDir, auditRetentionDays, now),
+    () => rotateAuditLogs(auditLogDir, auditRetentionDays, now, auditRotateLagSeconds),
     () => null,
   )
 

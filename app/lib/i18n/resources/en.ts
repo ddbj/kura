@@ -48,7 +48,7 @@ export const en: Resources = {
     issue: "Issue",
     urlLabel: "Presigned URL",
     expiresAt: "Valid until around {{datetime}}",
-    note: "Presigned URLs are for short-term hand-offs. Their lifetime is capped by the remaining session time, so the effective maximum is about 1 hour. For long-term sharing, make the file public instead.",
+    note: "Presigned URLs are for short-term hand-offs. Their lifetime is capped by the remaining session time, so the effective maximum is about 12 hours. For long-term sharing, make the file public instead.",
     filenameLabel: "File name",
     putUsage: "Upload to this URL with HTTP PUT.",
     failed: "Failed to issue the URL",

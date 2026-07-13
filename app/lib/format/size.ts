@@ -1,3 +1,5 @@
+// Binary-prefixed byte formatter (KiB/MiB/GiB/TiB). Used where the underlying
+// value is a strict IEC size (upload progress totals from lib-storage).
 export const formatSize = (bytes: number): string => {
   let value = bytes
   let unit = "B"

@@ -1,3 +1,4 @@
+import { formatBytes } from "~/lib/format"
 import { Button, Icon, Modal } from "~/ui"
 
 type Target = {
@@ -13,17 +14,6 @@ type Props = {
   onClose: () => void
   targets: Target[]
   onConfirm: () => void
-}
-
-const formatBytes = (n: number): string => {
-  if (n < 1024) return `${n} B`
-  const k = n / 1024
-  if (k < 1024) return `${k.toFixed(k < 10 ? 1 : 0)} KB`
-  const m = k / 1024
-  if (m < 1024) return `${m.toFixed(m < 10 ? 1 : 0)} MB`
-  const g = m / 1024
-
-  return `${g.toFixed(g < 10 ? 1 : 0)} GB`
 }
 
 // Delete is destructive — this modal only confirms intent. The actual delete

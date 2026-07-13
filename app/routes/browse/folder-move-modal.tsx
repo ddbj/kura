@@ -66,38 +66,35 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
         <div className="mh">
           <b id="folder-move-title">フォルダを移動</b>
         </div>
-        <div className="field">
-          <label className="flabel">対象フォルダ</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink)", padding: "6px 0" }}>
-            <Icon name="folder" size={16} />
-            <span>{name}</span>
+        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
+        <div className="flist">
+          <div className="frow">
+            <span className="fn"><Icon name="folder" size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />{name}</span>
           </div>
         </div>
-        <div className="field">
-          <label className="flabel">移動先</label>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              fontFamily: "var(--mono)",
-              fontSize: 12.5,
-            }}>
-              <Icon name="folder" size={14} />
-              <span title={displayPath} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
-            </div>
-            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>選ぶ…</Button>
+        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>移動先</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+          <div style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            fontFamily: "var(--mono)",
+            fontSize: 12.5,
+          }}>
+            <Icon name="folder" size={14} />
+            <span title={displayPath} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
           </div>
-          {error !== undefined ? <p className="ferr">{error}</p> : null}
+          <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>選ぶ…</Button>
         </div>
         <div className="banner ochre">
           <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
           <div>中身の件数が多い場合、移動には時間がかかります。進行状況は右下の操作カードに表示されます。</div>
         </div>
+        {error !== undefined ? <p className="ferr">{error}</p> : null}
         <div className="mfoot">
           <Button onClick={onClose}>キャンセル</Button>
           <Button kind="pri" onClick={submit}>移動</Button>

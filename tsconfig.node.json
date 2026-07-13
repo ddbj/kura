@@ -29,6 +29,7 @@
     "tests/e2e/**/*",
     "tests/integration/**/*",
     "tests/pbt/scripts/**/*",
+    "tests/unit/scripts/**/*",
     "tests/setup/**/*",
     "playwright.config.ts",
     "vitest.config.ts",

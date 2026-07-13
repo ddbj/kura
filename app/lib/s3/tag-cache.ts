@@ -26,6 +26,19 @@ export const tagQueryOptions = (s3: S3Client, bucket: string, key: string) => ({
 const latestChangeToken = new Map<string, symbol>()
 const changeMapKey = (bucket: string, key: string): string => `${bucket}/${key}`
 
+// If this call is still the latest issued change, apply the effect and then
+// forget the token — long-running sessions would otherwise accumulate one
+// entry per publish/unpublish. A newer change that arrives during the await
+// takes the map slot for itself, so the delete only fires when we are still
+// the latest.
+const consumeIfLatest = (bucket: string, key: string, token: symbol): boolean => {
+  const mapKey = changeMapKey(bucket, key)
+  if (latestChangeToken.get(mapKey) !== token) return false
+  latestChangeToken.delete(mapKey)
+
+  return true
+}
+
 // Call synchronously when a change is issued (react-query's mutation
 // onMutate runs at mutate()-call time, in actual call order, unlike
 // onSuccess which runs in response-arrival order).
@@ -49,6 +62,7 @@ export const applyPublicState = async (
 ): Promise<void> => {
   if (latestChangeToken.get(changeMapKey(bucket, key)) !== token) return
   await queryClient.cancelQueries({ queryKey: tagQueryKey(bucket, key) })
+  if (!consumeIfLatest(bucket, key, token)) return
   queryClient.setQueryData(tagQueryKey(bucket, key), isPublic)
 }
 
@@ -63,7 +77,7 @@ export const revertPublicStateOnFailure = async (
   key: string,
   token: symbol,
 ): Promise<void> => {
-  if (latestChangeToken.get(changeMapKey(bucket, key)) !== token) return
+  if (!consumeIfLatest(bucket, key, token)) return
   await queryClient.invalidateQueries({ queryKey: tagQueryKey(bucket, key) })
 }
 

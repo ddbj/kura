@@ -1,8 +1,7 @@
 import { HeadObjectCommand } from "@aws-sdk/client-s3"
-import { useEffect, useState } from "react"
 
 import { useS3 } from "~/lib/s3/use-s3"
-import { Button, Modal, TextInput } from "~/ui"
+import { NameEntryModal } from "~/ui"
 
 type Props = {
   open: boolean
@@ -25,95 +24,62 @@ const nameOf = (key: string): string => {
   return slash === -1 ? key : key.slice(slash + 1)
 }
 
-const validate = (name: string, current: string, siblings: readonly string[]): string | undefined => {
-  const trimmed = name.trim()
-  if (trimmed === "") return "名前を入力してください"
-  if (trimmed.includes("/")) return "名前に「/」は使えません"
-  if (trimmed === current) return "元の名前と同じです"
-  if (siblings.includes(trimmed)) return `「${trimmed}」は既にあります`
+const httpStatusOf = (err: unknown): number | undefined =>
+  typeof err === "object" && err !== null && "$metadata" in err
+    ? (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode
+    : undefined
 
-  return undefined
-}
-
-// Head-checks the destination on submit to catch collisions with objects that
-// aren't in the same directory listing (e.g. hidden files, or something the
-// UI hasn't refetched). A false negative (deleted between check and submit)
-// is fine — worst case is a normal overwrite.
 export const RenameModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfirm }: Props) => {
   const s3 = useS3()
   const currentName = nameOf(srcKey)
-  const [name, setName] = useState(currentName)
-  const [error, setError] = useState<string | undefined>()
-  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    if (open) {
-      setName(currentName)
-      setError(undefined)
-      setBusy(false)
-    }
-  }, [open, currentName])
+  const validate = (trimmed: string): string | undefined => {
+    if (trimmed === "") return "名前を入力してください"
+    if (trimmed.includes("/")) return "名前に「/」は使えません"
+    if (trimmed === currentName) return "元の名前と同じです"
+    if (siblingNames.includes(trimmed)) return `「${trimmed}」は既にあります`
 
-  const submit = async () => {
-    const trimmed = name.trim()
-    const validationError = validate(trimmed, currentName, siblingNames)
-    if (validationError !== undefined) {
-      setError(validationError)
+    return undefined
+  }
 
-      return
-    }
+  const verify = async (trimmed: string): Promise<string | undefined> => {
     const destKey = `${parentOf(srcKey)}${trimmed}`
-    setBusy(true)
     try {
-      // Second-level guard against silent overwrite.
-      try {
-        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: destKey }))
-        setError(`「${trimmed}」は既にあります`)
-        setBusy(false)
+      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: destKey }))
 
-        return
-      } catch (err) {
-        const status = typeof err === "object" && err !== null && "$metadata" in err
-          ? (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode
-          : undefined
-        if (status !== 404 && status !== 403) throw err
-      }
-      onConfirm(destKey)
-      onClose()
+      return `「${trimmed}」は既にあります`
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setBusy(false)
+      const status = httpStatusOf(err)
+      if (status === 404 || status === 403) return undefined
+      throw err
     }
   }
 
   return (
-    <Modal open={open} onClose={onClose} labelledBy="rename-title">
-      <div className="mh">
-        <b id="rename-title">名前を変更</b>
-      </div>
-      <div className="field">
-        <label className="flabel" htmlFor="rename-name">新しい名前</label>
-        <TextInput
-          id="rename-name"
-          value={name}
-          disabled={busy}
-          error={error !== undefined}
-          onChange={(next) => { setName(next); if (error !== undefined) setError(undefined) }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault()
-              void submit()
-            }
-          }}
-        />
-        {error !== undefined ? <p className="ferr">{error}</p> : null}
-      </div>
-      <div className="mfoot">
-        <Button onClick={onClose} disabled={busy}>キャンセル</Button>
-        <Button kind="pri" disabled={busy} onClick={() => void submit()}>
-          {busy ? "確認中…" : "変更"}
-        </Button>
-      </div>
-    </Modal>
+    <NameEntryModal
+      open={open}
+      onClose={onClose}
+      title="名前を変更"
+      labelledBy="rename-title"
+      targetSlot={
+        <>
+          <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
+          <div className="flist">
+            <div className="frow">
+              <span className="fn" title={srcKey}>{currentName}</span>
+            </div>
+          </div>
+        </>
+      }
+      inputId="rename-name"
+      inputLabel="新しい名前"
+      placeholder="新しい名前"
+      initialName={() => currentName}
+      validate={validate}
+      verify={verify}
+      onConfirm={(trimmed) => onConfirm(`${parentOf(srcKey)}${trimmed}`)}
+      submitLabel="変更"
+      busyLabel="確認中…"
+    />
   )
 }

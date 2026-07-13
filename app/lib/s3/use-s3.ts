@@ -44,9 +44,9 @@ export const freshAccessToken = async (auth: AuthContextProps): Promise<string> 
 
 // presign's STS session length is capped by the access token's remaining
 // life (docs/architecture.md presign), so renew whenever the cached token
-// would cut the requested duration short - otherwise a "1 hour" presign can
-// silently get less if the token has, say, only 5 minutes left but is still
-// above freshAccessToken's MIN_TOKEN_REMAINING_S reuse threshold.
+// would cut the requested duration short - otherwise a requested 12h presign
+// can silently get less if the token has, say, only 5 minutes left but is
+// still above freshAccessToken's MIN_TOKEN_REMAINING_S reuse threshold.
 export const accessTokenForDuration = async (auth: AuthContextProps, minRemainingS: number): Promise<string> => {
   const user = auth.user
   if (user && typeof user.expires_in === "number" && user.expires_in >= minRemainingS) {

@@ -4,6 +4,23 @@ import { Navigate } from "react-router"
 import { useT } from "~/lib/i18n"
 import { TextLink } from "~/ui"
 
+// Reject anything that is not a same-origin path (protocol-relative "//host",
+// external URL, javascript:, etc.). Parsing against the current origin makes
+// the check normative — any drift (leading whitespace, unicode digits in host,
+// backslash tricks) falls back to "/" instead of being smuggled through by an
+// ad-hoc prefix guard.
+export const safeReturnTo = (state: unknown): string => {
+  if (typeof state !== "string" || state === "") return "/"
+  try {
+    const url = new URL(state, window.location.origin)
+    if (url.origin !== window.location.origin) return "/"
+
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return "/"
+  }
+}
+
 // The AuthProvider consumes ?code/?state on its own; this route only reflects
 // the resulting state and returns the user to where signin started.
 const AuthCallback = () => {
@@ -22,11 +39,7 @@ const AuthCallback = () => {
   }
 
   if (auth.isAuthenticated) {
-    const state = auth.user?.state
-    // Same-origin paths only ("//host" would be protocol-relative).
-    const returnTo = typeof state === "string" && state.startsWith("/") && !state.startsWith("//") ? state : "/"
-
-    return <Navigate to={returnTo} replace />
+    return <Navigate to={safeReturnTo(auth.user?.state)} replace />
   }
 
   return <p className="plain-text">{t("auth.processingCallback")}</p>

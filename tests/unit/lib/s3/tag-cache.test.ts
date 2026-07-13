@@ -83,3 +83,46 @@ describe("revertPublicStateOnFailure", () => {
     queryClient.clear()
   })
 })
+
+describe("latestChangeToken pruning", () => {
+  test("applyPublicState_afterApply_supersededTokenReplayIsIgnored", async () => {
+    // After apply consumes the token slot, a delayed apply for the same
+    // token must not sneak back and overwrite the cache — the slot is gone,
+    // and re-applying would defeat pruning.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const token = beginPublicStateChange(BUCKET, "a.txt")
+    await applyPublicState(queryClient, BUCKET, "a.txt", true, token)
+    expect(queryClient.getQueryData(tagQueryKey(BUCKET, "a.txt"))).toBe(true)
+
+    // Nothing external issued another change; the map slot is now free. A
+    // stray applyPublicState replayed with the same token, or with a value
+    // that would corrupt the cache, must be a no-op.
+    queryClient.setQueryData(tagQueryKey(BUCKET, "a.txt"), true)
+    await applyPublicState(queryClient, BUCKET, "a.txt", false, token)
+    expect(queryClient.getQueryData(tagQueryKey(BUCKET, "a.txt"))).toBe(true)
+
+    queryClient.clear()
+  })
+
+  test("revertPublicStateOnFailure_afterRevert_replayIsIgnored", async () => {
+    // Same shape for revert: after the slot is consumed, a duplicate revert
+    // with the same token must not re-invalidate the cache.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const token = beginPublicStateChange(BUCKET, "a.txt")
+    queryClient.setQueryData(tagQueryKey(BUCKET, "a.txt"), true)
+    await revertPublicStateOnFailure(queryClient, BUCKET, "a.txt", token)
+    expect(queryClient.getQueryState(tagQueryKey(BUCKET, "a.txt"))?.isInvalidated).toBe(true)
+
+    // Reset invalidation, then replay revert with the (now consumed) token.
+    queryClient.setQueryData(tagQueryKey(BUCKET, "a.txt"), true)
+    expect(queryClient.getQueryState(tagQueryKey(BUCKET, "a.txt"))?.isInvalidated).toBe(false)
+    await revertPublicStateOnFailure(queryClient, BUCKET, "a.txt", token)
+    expect(queryClient.getQueryState(tagQueryKey(BUCKET, "a.txt"))?.isInvalidated).toBe(false)
+
+    queryClient.clear()
+  })
+})
