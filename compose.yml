@@ -5,14 +5,14 @@ services:
   # worker (uid 101) can create the date-stamped access-*.log files under it
   # (docs/operations.md). Runs to completion before nginx/ops start.
   kura-init:
-    image: alpine:3.20
+    image: docker.io/library/alpine:3.20
     command: ["sh", "-c", "install -d -o 101 -g 101 -m 0755 /var/log/kura"]
     volumes:
       - ${KURA_LOG_DIR:-./logs}:/var/log/kura
     restart: "no"
 
   seaweedfs:
-    image: chrislusf/seaweedfs:4.37
+    image: docker.io/chrislusf/seaweedfs:4.37
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/kura/entrypoint.sh"]
     command:
@@ -62,7 +62,7 @@ services:
       retries: 60
 
   nginx:
-    image: nginx:1.29-alpine
+    image: docker.io/library/nginx:1.29-alpine
     restart: unless-stopped
     volumes:
       # The image entrypoint envsubsts templates/*.template into conf.d
@@ -94,7 +94,7 @@ services:
   # 日次の運用タスク: file TTL 削除・放置 multipart 掃除・監査ログの
   # 圧縮/期限削除 (docs/operations.md)。node は TS を直接実行できる
   ops:
-    image: node:24-alpine
+    image: docker.io/library/node:24-alpine
     restart: unless-stopped
     command: ["node", "/kura/scripts/ops-loop.ts"]
     environment:
@@ -120,10 +120,14 @@ services:
 
   # テスト時のみ: 自前鍵の JWKS を SeaweedFS の OIDC provider へ配信する
   jwks:
-    image: nginx:1.29-alpine
+    image: docker.io/library/nginx:1.29-alpine
     profiles: [test]
     volumes:
       - ./tests/setup/.jwks:/usr/share/nginx/html:ro
 
 volumes:
-  seaweedfs-data:
+  # 値なし (`seaweedfs-data:` だけ) にすると podman-compose 1.0.6 の rec_merge が
+  # override 側の dict と merge するときに ValueError で落ちる (None + dict はマージ
+  # 不可)。空 dict `{}` にしておけば dict + dict になって override が通る。
+  # compose.podman.yml が driver_opts で bind mount 化する。
+  seaweedfs-data: {}
