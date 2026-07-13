@@ -1,4 +1,3 @@
-import { formatBytes } from "~/lib/format"
 import { Button, Icon, Modal } from "~/ui"
 
 type Target = {
@@ -25,28 +24,19 @@ export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
     onClose()
   }
 
+  const single = targets.length === 1 ? targets[0] : undefined
+  const headline = single !== undefined
+    ? <>「{single.name}」を削除するとすぐに消え、元には戻せません。公開中の場合は公開も止まります。</>
+    : <>{targets.length} 件のファイルを削除するとすぐに消え、元には戻せません。公開中のファイルは公開も止まります。</>
+
   return (
     <Modal open={open} onClose={onClose} labelledBy="delete-title">
       <div className="mh">
         <b id="delete-title">ファイルを削除</b>
       </div>
-      <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象 {targets.length}件</div>
-      <div className="flist">
-        {targets.map((t) => (
-          <div className="frow" key={`${t.bucket}/${t.key}`}>
-            <span className="fn" title={t.key}>
-              {t.name}
-              {t.isPublic === true
-                ? <span className="pubmark"><span className="d" />公開中</span>
-                : null}
-            </span>
-            <span className="fmeta">{formatBytes(t.size)}</span>
-          </div>
-        ))}
-      </div>
       <div className="banner red">
         <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />
-        <div>削除するとすぐに消え、元には戻せません。公開中のファイルは公開も止まります。</div>
+        <div>{headline}</div>
       </div>
       <div className="mfoot">
         <Button onClick={onClose}>キャンセル</Button>

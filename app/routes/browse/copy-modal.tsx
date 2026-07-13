@@ -74,16 +74,6 @@ export const CopyModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfi
       onClose={onClose}
       title="コピー"
       labelledBy="copy-title"
-      targetSlot={
-        <>
-          <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
-          <div className="flist">
-            <div className="frow">
-              <span className="fn" title={srcKey}>{original}</span>
-            </div>
-          </div>
-        </>
-      }
       inputId="copy-name"
       inputLabel="コピー後の名前"
       placeholder="コピー後の名前"

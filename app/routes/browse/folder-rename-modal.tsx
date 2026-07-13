@@ -24,16 +24,6 @@ export const FolderRenameModal = ({ open, onClose, currentName, siblingNames, on
       onClose={onClose}
       title="フォルダ名を変更"
       labelledBy="folder-rename-title"
-      targetSlot={
-        <>
-          <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
-          <div className="flist">
-            <div className="frow">
-              <span className="fn">{currentName}</span>
-            </div>
-          </div>
-        </>
-      }
       inputId="folder-rename-name"
       inputLabel="新しい名前"
       placeholder="新しい名前"

@@ -81,13 +81,7 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
     <>
       <Modal open={open && !pickerOpen} onClose={onClose} labelledBy="move-title">
         <div className="mh">
-          <b id="move-title">移動</b>
-        </div>
-        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
-        <div className="flist">
-          <div className="frow">
-            <span className="fn" title={srcKey}>{name}</span>
-          </div>
+          <b id="move-title">「{name}」を移動</b>
         </div>
         <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>移動先</div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>

@@ -64,13 +64,7 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
     <>
       <Modal open={open && !pickerOpen} onClose={onClose} labelledBy="folder-move-title">
         <div className="mh">
-          <b id="folder-move-title">フォルダを移動</b>
-        </div>
-        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象</div>
-        <div className="flist">
-          <div className="frow">
-            <span className="fn"><Icon name="folder" size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />{name}</span>
-          </div>
+          <b id="folder-move-title">フォルダ「{name}」を移動</b>
         </div>
         <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>移動先</div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
