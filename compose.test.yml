@@ -1,0 +1,21 @@
+# Test-only overlay. Adds the JWKS server so SeaweedFS's OIDC provider can
+# validate the tokens the test harness mints with its own key
+# (docs/testing.md). Merged on top of compose.yml for `npm test`:
+#   docker compose --env-file env.test -f compose.yml -f compose.test.yml up -d
+#
+# Kept separate from compose.yml because podman-compose 1.0.6 ignores
+# `profiles:` (would try to launch jwks in production) and `depends_on: ...
+# required: false` (would treat the missing jwks as a hard error). Splitting
+# the file makes both dev/prod (compose.yml alone) and test
+# (compose.yml + compose.test.yml) unambiguous.
+
+services:
+  seaweedfs:
+    depends_on:
+      jwks:
+        condition: service_started
+
+  jwks:
+    image: docker.io/library/nginx:1.29-alpine
+    volumes:
+      - ./tests/setup/.jwks:/usr/share/nginx/html:ro

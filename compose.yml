@@ -1,12 +1,15 @@
 name: kura
 
 services:
-  # Prepares the audit log directory (mounted into nginx and ops) so the nginx
-  # worker (uid 101) can create the date-stamped access-*.log files under it
+  # Prepares the audit log directory (mounted into nginx and ops) so nginx
+  # workers can create the date-stamped access-*.log files under it
   # (docs/operations.md). Runs to completion before nginx/ops start.
+  # chmod 0777 (not chown 101) so it works both under root-owned bind mounts
+  # (docker rootful) and rootless podman on Lustre — Lustre rejects chown to
+  # subuid range uids, so mode-based access is the only common denominator.
   kura-init:
     image: docker.io/library/alpine:3.20
-    command: ["sh", "-c", "install -d -o 101 -g 101 -m 0755 /var/log/kura"]
+    command: ["sh", "-c", "install -d -m 0777 /var/log/kura"]
     volumes:
       - ${KURA_LOG_DIR:-./logs}:/var/log/kura
     restart: "no"
@@ -23,6 +26,8 @@ services:
       # runs out of volume slots as buckets accumulate, so let it auto-scale
       # with free disk instead
       - -volume.max=0
+      # SeaweedFS 4.37 rejects master.volumeSizeLimitMB >= 30000 at startup,
+      # so KURA_VOLUME_SIZE_LIMIT_MB must be < 30000 (docs/operations.md).
       - -master.volumeSizeLimitMB=${KURA_VOLUME_SIZE_LIMIT_MB}
       - -volume.port=8082
       - -filer
@@ -47,14 +52,15 @@ services:
       KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}
     volumes:
       - ./seaweedfs/entrypoint.sh:/kura/entrypoint.sh:ro
-      - seaweedfs-data:/data
+      # /data と /filerldb2 は bind mount で渡す。named / anonymous volume に
+      # すると podman が image 内の初期 dir を volume に copy-up する際に
+      # chown 1000:1000 を発火し、rootless podman + Lustre では chown 拒否で
+      # container が起動できない (docs/operations.md)。
+      - ${KURA_SEAWEEDFS_DATA_DIR:-./data/seaweedfs}:/data
+      - ${KURA_FILER_DIR:-./data/filerldb}:/filerldb2
     ports:
       # S3 API のみ公開する。filer (8888) / master (9333) は内部 network に閉じる
       - "${KURA_S3_PORT}:8333"
-    depends_on:
-      jwks:
-        condition: service_started
-        required: false
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
       interval: 2s
@@ -69,8 +75,9 @@ services:
       - ./nginx/kura.conf.template:/etc/nginx/templates/default.conf.template:ro
       # SPA build output (npm run build). Build before compose up.
       - ./build/client:/usr/share/nginx/html:ro
-      # Public-delivery audit log; the worker (uid 101) must be able to write
-      # here (docs/operations.md). kura-init prepares the directory.
+      # Public-delivery audit log (docs/operations.md). kura-init prepares the
+      # directory as world-writable so workers of any uid can create the
+      # date-stamped access log files.
       - ${KURA_LOG_DIR:-./logs}:/var/log/kura
     environment:
       KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
@@ -117,17 +124,3 @@ services:
         condition: service_completed_successfully
       seaweedfs:
         condition: service_healthy
-
-  # テスト時のみ: 自前鍵の JWKS を SeaweedFS の OIDC provider へ配信する
-  jwks:
-    image: docker.io/library/nginx:1.29-alpine
-    profiles: [test]
-    volumes:
-      - ./tests/setup/.jwks:/usr/share/nginx/html:ro
-
-volumes:
-  # 値なし (`seaweedfs-data:` だけ) にすると podman-compose 1.0.6 の rec_merge が
-  # override 側の dict と merge するときに ValueError で落ちる (None + dict はマージ
-  # 不可)。空 dict `{}` にしておけば dict + dict になって override が通る。
-  # compose.podman.yml が driver_opts で bind mount 化する。
-  seaweedfs-data: {}

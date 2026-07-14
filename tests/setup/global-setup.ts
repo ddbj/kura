@@ -25,7 +25,7 @@ const readEnvFile = (path: string): Record<string, string> => {
 const compose = (args: string[], env: NodeJS.ProcessEnv) => {
   execFileSync(
     "docker",
-    ["compose", "-p", "kura-test", "--env-file", "env.test", "--profile", "test", ...args],
+    ["compose", "-p", "kura-test", "--env-file", "env.test", "-f", "compose.yml", "-f", "compose.test.yml", ...args],
     { cwd: repoRoot, env, stdio: "inherit" },
   )
 }
