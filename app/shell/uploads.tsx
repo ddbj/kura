@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
 import type { RunningUpload, UploadProgress } from "~/lib/s3"
-import { copyObject, deleteObjects, listAllUnderPrefix, renameObject, ResumeMismatchError, resumeUpload, startUpload } from "~/lib/s3"
+import { copyObject, deleteEmptyDirectory, deleteObjects, listAllUnderPrefix, renameObject, ResumeMismatchError, resumeUpload, startUpload } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
 
 export type TransferState =
@@ -318,11 +318,21 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const enqueue = useCallback((bucket: string, prefix: string, files: File[]): void => {
     if (files.length === 0) return
     const now = Date.now()
+    // A folder-picked File (webkitdirectory input) or a directory-walked drop
+    // (walkEntry sets webkitRelativePath on each file) carries the subpath
+    // starting with the dropped folder name; keying on it preserves the folder
+    // structure under the current prefix. webkitRelativePath is missing on
+    // jsdom's File shim so guard for undefined as well as the empty-string
+    // "no subpath" browser convention.
+    const relPath = (file: File): string => {
+      const rel = file.webkitRelativePath as string | undefined
+      return rel !== undefined && rel !== "" ? rel : file.name
+    }
     const added: Transfer[] = files.map((file, i) => ({
-      id: `${now}-${i}-${file.name}`,
+      id: `${now}-${i}-${relPath(file)}`,
       kind: "upload",
       bucket,
-      key: `${prefix}${file.name}`,
+      key: `${prefix}${relPath(file)}`,
       name: file.name,
       size: file.size,
       state: "checking",
@@ -669,6 +679,11 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       } else {
         finishOperation(id)
       }
+      // SeaweedFS keeps an empty directory entry in the filer even after all
+      // children are gone; without an explicit rmdir the folder keeps showing
+      // up as a CommonPrefix. Best-effort — deleteEmptyDirectory swallows any
+      // 404 for prefixes that were never materialized.
+      await deleteEmptyDirectory(s3, bucket, prefix)
       void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
       void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
 
@@ -724,6 +739,9 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       } else {
         finishOperation(id)
       }
+      // Rename / move copies-and-deletes each key; the empty source directory
+      // entry lingers in the SeaweedFS filer until we explicitly remove it.
+      await deleteEmptyDirectory(s3, bucket, srcPrefix)
       void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
       void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
 

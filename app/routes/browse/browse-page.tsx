@@ -179,7 +179,13 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     staleTime: 30_000,
   })
 
-  const files = useMemo(() => directory.data?.files ?? [], [directory.data?.files])
+  // .keep marker files are how "new folder" is materialized in S3; they must
+  // never surface as user-visible rows nor keep the emptyzone from rendering
+  // (a folder containing only its own .keep is functionally empty).
+  const files = useMemo(
+    () => (directory.data?.files ?? []).filter((f) => entryName(f.key) !== ".keep"),
+    [directory.data?.files],
+  )
   const dirs = useMemo(() => directory.data?.dirs ?? [], [directory.data?.dirs])
   const fileKeys = useMemo(() => files.map((f) => f.key), [files])
   const publicFlags = useObjectPublicFlags(s3, bucket, fileKeys)
@@ -971,7 +977,13 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
 
       <ShareModal
         open={share !== null}
-        onClose={() => setShare(null)}
+        onClose={() => {
+          setShare(null)
+          // A new presigned URL is only observable in the row via
+          // presignedList; addSessionPresigned writes to sessionStorage which
+          // React does not observe, so nudge the memo here.
+          setPresignedTick((v) => v + 1)
+        }}
         targets={share?.targets ?? []}
         initialMode={share?.mode ?? "pub"}
       />

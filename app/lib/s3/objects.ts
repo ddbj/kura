@@ -74,6 +74,23 @@ export const deleteObject = async (s3: S3Client, bucket: string, key: string): P
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
 }
 
+// SeaweedFS keeps directory entries in the filer even after every child object
+// is removed, so an "emptied" folder keeps appearing in CommonPrefixes and the
+// SPA still renders a row for it. DeleteObject on the directory key (with a
+// trailing slash) tells the S3 gateway to remove the filer directory entry;
+// SeaweedFS's own S3 handler treats a slash-terminated key as a directory.
+// Callers use this after folder rename / folder move / folder delete on the
+// vacated source prefix. Best-effort — SeaweedFS may return 404 if the
+// directory was never materialized (e.g. lazy create); we swallow it.
+export const deleteEmptyDirectory = async (s3: S3Client, bucket: string, prefix: string): Promise<void> => {
+  if (prefix === "" || !prefix.endsWith("/")) return
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: prefix }))
+  } catch {
+    // best-effort: absent directory / permission edge cases are non-fatal
+  }
+}
+
 // Server-side copy. TaggingDirective=COPY / MetadataDirective=COPY inherit
 // from the source, so the public tag ("kura-public=true") survives rename /
 // move and objects don't silently go private.

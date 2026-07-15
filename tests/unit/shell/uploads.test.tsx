@@ -292,7 +292,10 @@ describe("useTransfers.enqueueFolderMove", () => {
 
     expect(outcome?.ok.length).toBe(2)
     expect(copied.sort()).toEqual(["new/a.txt", "new/sub/b.txt"])
-    expect(deleted.sort()).toEqual(["old/a.txt", "old/sub/b.txt"])
+    // enqueueFolderMove は完了後に deleteEmptyDirectory(srcPrefix) を発行し
+    // SeaweedFS filer に残る空 directory metadata を掃除する。MSW route の
+    // :key+ 変数は末尾スラッシュを剥がすので "old" が観測される。
+    expect(deleted.sort()).toEqual(["old", "old/a.txt", "old/sub/b.txt"])
     const tr = result.current.t.transfers[0]
     expect(tr?.kind).toBe("folder-move")
     expect(tr?.state).toBe("done")

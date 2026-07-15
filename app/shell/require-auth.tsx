@@ -19,7 +19,12 @@ export const RequireAuth = ({ children, fallback }: RequireAuthProps) => {
   const location = useLocation()
   const signin = () => void auth.signinRedirect({ state: location.pathname + location.search })
 
-  if (auth.isLoading) {
+  // Silent renew also flips isLoading to true while the refresh_token grant
+  // is in flight; unmounting children in that window would tear down any open
+  // modal / upload tray (~1 h into a session, on every access token refresh).
+  // Only show the loading placeholder on the initial visit before any session
+  // is established.
+  if (auth.isLoading && !auth.isAuthenticated) {
     return <p className="plain-text">{t("common.loading")}</p>
   }
 
