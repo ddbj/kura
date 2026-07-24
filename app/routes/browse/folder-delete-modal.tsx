@@ -19,7 +19,7 @@ export const FolderDeleteModal = ({ open, onClose, folderName, onConfirm }: Prop
   return (
     <Modal open={open} onClose={onClose} labelledBy="folder-delete-title">
       <div className="mh">
-        <b id="folder-delete-title">フォルダを削除</b>
+        <h2 className="mtitle" id="folder-delete-title">フォルダを削除</h2>
       </div>
       <div className="banner red">
         <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />

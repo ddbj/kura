@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
-import { type ReactNode, useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 
 import { dirName, listDirectory } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
-import { Button, Icon, IconButton, Modal } from "~/ui"
+import { Button, Icon, Modal } from "~/ui"
 
 type Props = {
   open: boolean
@@ -13,95 +13,95 @@ type Props = {
   submitLabel?: string
   initialPrefix?: string
   // Prefix of the source folder being moved (or the parent of a file being
-  // moved). Descendants of it are disabled because moving into your own
-  // subtree makes no sense and would loop.
+  // moved). Descendants of it (or the folder itself) cannot be the destination.
   disabledPrefix?: string | undefined
   onSelect: (prefix: string) => void
 }
 
-const isDescendantOf = (prefix: string, ancestor: string): boolean =>
-  ancestor !== "" && prefix.startsWith(ancestor)
-
+// Navigate-into picker (Google Drive style): a single click enters a folder,
+// the breadcrumb reflects the current location, and the primary button
+// commits the current location as the destination — matching how people
+// already navigate the browse page. The tree with disclosure carets earlier
+// left the "select vs open" distinction ambiguous.
 export const FolderPicker = ({
   open,
   onClose,
   bucket,
-  title = "移動先を選ぶ",
-  submitLabel = "選択",
+  title = "移動先のフォルダを選ぶ",
+  submitLabel = "この場所を選ぶ",
   initialPrefix = "",
   disabledPrefix,
   onSelect,
 }: Props) => {
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set([""]))
-  const [selected, setSelected] = useState<string>(initialPrefix)
+  const s3 = useS3()
+  const [currentPrefix, setCurrentPrefix] = useState<string>(initialPrefix)
 
   useEffect(() => {
-    if (open) {
-      setExpanded(new Set([""]))
-      setSelected(initialPrefix)
-    }
+    if (open) setCurrentPrefix(initialPrefix)
   }, [open, initialPrefix])
 
-  const toggleExpand = (prefix: string): void => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(prefix)) next.delete(prefix)
-      else next.add(prefix)
-
-      return next
-    })
+  const segments = currentPrefix === "" ? [] : currentPrefix.slice(0, -1).split("/")
+  const goTo = (upTo: number): void => {
+    if (upTo < 0) setCurrentPrefix("")
+    else setCurrentPrefix(`${segments.slice(0, upTo + 1).join("/")}/`)
   }
+  const enterFolder = (dirPrefix: string): void => setCurrentPrefix(dirPrefix)
 
-  const renderNode = (prefix: string, name: string, depth: number): ReactNode => {
-    const isOpen = expanded.has(prefix)
-    const isSelected = prefix === selected
-    const isDisabled = disabledPrefix !== undefined && (prefix === disabledPrefix || isDescendantOf(prefix, disabledPrefix))
+  const isCurrentDisabled = disabledPrefix !== undefined
+    && disabledPrefix !== ""
+    && (currentPrefix === disabledPrefix || currentPrefix.startsWith(disabledPrefix))
 
-    return (
-      <div key={prefix === "" ? "__root__" : prefix}>
-        <div
-          className="picker-row"
-          style={{
-            paddingLeft: depth * 18 + 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 8px",
-            borderRadius: 6,
-            background: isSelected ? "var(--brandSoft)" : undefined,
-            cursor: isDisabled ? "not-allowed" : "pointer",
-            opacity: isDisabled ? 0.4 : 1,
-          }}
-          onClick={() => { if (!isDisabled) setSelected(prefix) }}
-        >
-          <IconButton
-            icon="caret"
-            size={10}
-            ariaLabel={isOpen ? "折りたたむ" : "展開する"}
-            onClick={(event) => { event.stopPropagation(); toggleExpand(prefix) }}
-            style={{ transform: isOpen ? "rotate(180deg)" : "rotate(90deg)", transition: "transform 100ms", background: "transparent", border: 0, padding: 2 }}
-          />
-          <Icon name="folder" size={14} />
-          <span style={{ fontFamily: "var(--mono)", fontSize: 12.5, fontWeight: isSelected ? 700 : 500 }}>{name}</span>
-        </div>
-        {isOpen
-          ? <FolderChildren bucket={bucket} prefix={prefix} depth={depth + 1} renderNode={renderNode} />
-          : null}
-      </div>
-    )
-  }
+  // Share the queryKey with BrowsePage's directory listing so that a new folder
+  // created there (which invalidates ["objects", bucket, prefix]) shows up here
+  // without the picker holding a stale cache of its own.
+  const q = useQuery({
+    queryKey: ["objects", bucket, currentPrefix],
+    queryFn: () => listDirectory(s3, bucket, currentPrefix),
+    enabled: open,
+  })
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="picker-title">
       <div className="mh">
-        <b id="picker-title">{title}</b>
+        <h2 className="mtitle" id="picker-title">{title}</h2>
       </div>
-      <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--borderSoft)", borderRadius: 8, padding: 4 }}>
-        {renderNode("", bucket, 0)}
+
+      <div className="mdest-label">移動先</div>
+      <div className="picker-crumbs" aria-label="移動先">
+        {segments.length === 0
+          ? <span className="cur">{bucket}</span>
+          : <Button unstyled onClick={() => goTo(-1)}>{bucket}</Button>}
+        {segments.map((seg, i) => {
+          const isLast = i === segments.length - 1
+
+          return (
+            <Fragment key={i}>
+              <span className="sl">/</span>
+              {isLast
+                ? <span className="cur">{seg}</span>
+                : <Button unstyled onClick={() => goTo(i)}>{seg}</Button>}
+            </Fragment>
+          )
+        })}
       </div>
+
+      <PickerList
+        q={q}
+        disabledPrefix={disabledPrefix}
+        onEnter={enterFolder}
+      />
+
+      {isCurrentDisabled
+        ? <p className="ferr" style={{ marginTop: 10 }}>この場所には移動できません</p>
+        : null}
+
       <div className="mfoot">
         <Button onClick={onClose}>キャンセル</Button>
-        <Button kind="pri" onClick={() => { onSelect(selected); onClose() }}>
+        <Button
+          kind="pri"
+          disabled={isCurrentDisabled}
+          onClick={() => { onSelect(currentPrefix); onClose() }}
+        >
           {submitLabel}
         </Button>
       </div>
@@ -109,30 +109,49 @@ export const FolderPicker = ({
   )
 }
 
-type ChildrenProps = {
-  bucket: string
-  prefix: string
-  depth: number
-  renderNode: (prefix: string, name: string, depth: number) => ReactNode
+type PickerListQuery = ReturnType<typeof useQuery<Awaited<ReturnType<typeof listDirectory>>>>
+
+type PickerListProps = {
+  q: PickerListQuery
+  disabledPrefix: string | undefined
+  onEnter: (dirPrefix: string) => void
 }
 
-const FolderChildren = ({ bucket, prefix, depth, renderNode }: ChildrenProps) => {
-  const s3 = useS3()
-  const q = useQuery({
-    queryKey: ["folder-picker", bucket, prefix],
-    queryFn: () => listDirectory(s3, bucket, prefix),
-  })
-
+const PickerList = ({ q, disabledPrefix, onEnter }: PickerListProps) => {
   if (q.isLoading) {
-    return <div style={{ paddingLeft: depth * 18 + 8, padding: "4px 8px", fontSize: 11, color: "var(--inkSoft)" }}>読み込み中…</div>
+    return <div className="picker-list"><div className="picker-empty">読み込み中…</div></div>
   }
   if (q.isError) {
-    return <div style={{ paddingLeft: depth * 18 + 8, padding: "4px 8px", fontSize: 11, color: "var(--red)" }}>取得に失敗しました</div>
+    return <div className="picker-list"><div className="picker-empty" style={{ color: "var(--red)" }}>取得に失敗しました</div></div>
   }
   const dirs = q.data?.dirs ?? []
   if (dirs.length === 0) {
-    return <div style={{ paddingLeft: depth * 18 + 8, padding: "4px 8px", fontSize: 11, color: "var(--inkSoft)" }}>(サブフォルダなし)</div>
+    return <div className="picker-list"><div className="picker-empty">サブフォルダはありません</div></div>
   }
 
-  return <>{dirs.map((d) => renderNode(d, dirName(d), depth))}</>
+  return (
+    <div className="picker-list" role="list">
+      {dirs.map((d) => {
+        const name = dirName(d)
+        const isDisabled = disabledPrefix !== undefined && disabledPrefix !== ""
+          && (d === disabledPrefix || d.startsWith(disabledPrefix))
+
+        return (
+          <Button
+            key={d}
+            unstyled
+            role="listitem"
+            className="picker-item"
+            disabled={isDisabled}
+            onClick={() => onEnter(d)}
+          >
+            <Icon name="folder" size={16} />
+            <span className="nm">{name}</span>
+            <span className="opencue" aria-hidden="true">開く</span>
+            <Icon name="caret" size={12} className="chev" />
+          </Button>
+        )
+      })}
+    </div>
+  )
 }

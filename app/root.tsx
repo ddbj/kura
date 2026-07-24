@@ -20,6 +20,7 @@ import { ConfigProvider, fetchConfig } from "~/lib/config"
 import { LangProvider } from "~/lib/i18n"
 import { createQueryClient } from "~/lib/query"
 import { OverlayProviders } from "~/shell"
+import { LoadingView } from "~/ui"
 
 import type { Route } from "./+types/root"
 
@@ -45,7 +46,7 @@ export const Layout = ({ children }: { children: ReactNode }) => (
 
 // Rendered into the prebuilt index.html shell until the clientLoader resolves;
 // it shows before i18n exists, so the text is intentionally untranslated.
-export const HydrateFallback = () => <p className="plain-text">Loading…</p>
+export const HydrateFallback = () => <LoadingView label="Loading…" full brand />
 
 export const ErrorBoundary = () => {
   const error = useRouteError()

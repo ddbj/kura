@@ -8,6 +8,9 @@ type Props = {
   open: boolean
   onClose: () => void
   title: string
+  // Optional line under the title identifying the target (mono, muted). Use for
+  // the current file / folder name; omit when there is no target (e.g. new folder).
+  subtitle?: React.ReactNode
   labelledBy: string
   // Rendered above the input, typically shows the target file / folder.
   targetSlot?: React.ReactNode
@@ -39,6 +42,7 @@ export const NameEntryModal = ({
   open,
   onClose,
   title,
+  subtitle,
   labelledBy,
   targetSlot,
   footerSlot,
@@ -98,7 +102,8 @@ export const NameEntryModal = ({
   return (
     <Modal open={open} onClose={onClose} labelledBy={labelledBy}>
       <div className="mh">
-        <b id={labelledBy}>{title}</b>
+        <h2 className="mtitle" id={labelledBy}>{title}</h2>
+        {subtitle === undefined ? null : <div className="msubtitle">{subtitle}</div>}
       </div>
       {targetSlot}
       <TextInput

@@ -3,7 +3,7 @@ import { useAuth } from "react-oidc-context"
 import { useLocation } from "react-router"
 
 import { useT } from "~/lib/i18n"
-import { Button, Callout } from "~/ui"
+import { Button, Callout, LoadingView } from "~/ui"
 
 type RequireAuthProps = {
   children: ReactNode
@@ -25,7 +25,7 @@ export const RequireAuth = ({ children, fallback }: RequireAuthProps) => {
   // Only show the loading placeholder on the initial visit before any session
   // is established.
   if (auth.isLoading && !auth.isAuthenticated) {
-    return <p className="plain-text">{t("common.loading")}</p>
+    return <LoadingView label={t("common.loading")} />
   }
 
   if (auth.error) {

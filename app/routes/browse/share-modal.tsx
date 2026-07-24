@@ -155,7 +155,7 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
   return (
     <Modal open={open} onClose={onClose} labelledBy="share-title">
       <div className="mh split">
-        <b id="share-title">{title}</b>
+        <h2 className="mtitle" id="share-title">{title}</h2>
         <ModeSwitch<Mode>
           value={mode}
           onChange={resetOnModeChange}
@@ -167,7 +167,6 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
         />
       </div>
 
-      <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>対象 {targets.length}件</div>
       <div className="flist">
         {targets.map((t) => {
           const state = rowStates[rowKey(t)]

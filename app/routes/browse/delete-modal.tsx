@@ -26,13 +26,13 @@ export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
 
   const single = targets.length === 1 ? targets[0] : undefined
   const headline = single !== undefined
-    ? <>「{single.name}」を削除するとすぐに消え、元には戻せません。公開中の場合は公開も止まります。</>
-    : <>{targets.length} 件のファイルを削除するとすぐに消え、元には戻せません。公開中のファイルは公開も止まります。</>
+    ? <>「{single.name}」を削除すると元には戻せません。公開中の場合は公開も止まります。</>
+    : <>{targets.length} 件のファイルを削除すると元には戻せません。公開中のファイルは公開も止まります。</>
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="delete-title">
       <div className="mh">
-        <b id="delete-title">ファイルを削除</b>
+        <h2 className="mtitle" id="delete-title">ファイルを削除</h2>
       </div>
       <div className="banner red">
         <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react"
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "react-oidc-context"
 import { Link, useNavigate } from "react-router"
 
@@ -224,7 +224,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "updated", dir: "desc" })
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set())
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null)
-  const [uploadMenuOpen, setUploadMenuOpen] = useState(false)
+  const [uploadMenuOpen, setUploadMenuOpen] = useState<"header" | "empty" | null>(null)
   const [share, setShare] = useState<
     | { targets: { bucket: string; key: string; name: string; size: number }[]; mode: "pub" | "temp" }
     | null
@@ -244,7 +244,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
 
   const closeAllMenus = useCallback(() => {
     setOpenRowMenu(null)
-    setUploadMenuOpen(false)
+    setUploadMenuOpen(null)
     setOpenFolderMenu(null)
   }, [])
 
@@ -388,6 +388,22 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     }
   }
 
+  const copyShareUrl = async (key: string) => {
+    const isPub = publicFlags.get(key) === true
+    const presigned = presignedByKey.get(key)
+    const url = isPub
+      ? publicUrl(config.publicBase, bucket, key)
+      : presigned?.url
+    if (url === undefined) return
+    try {
+      await navigator.clipboard.writeText(url)
+      setFlash({ tone: "ok", message: "リンクをコピーしました" })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setFlash({ tone: "red", message: `コピーに失敗しました: ${message}` })
+    }
+  }
+
   const unpublish = useMutation({
     mutationFn: async (key: string) => {
       const changeToken = beginPublicStateChange(bucket, key)
@@ -441,33 +457,57 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     transfersApi.enqueue(bucket, prefix, arr)
   }
 
+  // dragenter/dragleave fires when the pointer crosses any descendant
+  // boundary, so a naive `isDragging` toggle flickers. Counting enter/leave
+  // pairs across children stays true until the pointer actually leaves the
+  // drop target. Ref (not state) so successive events aren't batched.
+  const dragDepthRef = useRef(0)
+
+  const onDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return
+    event.preventDefault()
+    dragDepthRef.current += 1
+    if (!overQuota) setIsDragging(true)
+  }
+
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return
+    // preventDefault on both dragenter AND dragover is required for drop
+    // to fire (browser default is to reject the drop).
+    event.preventDefault()
+    if (overQuota) event.dataTransfer.dropEffect = "none"
+    else event.dataTransfer.dropEffect = "copy"
+  }
+
+  const onDragLeave = (_event: DragEvent<HTMLDivElement>) => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDragging(false)
+  }
+
   const onDrop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
+    dragDepthRef.current = 0
     setIsDragging(false)
     if (overQuota) return
-    const items = event.dataTransfer.items
-    if (items.length > 0 && typeof (items[0] as DataTransferItem).webkitGetAsEntry === "function") {
-      // Directory-capable path: walk each dragged entry and reconstruct File
-      // objects with a `webkitRelativePath` so the transfer preserves the
-      // dropped folder structure.
-      const files = await filesFromDataTransferItems(items)
+    // event.dataTransfer is only guaranteed valid during the drop tick;
+    // capture File references and FileSystemEntry roots synchronously
+    // before any await, then walk the entries asynchronously.
+    const dtItems = event.dataTransfer.items
+    const dtFiles = Array.from(event.dataTransfer.files)
+    const entries: FileSystemEntry[] = []
+    if (dtItems.length > 0 && typeof (dtItems[0] as DataTransferItem).webkitGetAsEntry === "function") {
+      for (const it of Array.from(dtItems)) {
+        const entry = (it as unknown as { webkitGetAsEntry: () => FileSystemEntry | null }).webkitGetAsEntry()
+        if (entry !== null && entry !== undefined) entries.push(entry)
+      }
+    }
+    if (entries.length > 0) {
+      const files = await filesFromEntries(entries)
       if (files.length > 0) transfersApi.enqueue(bucket, prefix, files)
 
       return
     }
-    const arr: File[] = []
-    for (const item of Array.from(event.dataTransfer.files)) arr.push(item)
-    if (arr.length > 0) transfersApi.enqueue(bucket, prefix, arr)
-  }
-
-  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    if (overQuota) return
-    setIsDragging(true)
-  }
-
-  const onDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (event.currentTarget === event.target) setIsDragging(false)
+    if (dtFiles.length > 0) transfersApi.enqueue(bucket, prefix, dtFiles)
   }
 
   const existingFolderNames = useMemo(() => dirs.map((d) => dirName(d)), [dirs])
@@ -524,12 +564,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const pending = pendingUploads.data ?? []
 
   return (
-    <div
-      className="wrap"
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={(event) => void onDrop(event)}
-    >
+    <div className="wrap">
       {bucketReady.isError
         ? (
           <div style={{ margin: "24px 0 0" }}>
@@ -596,7 +631,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
               onClick={(event) => {
                 event.stopPropagation()
                 if (overQuota) return
-                setUploadMenuOpen((v) => !v)
+                setUploadMenuOpen((v) => v === "header" ? null : "header")
               }}
               style={overQuota ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
             >
@@ -604,13 +639,13 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
               アップロード
               <Icon name="caret" size={10} className="caret" />
             </Button>
-            {uploadMenuOpen ? (
+            {uploadMenuOpen === "header" ? (
               <div className="uploadmenu" role="menu" onClick={(event) => event.stopPropagation()}>
-                <MenuItem onClick={() => { setUploadMenuOpen(false); fileInputRef.current?.click() }}>
+                <MenuItem onClick={() => { setUploadMenuOpen(null); fileInputRef.current?.click() }}>
                   <Icon name="file" size={15} />
                   ファイルを選択
                 </MenuItem>
-                <MenuItem onClick={() => { setUploadMenuOpen(false); folderInputRef.current?.click() }}>
+                <MenuItem onClick={() => { setUploadMenuOpen(null); folderInputRef.current?.click() }}>
                   <Icon name="folder" size={15} />
                   フォルダを選択
                 </MenuItem>
@@ -703,7 +738,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
         )
         : null}
 
-      <div className={cn("card", { menuopen: openRowMenu !== null })}>
+      <div className={cn("card", { menuopen: openRowMenu !== null || openFolderMenu !== null || uploadMenuOpen === "empty" })}>
         {selection.size === 0
           ? null
           : (
@@ -733,7 +768,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           >
             名前
           </SortButton>
-          <span>共有</span>
+          <span className="col-center">共有</span>
           <SortButton
             active={sort.key === "size"}
             descending={sort.dir === "desc"}
@@ -753,177 +788,116 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           <span />
         </div>
 
-        {noResultsAfterSearch
-          ? (
-            <div className="empty" style={{ padding: "48px 24px" }}>
-              <h2 style={{ fontSize: 15 }}>「{search}」に一致するファイルはありません</h2>
-              <div className="lens" style={{ justifyContent: "center" }}>
-                <Chip onClick={() => setSearch("")}>検索をクリア</Chip>
-              </div>
-            </div>
-          )
-          : rows.length === 0 && dirs.length === 0
+        <div
+          className={cn("cardbody", { dragging: isDragging && !overQuota })}
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={(event) => void onDrop(event)}
+        >
+          {noResultsAfterSearch
             ? (
-              <div className="emptyzone">
-                <div className="eico"><Icon name="up" size={24} /></div>
-                <div className="ez-title">まだファイルがありません</div>
-                <div className="ez-note">
-                  ファイル・フォルダをアップロードするとここに一覧表示されます。<br />
-                  ドラッグ＆ドロップもできます。
-                </div>
-                <div className="ez-actions">
-                  <Button
-                    kind="pri"
-                    size="sm"
-                    disabled={overQuota}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Icon name="up" size={14} />
-                    アップロード
-                    <Icon name="caret" size={10} className="caret" />
-                  </Button>
+              <div className="empty" style={{ padding: "48px 24px" }}>
+                <h2 style={{ fontSize: 15 }}>「{search}」に一致するファイルはありません</h2>
+                <div className="lens" style={{ justifyContent: "center" }}>
+                  <Chip onClick={() => setSearch("")}>検索をクリア</Chip>
                 </div>
               </div>
             )
-            : (
-              <>
-                {dirs.filter((d) => search === "" || dirName(d).toLowerCase().includes(search.toLowerCase())).map((dirPrefix) => {
-                  const name = dirName(dirPrefix)
-                  const href = dirHref(dirPrefix)
-                  const isFolderMenuOpen = openFolderMenu === dirPrefix
-
-                  return (
-                    <div className="row sel" key={dirPrefix}>
-                      <div className="c-sel" />
-                      <div className="c-name">
-                        <Icon name="folder" size={20} className="ico f" />
-                        <FolderNavButton
-                          to={href}
-                          onNavigate={(to) => navigate(to)}
-                          className="nm folder"
-                          title={name}
-                        >
-                          {name}
-                        </FolderNavButton>
-                      </div>
-                      <div className="c-pub" />
-                      <div className="c-size">—</div>
-                      <div className="c-date">—</div>
-                      <div className="c-act">
-                        <IconButton
-                          icon="more"
-                          ariaLabel={`${name} の操作`}
-                          active={isFolderMenuOpen}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setOpenFolderMenu(isFolderMenuOpen ? null : dirPrefix)
-                          }}
-                        />
-                        {isFolderMenuOpen ? (
-                          <div className="rowmenu" role="menu" onClick={(event) => event.stopPropagation()}>
-                            <MenuItem onClick={() => { setOpenFolderMenu(null); setFolderRenameTarget({ prefix: dirPrefix, name }) }}>
-                              名前を変更
-                            </MenuItem>
-                            <MenuItem onClick={() => { setOpenFolderMenu(null); setFolderMoveTarget({ prefix: dirPrefix, name }) }}>
-                              移動
-                            </MenuItem>
-                            <div className="sepline" />
-                            <MenuItem danger onClick={() => { setOpenFolderMenu(null); setFolderDeleteTarget({ prefix: dirPrefix, name }) }}>
-                              <Icon name="trash" size={15} />
-                              削除
-                            </MenuItem>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  )
-                })}
-
-                {rows.map((file) => {
-                  const key = file.key
-                  const name = entryName(key)
-                  if (name === ".keep") return null
-                  const isPub = publicFlags.get(key) === true
-                  const presigned = presignedByKey.get(key)
-                  const isSelected = selection.has(key)
-                  const isMenuOpen = openRowMenu === key
-                  const canExpand = isPub || presigned !== undefined
-                  const isExpanded = canExpand && expandedRows.has(key)
-                  const rowClass = cn("row sel", {
-                    selected: isSelected,
-                    public: isPub && !isSelected && isExpanded,
-                    presigned: !isPub && presigned !== undefined && !isSelected && isExpanded,
-                    expandable: canExpand,
-                    expanded: isExpanded,
-                  })
-
-                  return (
-                    <div key={key}>
-                      <div
-                        className={rowClass}
-                        onClick={canExpand ? (event) => onRowActivate(event, key) : undefined}
-                        aria-expanded={canExpand ? isExpanded : undefined}
+            : rows.length === 0 && dirs.length === 0
+              ? (
+                <div className="emptyzone">
+                  <div className="eico"><Icon name="up" size={24} /></div>
+                  <div className="ez-title">まだファイルがありません</div>
+                  <div className="ez-note">
+                    ファイル・フォルダをアップロードするとここに一覧表示されます。<br />
+                    ドラッグ＆ドロップもできます。
+                  </div>
+                  <div className="ez-actions">
+                    <div style={{ position: "relative" }}>
+                      <Button
+                        kind="pri"
+                        size="sm"
+                        disabled={overQuota}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setUploadMenuOpen((v) => v === "empty" ? null : "empty")
+                        }}
                       >
-                        <div className="c-sel">
-                          <Checkbox checked={isSelected} onChange={() => toggleSelection(key)} ariaLabel={`${name} を選択`} />
+                        <Icon name="up" size={14} />
+                        アップロード
+                        <Icon name="caret" size={10} className="caret" />
+                      </Button>
+                      {uploadMenuOpen === "empty" ? (
+                        <div className="uploadmenu uploadmenu-center" role="menu" onClick={(event) => event.stopPropagation()}>
+                          <MenuItem onClick={() => { setUploadMenuOpen(null); fileInputRef.current?.click() }}>
+                            <Icon name="file" size={15} />
+                            ファイルを選択
+                          </MenuItem>
+                          <MenuItem onClick={() => { setUploadMenuOpen(null); folderInputRef.current?.click() }}>
+                            <Icon name="folder" size={15} />
+                            フォルダを選択
+                          </MenuItem>
                         </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )
+              : (
+                <>
+                  {dirs.filter((d) => search === "" || dirName(d).toLowerCase().includes(search.toLowerCase())).map((dirPrefix) => {
+                    const name = dirName(dirPrefix)
+                    const href = dirHref(dirPrefix)
+                    const isFolderMenuOpen = openFolderMenu === dirPrefix
+
+                    return (
+                      <div
+                        className="row sel folder-row"
+                        key={dirPrefix}
+                        onClick={(event) => {
+                          const target = event.target as HTMLElement
+                          if (target.closest("button, a, input") !== null) return
+                          navigate(href)
+                        }}
+                      >
+                        <div className="c-sel" />
                         <div className="c-name">
-                          <Icon name="file" size={20} className="ico" />
-                          <span className="nm" title={key}>{name}</span>
+                          <Icon name="folder" size={20} className="ico f" />
+                          <FolderNavButton
+                            to={href}
+                            onNavigate={(to) => navigate(to)}
+                            className="nm folder"
+                            title={name}
+                          >
+                            {name}
+                          </FolderNavButton>
+                          <span className="opencue" aria-hidden="true">開く</span>
+                          <Icon name="caret" size={12} className="folder-chev" />
                         </div>
-                        <div className="c-pub">
-                          {isPub
-                            ? <Tag tone="ok" dot>公開中</Tag>
-                            : presigned !== undefined
-                              ? <Tag tone="warn"><Icon name="clock" size={11} />期限つき</Tag>
-                              : null}
-                        </div>
-                        <div className="c-size">{file.size === undefined ? "—" : formatBytes(file.size)}</div>
-                        <div className="c-date">
-                          <div>{formatShortDate(file.lastModified)}</div>
-                          {config.fileTtlDays === null
-                            ? null
-                            : (
-                              <div style={{ fontSize: 11, color: "var(--inkSoft)" }}>
-                                <TtlExpiry createdMs={file.lastModified.getTime()} ttlDays={config.fileTtlDays} />
-                              </div>
-                            )}
-                        </div>
+                        <div className="c-pub" />
+                        <div className="c-size">—</div>
+                        <div className="c-date">—</div>
                         <div className="c-act">
-                          {isPub
-                            ? (
-                              <Button kind="stop" size="sm" className="pubbtn" onClick={() => unpublish.mutate(key)}>
-                                公開を停止
-                              </Button>
-                            )
-                            : <Button kind="po" size="sm" className="pubbtn" onClick={() => openShare([key])}>公開する</Button>}
                           <IconButton
                             icon="more"
                             ariaLabel={`${name} の操作`}
-                            active={isMenuOpen}
+                            active={isFolderMenuOpen}
                             onClick={(event) => {
                               event.stopPropagation()
-                              setOpenRowMenu(isMenuOpen ? null : key)
+                              setOpenFolderMenu(isFolderMenuOpen ? null : dirPrefix)
                             }}
                           />
-                          {isMenuOpen ? (
+                          {isFolderMenuOpen ? (
                             <div className="rowmenu" role="menu" onClick={(event) => event.stopPropagation()}>
-                              <MenuItem onClick={() => { setOpenRowMenu(null); void download(key) }}>
-                                <Icon name="dl" size={15} />
-                                ダウンロード
-                              </MenuItem>
-                              <div className="sepline" />
-                              <MenuItem onClick={() => { setOpenRowMenu(null); setRenameTarget(key) }}>
+                              <MenuItem onClick={() => { setOpenFolderMenu(null); setFolderRenameTarget({ prefix: dirPrefix, name }) }}>
                                 名前を変更
                               </MenuItem>
-                              <MenuItem onClick={() => { setOpenRowMenu(null); setMoveTarget(key) }}>
+                              <MenuItem onClick={() => { setOpenFolderMenu(null); setFolderMoveTarget({ prefix: dirPrefix, name }) }}>
                                 移動
                               </MenuItem>
-                              <MenuItem onClick={() => { setOpenRowMenu(null); setCopyTarget(key) }}>
-                                コピー
-                              </MenuItem>
                               <div className="sepline" />
-                              <MenuItem danger onClick={() => { setOpenRowMenu(null); openDelete([key]) }}>
+                              <MenuItem danger onClick={() => { setOpenFolderMenu(null); setFolderDeleteTarget({ prefix: dirPrefix, name }) }}>
                                 <Icon name="trash" size={15} />
                                 削除
                               </MenuItem>
@@ -931,29 +905,143 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                           ) : null}
                         </div>
                       </div>
-                      {isPub && isExpanded ? (
-                        <div className="pubpanel">
-                          <div className="pp-top">
-                            <span className="lbl">公開URL — 認証なしで誰でもダウンロードできます</span>
+                    )
+                  })}
+
+                  {rows.map((file) => {
+                    const key = file.key
+                    const name = entryName(key)
+                    if (name === ".keep") return null
+                    const isPub = publicFlags.get(key) === true
+                    const presigned = presignedByKey.get(key)
+                    const isSelected = selection.has(key)
+                    const isMenuOpen = openRowMenu === key
+                    const canExpand = isPub || presigned !== undefined
+                    const isExpanded = canExpand && expandedRows.has(key)
+                    const rowClass = cn("row sel", {
+                      selected: isSelected,
+                      public: isPub && !isSelected && isExpanded,
+                      presigned: !isPub && presigned !== undefined && !isSelected && isExpanded,
+                      expandable: canExpand,
+                      expanded: isExpanded,
+                    })
+
+                    return (
+                      <Fragment key={key}>
+                        <div
+                          className={rowClass}
+                          onClick={canExpand ? (event) => onRowActivate(event, key) : undefined}
+                          aria-expanded={canExpand ? isExpanded : undefined}
+                        >
+                          <div className="c-sel">
+                            <Checkbox checked={isSelected} onChange={() => toggleSelection(key)} ariaLabel={`${name} を選択`} />
                           </div>
-                          <LinkBar url={publicUrl(config.publicBase, bucket, key)} tone="ok" copyLabel="コピー" copiedLabel="コピー済み" />
-                        </div>
-                      ) : null}
-                      {presigned !== undefined && !isPub && isExpanded ? (
-                        <div className="presignpanel">
-                          <div className="pp-top">
-                            <span className="lbl" style={{ color: "var(--warnFg)" }}>
-                              期限つきリンク — 約<ExpiresInMinutes expiresAtMs={presigned.expiresAt} />分後に自動で失効します
-                            </span>
+                          <div className="c-name">
+                            <Icon name="file" size={20} className="ico" />
+                            <span className="nm" title={key}>{name}</span>
+                            {canExpand ? (
+                              <>
+                                <span className="opencue" aria-hidden="true">URL を開く</span>
+                                <Icon name="caret" size={12} className="row-chev" />
+                              </>
+                            ) : null}
                           </div>
-                          <LinkBar url={presigned.url} tone="warn" copyLabel="コピー" copiedLabel="コピー済み" />
+                          <div className="c-pub">
+                            {isPub
+                              ? <Tag tone="ok" dot>公開中</Tag>
+                              : presigned !== undefined
+                                ? <Tag tone="warn"><Icon name="clock" size={11} />期限つき</Tag>
+                                : null}
+                          </div>
+                          <div className="c-size">{file.size === undefined ? "—" : formatBytes(file.size)}</div>
+                          <div className="c-date">
+                            <div>{formatShortDate(file.lastModified)}</div>
+                            {config.fileTtlDays === null
+                              ? null
+                              : (
+                                <div style={{ fontSize: 11, color: "var(--inkSoft)" }}>
+                                  <TtlExpiry createdMs={file.lastModified.getTime()} ttlDays={config.fileTtlDays} />
+                                </div>
+                              )}
+                          </div>
+                          <div className="c-act">
+                            {isPub
+                              ? (
+                                <Button kind="stop" size="sm" className="pubbtn" onClick={() => unpublish.mutate(key)}>
+                                  公開停止
+                                </Button>
+                              )
+                              : <Button kind="po" size="sm" className="pubbtn" onClick={() => openShare([key])}>公開する</Button>}
+                            <IconButton
+                              icon="more"
+                              ariaLabel={`${name} の操作`}
+                              active={isMenuOpen}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setOpenRowMenu(isMenuOpen ? null : key)
+                              }}
+                            />
+                            {isMenuOpen ? (
+                              <div className="rowmenu" role="menu" onClick={(event) => event.stopPropagation()}>
+                                {canExpand ? (
+                                  <MenuItem onClick={() => { setOpenRowMenu(null); void copyShareUrl(key) }}>
+                                    <Icon name="link" size={15} />
+                                    リンクをコピー
+                                  </MenuItem>
+                                ) : null}
+                                <MenuItem onClick={() => { setOpenRowMenu(null); void download(key) }}>
+                                  <Icon name="dl" size={15} />
+                                  ダウンロード
+                                </MenuItem>
+                                <div className="sepline" />
+                                <MenuItem onClick={() => { setOpenRowMenu(null); setRenameTarget(key) }}>
+                                  名前を変更
+                                </MenuItem>
+                                <MenuItem onClick={() => { setOpenRowMenu(null); setMoveTarget(key) }}>
+                                  移動
+                                </MenuItem>
+                                <MenuItem onClick={() => { setOpenRowMenu(null); setCopyTarget(key) }}>
+                                  コピー
+                                </MenuItem>
+                                <div className="sepline" />
+                                <MenuItem danger onClick={() => { setOpenRowMenu(null); openDelete([key]) }}>
+                                  <Icon name="trash" size={15} />
+                                  削除
+                                </MenuItem>
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
-              </>
-            )}
+                        {isPub && isExpanded ? (
+                          <div className="pubpanel">
+                            <div className="pp-top">
+                              <span className="lbl">公開URL — 認証なしで誰でもダウンロードできます</span>
+                            </div>
+                            <LinkBar url={publicUrl(config.publicBase, bucket, key)} tone="ok" copyLabel="コピー" copiedLabel="コピー済み" />
+                          </div>
+                        ) : null}
+                        {presigned !== undefined && !isPub && isExpanded ? (
+                          <div className="presignpanel">
+                            <div className="pp-top">
+                              <span className="lbl" style={{ color: "var(--warnFg)" }}>
+                                期限つきリンク — 約<ExpiresInMinutes expiresAtMs={presigned.expiresAt} />分後に自動で失効します
+                              </span>
+                            </div>
+                            <LinkBar url={presigned.url} tone="warn" copyLabel="コピー" copiedLabel="コピー済み" />
+                          </div>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })}
+                </>
+              )}
+          {isDragging && !overQuota ? (
+            <div className="dropov" aria-hidden="true">
+              <Icon name="up" size={28} />
+              <div className="t">ここにドロップしてアップロード</div>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <UploadCard
@@ -966,14 +1054,6 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
         onSkip={transfersApi.skip}
         onDismissAll={transfersApi.dismissAll}
       />
-
-      {isDragging && !overQuota ? (
-        <div className="dropov" aria-hidden="true">
-          <Icon name="up" size={28} />
-          <div className="t">ここにドロップしてアップロード</div>
-          <div className="sub">現在の {segments.length === 0 ? "ホーム" : segments.join(" / ")} に追加されます</div>
-        </div>
-      ) : null}
 
       <ShareModal
         open={share !== null}
@@ -1129,13 +1209,7 @@ type FileSystemDirectoryReader = {
   readEntries: (cb: (entries: FileSystemEntry[]) => void, err: (e: unknown) => void) => void
 }
 
-const filesFromDataTransferItems = async (items: DataTransferItemList): Promise<File[]> => {
-  const roots: FileSystemEntry[] = []
-  for (const it of Array.from(items)) {
-    // webkitGetAsEntry is non-standard; typed defensively.
-    const entry = (it as unknown as { webkitGetAsEntry: () => FileSystemEntry | null }).webkitGetAsEntry()
-    if (entry !== null && entry !== undefined) roots.push(entry)
-  }
+const filesFromEntries = async (roots: FileSystemEntry[]): Promise<File[]> => {
   const out: File[] = []
   await Promise.all(roots.map((root) => walkEntry(root, "", out)))
 
@@ -1143,10 +1217,14 @@ const filesFromDataTransferItems = async (items: DataTransferItemList): Promise<
 }
 
 const walkEntry = async (entry: FileSystemEntry, parentPath: string, out: File[]): Promise<void> => {
+  // Native FileSystemFileEntry.file() checks `this` internally, so a detached
+  // reference (`const f = entry.file; f(...)`) throws "Illegal invocation".
+  // Rebind via .call(entry, …) instead of a member-call expression to keep
+  // the pattern local (rather than repeat the .file? undefined check).
   const readFile = entry.file
   if (entry.isFile && readFile !== undefined) {
     const file = await new Promise<File | null>((resolve) => {
-      readFile(resolve, () => resolve(null))
+      readFile.call(entry, resolve, () => resolve(null))
     })
     if (file === null) return
     const rel = `${parentPath}${entry.name}`

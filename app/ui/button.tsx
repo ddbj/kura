@@ -20,6 +20,10 @@ type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   size?: ButtonSize
   children: ReactNode
   type?: "button" | "submit" | "reset"
+  // Opt out of the `.btn` base class (padding, border, font, etc.) when the
+  // caller needs a fully custom shape (e.g. a table-row clickable). Semantics
+  // stay a native button; only the default styles are dropped.
+  unstyled?: boolean
 }
 
 export const Button = ({
@@ -28,11 +32,14 @@ export const Button = ({
   className,
   children,
   type = "button",
+  unstyled = false,
   ...rest
 }: Props) => (
   <button
     type={type}
-    className={cn("btn", { pri: kind === "pri", ghost: kind === "ghost", po: kind === "po", do: kind === "do", stop: kind === "stop", ok: kind === "ok", dangerbox: kind === "dangerbox", linky: kind === "linky" }, { sm: size === "sm", big: size === "big" }, className)}
+    className={unstyled
+      ? cn(className)
+      : cn("btn", { pri: kind === "pri", ghost: kind === "ghost", po: kind === "po", do: kind === "do", stop: kind === "stop", ok: kind === "ok", dangerbox: kind === "dangerbox", linky: kind === "linky" }, { sm: size === "sm", big: size === "big" }, className)}
     {...rest}
   >
     {children}

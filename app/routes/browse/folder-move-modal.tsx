@@ -64,25 +64,26 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
     <>
       <Modal open={open && !pickerOpen} onClose={onClose} labelledBy="folder-move-title">
         <div className="mh">
-          <b id="folder-move-title">フォルダ「{name}」を移動</b>
+          <h2 className="mtitle" id="folder-move-title">フォルダを移動</h2>
         </div>
-        <div className="lbl" style={{ color: "var(--inkMid)", marginBottom: 6 }}>移動先</div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
-          <div style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 12px",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            fontFamily: "var(--mono)",
-            fontSize: 12.5,
-          }}>
-            <Icon name="folder" size={14} />
-            <span title={displayPath} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
+        <div className="mdest">
+          <div className="mdest-label">移動元</div>
+          <div className="mdest-row">
+            <div className="mdest-path">
+              <Icon name="folder" size={14} />
+              <span className="p" title={name}>{name}</span>
+            </div>
           </div>
-          <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>選ぶ…</Button>
+        </div>
+        <div className="mdest">
+          <div className="mdest-label">移動先</div>
+          <div className="mdest-row">
+            <div className="mdest-path">
+              <Icon name="folder" size={14} />
+              <span className="p" title={displayPath}>{displayPath}</span>
+            </div>
+            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>フォルダを選ぶ</Button>
+          </div>
         </div>
         <div className="banner ochre">
           <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
@@ -98,8 +99,6 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         bucket={bucket}
-        title="移動先のフォルダを選ぶ"
-        submitLabel="選択"
         initialPrefix={destParent}
         disabledPrefix={srcPrefix}
         onSelect={(prefix) => setDestParent(prefix)}

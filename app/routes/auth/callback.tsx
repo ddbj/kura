@@ -2,7 +2,7 @@ import { useAuth } from "react-oidc-context"
 import { Navigate } from "react-router"
 
 import { useT } from "~/lib/i18n"
-import { TextLink } from "~/ui"
+import { LoadingView,TextLink } from "~/ui"
 
 // Reject anything that is not a same-origin path (protocol-relative "//host",
 // external URL, javascript:, etc.). Parsing against the current origin makes
@@ -42,7 +42,7 @@ const AuthCallback = () => {
     return <Navigate to={safeReturnTo(auth.user?.state)} replace />
   }
 
-  return <p className="plain-text">{t("auth.processingCallback")}</p>
+  return <LoadingView label={t("auth.processingCallback")} full brand />
 }
 
 export default AuthCallback

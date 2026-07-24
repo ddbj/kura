@@ -72,7 +72,7 @@ export const CopyModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfi
     <NameEntryModal
       open={open}
       onClose={onClose}
-      title="コピー"
+      title="コピーを作成"
       labelledBy="copy-title"
       inputId="copy-name"
       inputLabel="コピー後の名前"
