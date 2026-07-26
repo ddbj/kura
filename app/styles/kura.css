@@ -52,6 +52,15 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 
 /* ---------- content ---------- */
 .wrap{padding:0 28px 32px;}
+
+/* ---------- page-level notice stack (header 直下、.wrap の冒頭) ----------
+   ページ全体を対象にした通知 (bucket 準備失敗 / quota 超過 / 一覧取得失敗 /
+   flash / unsupported username 等) をここに縦積みする。空のときは自身も
+   潰して pathbar が上に詰まる。上 20px は header 下 border からの間、
+   下は pathbar の padding-top:24px に任せて 0。バー同士は 10px。 */
+.notices{display:flex;flex-direction:column;gap:10px;padding:20px 0 0;}
+.notices:empty{display:none;padding:0;}
+.notices .banner{margin:0;}
 .pathbar{display:flex;align-items:center;gap:16px;padding:24px 0 16px;flex-wrap:wrap;}
 .crumb{display:flex;align-items:center;gap:7px;font-size:20px;font-weight:700;color:var(--ink);letter-spacing:-.01em;}
 .crumb button,.crumb a{color:var(--inkMid);text-decoration:none;font-weight:600;background:transparent;border:0;padding:0;font:inherit;letter-spacing:inherit;cursor:pointer;}
@@ -250,12 +259,19 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .cli{margin-top:16px;display:inline-flex;gap:9px;align-items:flex-start;text-align:left;background:var(--surfaceSubtle);border:1px solid var(--border);border-radius:8px;padding:11px 14px;font-size:12px;color:var(--inkMid);max-width:520px;}
 
 /* banner */
-.banner{display:flex;gap:10px;align-items:flex-start;padding:11px 15px;border-radius:8px;font-size:12.5px;line-height:1.5;border:1px solid var(--border);margin-bottom:14px;}
+.banner{display:flex;gap:12px;align-items:center;padding:10px 12px 10px 16px;border-radius:8px;font-size:12.5px;line-height:1.5;border:1px solid var(--border);margin-bottom:14px;min-height:44px;box-sizing:border-box;}
 .banner.red{background:var(--redBg);border-color:var(--redBorder);}
 .banner.ochre{background:var(--warnBg);border-color:var(--warnBorder);}
 .banner.info{background:var(--brandSoft);border-color:#C9B3E3;}
 .banner.ok{background:var(--okBg);border-color:var(--okBorder);}
 .banner b{font-weight:700;}
+.banner > svg{flex:none;}
+.banner-body{flex:1;min-width:0;}
+.banner-actions{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto;}
+/* Bar 右端の閉じるボタン。tone 依存の背景を持たない中立の hover。 */
+.banner-close{width:28px;height:28px;border:0;background:transparent;border-radius:6px;color:var(--inkSoft);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;padding:0;}
+.banner-close:hover{background:rgba(26,23,38,.06);color:var(--ink);}
+.banner-close:focus-visible{outline:2px solid var(--focus);outline-offset:1px;}
 
 /* scrim + modal */
 .scrim{position:fixed;inset:0;background:rgba(26,23,38,.28);display:flex;align-items:center;justify-content:center;padding:28px;z-index:100;}
@@ -336,6 +352,7 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .uhead,.urow{display:grid;grid-template-columns:minmax(220px,1.6fr) 116px 1.3fr 170px 258px;gap:14px;align-items:center;padding:11px 18px;}
 .uhead{border-bottom:1px solid var(--border);font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--inkMid);text-transform:uppercase;}
 .uhead .r{text-align:right;justify-self:end;}
+.uhead .c,.urow .c{justify-self:center;text-align:center;}
 .urow{border-bottom:1px solid var(--borderSoft);}
 .urow:last-child{border-bottom:0;}
 .urow:hover{background:var(--surfaceSubtle);}

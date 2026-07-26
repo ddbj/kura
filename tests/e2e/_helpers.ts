@@ -200,11 +200,14 @@ export const expectUploadDone = async (
   await expect(row.locator(".tag.ok")).toHaveText("完了", { timeout })
 }
 
-// AUTO_DISMISS_MS = 4000 (app/shell/uploads.tsx); accept up to 10s to absorb
-// tick jitter between the 4s dismiss timer and the assertion.
+// The upcard waits for every transfer to settle and then, after
+// DONE_DISMISS_MS (8s) with the pointer off the card, sweeps all "done" rows
+// in one shot. Timeout is generous enough to cover that fixed wait plus
+// scheduler jitter, and the helper never places the cursor inside .upcard so
+// the hover-pause never trips.
 export const expectUploadRowAutoDismissed = async (page: Page, name: string): Promise<void> => {
   const row = page.locator(".upcard .urow").filter({ hasText: name })
-  await expect(row).toHaveCount(0, { timeout: 10_000 })
+  await expect(row).toHaveCount(0, { timeout: 15_000 })
 }
 
 // ---------------------------------------------------------------------------

@@ -196,7 +196,7 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
   - `uploadFileFromPath(page, sourcePath)` (大 file 用)
   - `uploadFolderFromDir(page, dirPath)`
   - `expectUploadDone(page, name, { timeout = 30_000 } = {})` → `.upcard .urow` 該当行の `.tag.ok` `完了` を待つ
-  - `expectUploadRowAutoDismissed(page, name)` → 該当 `.urow` が **10s 以内に** 消えることを assertion (`AUTO_DISMISS_MS = 4000` の race を吸収)
+  - `expectUploadRowAutoDismissed(page, name)` → 該当 `.urow` が **15s 以内に** 消えることを assertion (`DONE_DISMISS_MS = 8000` の all-settled 検出 + hover pause + scheduler tick を吸収)
 - Isolation / cleanup
   - `s3ClientForE2e(page)` → `page.evaluate` で sessionStorage の `oidc.user:*` から access token を取り、`STSClient({ endpoint: KURA_E2E_S3_ENDPOINT, region: "us-east-1" })` で `AssumeRoleWithWebIdentityCommand` を叩き、返された credentials で `S3Client({ endpoint: KURA_E2E_S3_ENDPOINT, region: "us-east-1", forcePathStyle: true, credentials })` を返す。SeaweedFS の STS は S3 と同じ endpoint / host / port (dev では `http://localhost:28333`)。参照実装は `app/lib/s3/credentials.ts:createStsCredentialsProvider`。
   - `resetE2eScope(page)`:
@@ -672,8 +672,8 @@ projects:
 - **期待**:
   - upload row の state tag `.tag.run` `アップロード中` → `.tag.ok` `完了`
   - 一覧に file row が 1 行増え、size 一致
-  - `expectUploadRowAutoDismissed(page, name)` (10s 以内に `.upcard .urow` が該当行を持たなくなる)
-- **備考**: HiddenFileInput は 3 系統並存するため、helper が scope 分離した input に setInputFiles する。auto-dismiss の 4s tick と test 実行 tick の race を 10s 上限で許容。
+  - `expectUploadRowAutoDismissed(page, name)` (15s 以内に `.upcard .urow` が該当行を持たなくなる)
+- **備考**: HiddenFileInput は 3 系統並存するため、helper が scope 分離した input に setInputFiles する。auto-dismiss は upcard 全体が settle した後 8s（`DONE_DISMISS_MS`）で done 行をまとめて掃くため、helper 側では 15s 上限で観測する。
 
 ### S-UPLOAD-02: `.emptyzone` の primary button で upload
 

@@ -68,6 +68,10 @@ type TransfersApi = {
   // paused). Wired to the upcard's "閉じる" button, which only appears when
   // there is no in-flight work.
   dismissAll: () => void
+  // Removes only "done" rows and leaves failed / conflict / paused untouched.
+  // The upcard drives this on a timer once every transfer has settled so the
+  // batch stays visible long enough to read but doesn't linger indefinitely.
+  dismissDone: () => void
   resumePending: (bucket: string, key: string, uploadId: string, file: File) => void
   // Non-upload operations. Each returns a promise so callers can await
   // completion for query invalidation while the tray shows progress.
@@ -128,10 +132,14 @@ const MAX_CONCURRENT = 1
 // per-request latency on a many-file folder.
 const FOLDER_ITEM_CONCURRENCY = 5
 
-// How long a completed row lingers so the user can register "完了" before the
-// row (and eventually the whole upcard) is auto-dismissed. Failed / conflict
-// rows never auto-dismiss because they require a decision from the user.
-const AUTO_DISMISS_MS = 4000
+// Kept intentionally: individual "done" rows are never removed one-by-one any
+// more — the upcard waits until every transfer has settled (no uploading /
+// queued / checking left) and then dismisses all "done" rows together after
+// this delay. Failed / conflict / paused rows stay put because they require
+// a decision. The upcard also pauses this timer while the pointer is over
+// the card or a control inside it has focus (Material / NN Group pattern),
+// so a user reading a completed batch is never surprised by rows vanishing.
+export const DONE_DISMISS_MS = 8000
 
 type Running = { id: string; abort: () => Promise<void> }
 
@@ -278,9 +286,6 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
-        // Auto-dismiss completed rows so the upcard collapses once everything
-        // succeeds. Failures / conflicts stick until the user acts on them.
-        setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
       })
       .catch((error: unknown) => {
         if (cancelState.requested) {
@@ -420,7 +425,6 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
-        setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
       })
       .catch((error: unknown) => {
         if (cancelState.requested) {
@@ -503,6 +507,24 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     })
   }, [])
 
+  const dismissDone = useCallback((): void => {
+    // Driven by the upcard once every transfer has settled AND the pointer
+    // isn't over the card. Keeps failed / conflict / paused visible so the
+    // user still has to act on them.
+    setTransfers((prev) => {
+      const kept: Transfer[] = []
+      for (const t of prev) {
+        if (t.state === "done") {
+          filesRef.current.delete(t.id)
+        } else {
+          kept.push(t)
+        }
+      }
+
+      return kept
+    })
+  }, [])
+
   const resumePending = useCallback((bucket: string, key: string, uploadId: string, file: File): void => {
     const id = `resume-${Date.now()}-${key}`
     filesRef.current.set(id, file)
@@ -538,7 +560,6 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
         void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
-        setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
       })
       .catch((error: unknown) => {
         if (cancelState.requested) {
@@ -564,11 +585,10 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       // Read total from React's own latest state (not transfersRef, which
       // effect-updated refs may still be catching up on).
       setTransfers((prev) => prev.map((t) => t.id === id ? { ...t, state: "done", loaded: t.total } : t))
-      setTimeout(() => removeOne(id), AUTO_DISMISS_MS)
     } else {
       updateOne(id, { state: "failed", error })
     }
-  }, [updateOne, removeOne])
+  }, [updateOne])
 
   const enqueueDelete = useCallback(async (bucket: string, targets: DeleteTarget[]): Promise<BatchOutcome<string>> => {
     if (targets.length === 0) return { ok: [], failed: [] }
@@ -765,6 +785,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     retry,
     cancelAll,
     dismissAll,
+    dismissDone,
     resumePending,
     enqueueDelete,
     enqueueRename,
@@ -772,7 +793,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     enqueueCopy,
     enqueueFolderDelete,
     enqueueFolderMove,
-  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove])
+  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, dismissDone, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove])
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>
 }

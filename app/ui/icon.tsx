@@ -15,6 +15,7 @@ export type IconName =
   | "more"
   | "trash"
   | "clock"
+  | "x"
 
 type IconProps = {
   name: IconName
@@ -41,8 +42,8 @@ export const Icon = ({ name, size = 16, className, style, ariaLabel }: IconProps
 export const IconSprite = () => (
   <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
     <symbol id="i-file" viewBox="0 0 20 20">
-      <path d="M5 2.5h6l4 4v11c0 .3-.2.5-.5.5h-9c-.3 0-.5-.2-.5-.5v-15z" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M11 2.5v4h4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M5.2 2.7c-.4 0-.7.3-.7.7v13.2c0 .4.3.7.7.7h9.6c.4 0 .7-.3.7-.7V7l-4.3-4.3z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M11.2 2.7v3.6c0 .4.3.7.7.7h3.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" />
     </symbol>
     <symbol id="i-folder" viewBox="0 0 20 20">
       <path d="M2.5 5.5c0-.7.6-1.3 1.3-1.3h3.4l1.5 1.6h6.5c.7 0 1.3.6 1.3 1.3v7c0 .7-.6 1.3-1.3 1.3H3.8c-.7 0-1.3-.6-1.3-1.3v-8.6z" fill="none" stroke="currentColor" strokeWidth="1.3" />
@@ -88,6 +89,9 @@ export const IconSprite = () => (
     <symbol id="i-clock" viewBox="0 0 16 16">
       <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" />
       <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </symbol>
+    <symbol id="i-x" viewBox="0 0 16 16">
+      <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </symbol>
   </svg>
 )

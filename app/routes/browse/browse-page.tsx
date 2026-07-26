@@ -44,6 +44,7 @@ import {
   IconButton,
   LinkBar,
   MenuItem,
+  NoticeStack,
   SearchInput,
   SortButton,
   Tag,
@@ -242,6 +243,17 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const [folderMoveTarget, setFolderMoveTarget] = useState<{ prefix: string; name: string } | null>(null)
   const [flash, setFlash] = useState<{ tone: "red" | "ok" | "warn"; message: string } | null>(null)
 
+  // ページ全体で出す恒久的な notice (bucket-init / quota / list) の dismiss 状態。
+  // Callout の × でユーザーが閉じたら true に。エラーが更新されたら false に戻して
+  // 新しいエラーは必ず再表示されるようにする。
+  const [noticeDismissed, setNoticeDismissed] = useState({ bucket: false, quota: false, list: false })
+  useEffect(() => {
+    if (bucketReady.isError) setNoticeDismissed((d) => (d.bucket ? { ...d, bucket: false } : d))
+  }, [bucketReady.errorUpdatedAt, bucketReady.isError])
+  useEffect(() => {
+    if (directory.isError) setNoticeDismissed((d) => (d.list ? { ...d, list: false } : d))
+  }, [directory.errorUpdatedAt, directory.isError])
+
   const closeAllMenus = useCallback(() => {
     setOpenRowMenu(null)
     setUploadMenuOpen(null)
@@ -310,6 +322,9 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const total = DEFAULT_QUOTA_BYTES
   const overQuota = used >= total
   const usagePct = Math.min(100, (used / total) * 100)
+  useEffect(() => {
+    if (overQuota) setNoticeDismissed((d) => (d.quota ? { ...d, quota: false } : d))
+  }, [overQuota])
 
   const rows = useMemo(() => {
     const filtered = files.filter((f) => {
@@ -565,44 +580,56 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
 
   return (
     <div className="wrap">
-      {bucketReady.isError
-        ? (
-          <div style={{ margin: "24px 0 0" }}>
-            <Callout tone="red" role="alert">
-              <div>
-                領域の初期化に失敗しました: {bucketReady.error instanceof Error ? bucketReady.error.message : String(bucketReady.error)}
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <Button size="sm" onClick={() => void bucketReady.refetch()}>再試行</Button>
-              </div>
+      <NoticeStack>
+        {bucketReady.isError && !noticeDismissed.bucket
+          ? (
+            <Callout
+              tone="red"
+              role="alert"
+              actions={<Button size="sm" onClick={() => void bucketReady.refetch()}>再試行</Button>}
+              onDismiss={() => setNoticeDismissed((d) => ({ ...d, bucket: true }))}
+            >
+              領域の初期化に失敗しました: {bucketReady.error instanceof Error ? bucketReady.error.message : String(bucketReady.error)}
             </Callout>
-          </div>
-        )
-        : null}
-
-      {overQuota
-        ? (
-          <div className="banner red" style={{ margin: "24px 0 0", alignItems: "center" }}>
-            <Icon name="up" size={16} style={{ color: "var(--red)", flex: "none", marginTop: 1 }} />
-            <div>容量が上限に達しています。新規アップロードは停止中です。ファイルを削除して空き容量ができれば自動的に再開します。ダウンロード・削除は引き続き行えます。</div>
-          </div>
-        )
-        : null}
-
-      {flash !== null
-        ? (
-          <div style={{ margin: "16px 0 0" }}>
-            <Callout tone={flash.tone} role={flash.tone === "red" ? "alert" : "status"}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ flex: 1 }}>{flash.message}</span>
-                <Button kind="ghost" size="sm" onClick={() => setFlash(null)}>閉じる</Button>
-              </div>
+          )
+          : null}
+        {overQuota && !noticeDismissed.quota
+          ? (
+            <Callout
+              tone="red"
+              icon="up"
+              onDismiss={() => setNoticeDismissed((d) => ({ ...d, quota: true }))}
+            >
+              容量が上限に達しています。新規アップロードは停止中です。ファイルを削除して空き容量ができれば自動的に再開します。ダウンロード・削除は引き続き行えます。
             </Callout>
-          </div>
-        )
-        : null}
+          )
+          : null}
+        {flash !== null
+          ? (
+            <Callout
+              tone={flash.tone}
+              role={flash.tone === "red" ? "alert" : "status"}
+              onDismiss={() => setFlash(null)}
+            >
+              {flash.message}
+            </Callout>
+          )
+          : null}
+        {directory.isError && !noticeDismissed.list
+          ? (
+            <Callout
+              tone="red"
+              role="alert"
+              actions={<Button size="sm" onClick={() => void directory.refetch()}>再試行</Button>}
+              onDismiss={() => setNoticeDismissed((d) => ({ ...d, list: true }))}
+            >
+              一覧の取得に失敗しました: {directory.error instanceof Error ? directory.error.message : String(directory.error)}
+            </Callout>
+          )
+          : null}
+      </NoticeStack>
 
-      <div className="pathbar" style={overQuota ? { paddingTop: 12 } : undefined}>
+      <div className="pathbar">
         <div className="crumb">
           {segments.length === 0
             ? <span className="cur">{bucket}</span>
@@ -685,14 +712,6 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           </div>
         </div>
       </div>
-
-      {directory.isError
-        ? (
-          <Callout tone="red" role="alert">
-            一覧の取得に失敗しました: {directory.error instanceof Error ? directory.error.message : String(directory.error)}
-          </Callout>
-        )
-        : null}
 
       {pending.length > 0
         ? (
@@ -1053,6 +1072,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
         onSaveAs={transfersApi.saveAs}
         onSkip={transfersApi.skip}
         onDismissAll={transfersApi.dismissAll}
+        onDismissDone={transfersApi.dismissDone}
       />
 
       <ShareModal

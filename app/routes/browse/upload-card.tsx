@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react"
+
 import { formatBytes } from "~/lib/format"
-import type { OperationKind, Transfer } from "~/shell"
+import { DONE_DISMISS_MS, type OperationKind, type Transfer } from "~/shell"
 import { Button, Icon, type IconName, Tag } from "~/ui"
 
 // Card-header icon. Only two kinds have an unambiguous representative icon
@@ -24,6 +26,7 @@ type Props = {
   onSaveAs: (id: string) => void
   onSkip: (id: string) => void
   onDismissAll: () => void
+  onDismissDone: () => void
 }
 
 const formatSpeed = (bps: number | undefined): string => {
@@ -108,16 +111,38 @@ const stateTag = (t: Transfer) => {
 }
 
 // Design_handoff frame 5.
-export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwrite, onSaveAs, onSkip, onDismissAll }: Props) => {
-  if (transfers.length === 0) return null
+export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwrite, onSaveAs, onSkip, onDismissAll, onDismissDone }: Props) => {
   const active = transfers.filter((t) => t.state === "uploading" || t.state === "queued" || t.state === "checking").length
   const done = transfers.filter((t) => t.state === "done").length
+
+  // pause the auto-dismiss timer while the pointer is over the card or a
+  // control inside it holds focus, so a user reading a settled batch is never
+  // surprised by rows vanishing mid-scan (Material / NN Group pattern).
+  const [hovered, setHovered] = useState(false)
+  const [focusedInside, setFocusedInside] = useState(false)
+  const canDismiss = active === 0 && done > 0 && !hovered && !focusedInside
+  useEffect(() => {
+    if (!canDismiss) return
+    const timer = setTimeout(onDismissDone, DONE_DISMISS_MS)
+
+    return () => clearTimeout(timer)
+  }, [canDismiss, onDismissDone])
+
+  if (transfers.length === 0) return null
   const kinds = new Set<OperationKind>(transfers.map((t) => t.kind))
   const label = headerLabel(kinds)
   const icon = headerIcon(kinds)
 
   return (
-    <div className="upcard">
+    <div
+      className="upcard"
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocusedInside(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusedInside(false)
+      }}
+    >
       <div className="uph">
         {icon !== null ? <Icon name={icon} size={15} style={{ color: "var(--brand)" }} /> : null}
         {label} · {active}件処理中 · {done}件完了
@@ -129,7 +154,7 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
       </div>
       <div className="uhead">
         <span>名前</span>
-        <span>状態</span>
+        <span className="c">状態</span>
         <span>進捗</span>
         <span className="r">詳細</span>
         <span className="r">操作</span>
@@ -152,7 +177,7 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
                 : <Icon name={rowIcon(t)} size={16} className="ico" />}
               <span title={t.name}>{t.name}</span>
             </div>
-            <div>
+            <div className="c">
               {stateTag(t)}
             </div>
             <div>
