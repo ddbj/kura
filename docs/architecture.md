@@ -31,7 +31,7 @@ kura の実態は SeaweedFS（S3 + STS + IAM）と nginx の設定群である�
 
 - SeaweedFS: S3 API・STS・IAM・filer。ファイルと公開状態（tag）の SSOT
 - nginx（kura 内側）: SPA 静的配信 + 公開配信（tag 判定）
-- DDBJ gateway（`ddbj/service-gateway-conf` の gw-nginx。kura repo の外）: TLS 終端・subdomain routing・CORS
+- DDBJ gateway（`ddbj/service-gateway-conf` の gw-nginx。kura repo の外）: TLS 終端・subdomain routing
 - DDBJ Keycloak: 認証（OIDC）。kura 専用の client を持つ
 - reference SPA: React SPA。STS と S3 API を直接叩く
 
@@ -100,7 +100,7 @@ subdomain 分離:
 
 二層 nginx:
 
-- 前段 = DDBJ gateway（gw-nginx）: TLS 終端・subdomain routing・CORS を担当
+- 前段 = DDBJ gateway（gw-nginx）: TLS 終端・subdomain routing を担当
 - 後段 = kura 内側 nginx: SPA 静的配信 + 公開配信（tag 判定）
 - filer への到達は内側 nginx（内部 network）からのみ。filer を外部に露出しない
 
@@ -112,8 +112,10 @@ root パスの名前空間:
 
 CORS:
 
-- gateway で一元管理する（Allow-Origin = `https://kura.ddbj.nig.ac.jp`、preflight OPTIONS は gateway が 204 応答、`x-amz-security-token` 等の S3 系 header を許可）。SeaweedFS 側の CORS は無効にして二重付与を避ける
-- dev（gateway の無い local compose）では local 側（SeaweedFS `-allowedOrigins` または local nginx）で CORS を持つ
+- CORS は SeaweedFS の per-bucket CORS middleware が応答する。preflight OPTIONS は SeaweedFS が単独で完結する（auth 不要、200 OK）
+- 許可 origin は起動 flag `-s3.allowedOrigins` に渡す（env `KURA_S3_ALLOWED_ORIGINS`）。全 bucket 共通の fallback CORS config がここから生成され、`AllowedHeaders: ["*"]` を持つ。SeaweedFS はこの `*` を「preflight の `Access-Control-Request-Headers` を verbatim echo する」意味で扱うため、AWS SDK が付ける header 群（`amz-sdk-*` / `x-amz-*` / 将来追加される checksum バリアント等）を gateway 側で列挙する必要が無い
+- 一般ユーザーが per-bucket CORS を PutBucketCors で上書きして fallback を無効化しないよう、IAM policy で `s3:PutBucketCors` / `s3:DeleteBucketCors` を Deny する（「認証・認可」参照）
+- gateway と kura 内側 nginx は CORS header を touch しない（`proxy_hide_header` / `add_header Access-Control-*` は置かない、preflight OPTIONS も短絡させず素通しする）。dev / staging / production で CORS 応答経路が単一化される
 
 ## Keycloak client
 

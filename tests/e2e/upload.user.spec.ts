@@ -72,7 +72,7 @@ test.describe("UPLOAD", () => {
     const name = uniqueName("upload03")
     const content = "drag drop e2e"
     await page.goto(scopeBrowseUrl())
-    await page.locator(".wrap").waitFor({ state: "attached", timeout: 15_000 })
+    await page.locator(".cardbody").waitFor({ state: "attached", timeout: 15_000 })
 
     // Playwright は native DnD を simulate しないので、DataTransfer を browser
     // 側で生成し dragover / drop を同じ handle 相手に dispatch する。
@@ -84,14 +84,14 @@ test.describe("UPLOAD", () => {
     // `typeof item.webkitGetAsEntry === "function"` が false になり、素直な
     // dataTransfer.files 経路に落ちる。
     await page.evaluate(async ({ name, content }) => {
-      const wrap = document.querySelector(".wrap")
-      if (!wrap) throw new Error("no .wrap element found")
+      const target = document.querySelector(".cardbody")
+      if (!target) throw new Error("no .cardbody element found")
       delete (DataTransferItem.prototype as { webkitGetAsEntry?: unknown }).webkitGetAsEntry
       const dt = new DataTransfer()
       dt.items.add(new File([content], name, { type: "text/plain" }))
       const dispatch = (type: string) => {
         const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })
-        wrap.dispatchEvent(ev)
+        target.dispatchEvent(ev)
       }
       dispatch("dragenter")
       dispatch("dragover")

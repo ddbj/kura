@@ -42,11 +42,12 @@ test.describe("PUBLISH", () => {
 
     const row = getRow(page, name)
     await expect(row.locator(".c-pub .tag.ok")).toHaveText("公開中", { timeout: 15_000 })
-    await expect(row.locator(".pubbtn")).toHaveText("公開を停止")
+    await expect(row.locator(".pubbtn")).toHaveText("公開停止")
 
     await expandRow(page, name)
     const publicUrl = await getPubPanel(page, name).locator(".linkbar .u").textContent()
-    expect(publicUrl).toMatch(/^http:\/\/localhost:28080\//)
+    const publicBase = process.env["KURA_E2E_BASE_URL"] ?? "http://localhost:28080"
+    expect(publicUrl?.startsWith(`${publicBase}/`)).toBe(true)
   })
 
   test("S-PUBLISH-02: pubpanel の URL が SPA context 内で GET 200", async ({ page }) => {

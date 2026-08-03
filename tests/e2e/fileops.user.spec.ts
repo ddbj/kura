@@ -7,6 +7,7 @@ import {
   clearClientPrefs,
   createFolderViaSdk,
   e2eUsername,
+  exactPickerItem,
   expandRow,
   expectUploadRowAutoDismissed,
   getAnon,
@@ -16,7 +17,7 @@ import {
   getRow,
   openFolderMenu,
   openRowMenu,
-  pickerExpandScopePath,
+  pickerAssertOnScope,
   publicUrlFor,
   scopeBrowseUrl,
   scopePrefix,
@@ -86,15 +87,15 @@ test.describe("FILEOPS", () => {
     await openRowMenu(page, src)
     await page.locator(".rowmenu").getByRole("menuitem", { name: "移動" }).click()
 
-    const modal = page.getByRole("dialog", { name: new RegExp(`「${src}」を移動`) })
-    await modal.getByRole("button", { name: "選ぶ…" }).click()
+    const modal = page.getByRole("dialog", { name: "ファイルを移動" })
+    await modal.getByRole("button", { name: "フォルダを選ぶ" }).click()
 
     const picker = page.getByRole("dialog", { name: "移動先のフォルダを選ぶ" })
     await picker.waitFor({ state: "visible" })
-    // picker は root のみ expand で開くため runId scope を掘る必要がある
-    await pickerExpandScopePath(picker)
-    await picker.locator(".picker-row").filter({ hasText: dstFolder }).first().click()
-    await picker.getByRole("button", { name: "選択" }).click()
+    // navigate-into 型なので e2e/${runId} を掘ってから dstFolder に入る
+    await pickerAssertOnScope(picker)
+    await exactPickerItem(picker, dstFolder).first().click()
+    await picker.getByRole("button", { name: "この場所を選ぶ" }).click()
 
     // MoveModal 復帰後 submit
     await modal.getByRole("button", { name: "移動" }).click()
@@ -211,12 +212,12 @@ test.describe("FILEOPS", () => {
     await openFolderMenu(page, src)
     await page.locator(".rowmenu").getByRole("menuitem", { name: "移動" }).click()
 
-    const modal = page.getByRole("dialog", { name: new RegExp(`フォルダ「${src}」を移動`) })
-    await modal.getByRole("button", { name: "選ぶ…" }).click()
+    const modal = page.getByRole("dialog", { name: "フォルダを移動" })
+    await modal.getByRole("button", { name: "フォルダを選ぶ" }).click()
     const picker = page.getByRole("dialog", { name: "移動先のフォルダを選ぶ" })
-    await pickerExpandScopePath(picker)
-    await picker.locator(".picker-row").filter({ hasText: dst }).first().click()
-    await picker.getByRole("button", { name: "選択" }).click()
+    await pickerAssertOnScope(picker)
+    await exactPickerItem(picker, dst).first().click()
+    await picker.getByRole("button", { name: "この場所を選ぶ" }).click()
     await modal.getByRole("button", { name: "移動" }).click()
 
     await expect(getFolderRow(page, src)).toHaveCount(0, { timeout: 30_000 })
@@ -272,7 +273,7 @@ test.describe("FILEOPS", () => {
 
     // 新 URL は publicUrl(publicBase, bucket, dstKey) で計算 (SPA と同じ pattern)
     const bucket = e2eUsername()
-    const publicBase = "http://localhost:28080"
+    const publicBase = process.env["KURA_E2E_BASE_URL"] ?? "http://localhost:28080"
     const dstKey = `${scopePrefix()}${dst}`
     const newUrl = publicUrlFor(publicBase, bucket, dstKey)
 
@@ -363,27 +364,20 @@ test.describe("FILEOPS", () => {
 
     await openFolderMenu(page, parent)
     await page.locator(".rowmenu").getByRole("menuitem", { name: "移動" }).click()
-    const modal = page.getByRole("dialog", { name: new RegExp(`フォルダ「${parent}」を移動`) })
-    await modal.getByRole("button", { name: "選ぶ…" }).click()
+    const modal = page.getByRole("dialog", { name: "フォルダを移動" })
+    await modal.getByRole("button", { name: "フォルダを選ぶ" }).click()
     const picker = page.getByRole("dialog", { name: "移動先のフォルダを選ぶ" })
-    await pickerExpandScopePath(picker)
+    await pickerAssertOnScope(picker)
 
-    // src (parent-XXX) picker-row 自身と descendant (child-XXX) は
-    // disabledPrefix で cursor: not-allowed / opacity: 0.4 になる。
-    // 実装上、click しても setSelected されないので "自分自身の中には移動
-    // できません" flash は現在の UI 経路では到達不能 (folder-move-modal.tsx
-    // の defense-in-depth check として残す)。ここでは picker 側の disabled
-    // 表現 (style 経由の opacity) を pin する。
-    const srcRow = picker.locator(".picker-row").filter({ hasText: parent }).first()
+    // navigate-into 型 picker では src (自分自身) が disabled で表示され、
+    // click しても入れない。descendant (child) は src に入れないので
+    // picker 上に現れない — この副作用が自身への move を実質不可能にする。
+    const srcRow = exactPickerItem(picker, parent).first()
     await expect(srcRow).toHaveCSS("opacity", "0.4")
     await expect(srcRow).toHaveCSS("cursor", "not-allowed")
-
-    // src の caret を expand → child が見えるように
-    await srcRow.locator('[aria-label="展開する"]').click()
-    const childRow = picker.locator(".picker-row").filter({ hasText: child }).first()
-    await expect(childRow).toBeVisible({ timeout: 10_000 })
-    await expect(childRow).toHaveCSS("opacity", "0.4")
-    await expect(childRow).toHaveCSS("cursor", "not-allowed")
+    await expect(srcRow).toBeDisabled()
+    // 参照使用 (unused-var 抑止): child 名は前提の一部
+    expect(child).toBeTruthy()
   })
 
   test("E-FILEOPS-05: 空 name で submit → 拒否", async ({ page }) => {

@@ -117,33 +117,22 @@ export const getPubPanel = (page: Page, filename: string): Locator =>
 export const getPresignPanel = (page: Page, filename: string): Locator =>
   getRow(page, filename).locator("xpath=..").locator(".presignpanel")
 
-// FolderPicker (MoveModal / FolderMoveModal から開かれる) は初期状態で bucket
-// root だけ expand されており、subfolder は caret を順に click しないと見え
-// ない。runId scope 内の folder を選択したいときは `e2e/` と `${runId}` を
-// 事前 expand する必要がある。scope を跨がない前提。
-//
-// 各 expand の後、target 名を持つ次階層の picker-row が visible になるまで
-// 待つ (FolderChildren は開いた瞬間に React Query fetch が走るため子は
-// 非同期に visible 化する)。
-export const pickerExpandScopePath = async (picker: Locator): Promise<void> => {
+// FolderPicker (MoveModal / FolderMoveModal から開かれる) は navigate-into
+// 型で、開いた瞬間の initialPrefix は呼び出し元の現在 browse prefix になる。
+// E2E は `/_browse/e2e/${runId}/` 配下で移動操作を行うので、picker は既に
+// scope の中で開く。掘り直しは要らず、crumbs が runId で終わっている事を
+// 検証するだけで十分。
+export const pickerAssertOnScope = async (picker: Locator): Promise<void> => {
   const runIdValue = requireEnv("KURA_E2E_RUN_ID")
-
-  const expandAndWaitChild = async (parentName: string, childName: string): Promise<void> => {
-    const parentRow = picker.locator(".picker-row").filter({ hasText: parentName }).first()
-    await parentRow.waitFor({ state: "visible", timeout: 10_000 })
-    const caret = parentRow.locator('[aria-label="展開する"]')
-    if ((await caret.count()) > 0) await caret.click()
-    // child が visible になるまで待つ (FolderChildren の初回 fetch を吸収)
-    await picker.locator(".picker-row").filter({ hasText: childName }).first()
-      .waitFor({ state: "visible", timeout: 10_000 })
-  }
-
-  await expandAndWaitChild("e2e", runIdValue)
-  // runId の caret を expand し、子 (何でも良い) が見えるまで待つ。
-  const runIdRow = picker.locator(".picker-row").filter({ hasText: runIdValue }).first()
-  const runIdCaret = runIdRow.locator('[aria-label="展開する"]')
-  if ((await runIdCaret.count()) > 0) await runIdCaret.click()
+  await expect(picker.locator(".picker-crumbs .cur").last())
+    .toHaveText(runIdValue, { timeout: 10_000 })
 }
+
+// picker-item の name は substring では衝突する (e2e が e2e-foNN-... にも
+// 部分一致する) ため、`.nm` を Playwright の `:text-is()` pseudo で完全一致
+// させる。JSON.stringify で quote + escape をひとまとめに済ませる。
+export const exactPickerItem = (picker: Locator, name: string): Locator =>
+  picker.locator(`.picker-item:has(.nm:text-is(${JSON.stringify(name)}))`)
 
 // ---------------------------------------------------------------------------
 // upload input pickers (HiddenFileInput scope splitting; see frontend.md §7)

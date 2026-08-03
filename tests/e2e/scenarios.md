@@ -1207,9 +1207,9 @@ projects:
 - **手順**:
   1. `parent-${hex}/` の move modal → `選ぶ…` → picker (`移動先のフォルダを選ぶ`) を開く
   2. `pickerExpandScopePath(picker)` で e2e/${runId} まで expand
-  3. src (parent-${hex}) picker-row の CSS assertion: `opacity: 0.4` / `cursor: not-allowed`
-  4. src の caret を展開 → child-${hex} picker-row を可視化
-  5. child picker-row の CSS assertion: 同じく disabled 表示
+  3. src (parent-${hex}) picker-item の CSS assertion: `opacity: 0.4` / `cursor: not-allowed`
+  4. src の caret を展開 → child-${hex} picker-item を可視化
+  5. child picker-item の CSS assertion: 同じく disabled 表示
 - **期待**:
   - picker 上で src とその descendant はどちらも disabled (click しても setSelected されない)
 - **備考**: `folder-move-modal.tsx` の `if (destParent === srcPrefix || destParent.startsWith(srcPrefix)) setError(...)` は defense-in-depth。picker 経由の UI では disabledPrefix で src/descendant の click 自体を無効化しているため、`.ferr` text `自分自身の中には移動できません` は現状の UI 経路では到達不能。E2E は picker の disabled 表示を pin する形で対応。

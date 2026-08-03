@@ -66,8 +66,8 @@ test.describe("SHELL", () => {
 
     // 効果範囲外: browse ページの「＋ 新規フォルダ」/「アップロード」は literal ja
     await page.keyboard.press("Escape")
-    await expect(page.getByRole("button", { name: "＋ 新規フォルダ" })).toBeVisible()
-    await expect(page.getByRole("button", { name: /アップロード/ })).toBeVisible()
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" })).toBeVisible()
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: /アップロード/ })).toBeVisible()
     // negative: Upload という英語文言は無い
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0)
   })
