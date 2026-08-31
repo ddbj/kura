@@ -6,6 +6,7 @@
 
 - 稼働ノード: NIG オンプレミスの a012（`172.19.15.12`）
 - SeaweedFS 一式・SPA 配信 server・ops（日次運用タスク。「日次運用タスク」参照）を compose で動かす。port は SPA 配信 = 28080、SeaweedFS S3 = 28333。dev は docker、a012 (staging / production) は rootless podman-compose（下記「a012 (rootless podman) の追加要件」）
+- 公開 port の bind 先は `KURA_BIND_ADDR`。**default は `127.0.0.1`** で、開発機やテストが意図せず LAN に晒されないようにしてある。配備先では gateway が別ホストから a012 の IP に proxy してくるため loopback では届かず、`env.production` が `0.0.0.0` を明示している。ホスト側で外から届いてよいのはこの 2 port だけで、それ以外（filer / master）は compose の内部 network に閉じている
 - 起動:
   - docker (dev): `docker compose --env-file env.dev --env-file .env up -d --wait`
   - a012: `.env` に `env.<環境>` の内容と secrets を merge しておき（podman-compose 1.0.6 は `--env-file` を複数回渡すと最後の 1 つしか読まない）、`podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d`
