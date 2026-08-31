@@ -8,7 +8,7 @@ const b64url = (data: string): string => {
 }
 
 // Unsigned test JWT: kura's frontend only decodes claims for display; signature
-// verification is SeaweedFS's job (docs/architecture.md).
+// verification is SeaweedFS's job.
 export const encodeTestJwt = (payload: unknown): string =>
   `${b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${b64url(JSON.stringify(payload))}.test-signature`
 

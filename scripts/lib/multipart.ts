@@ -60,7 +60,7 @@ const latestPartActivity = async (
 
 // Aborts multipart uploads whose last part activity is older than maxAgeDays,
 // reclaiming the invisible space their parts hold. Interrupted uploads stay
-// resumable within this window (docs/operations.md). SeaweedFS reports no
+// resumable within this window. SeaweedFS reports no
 // Initiated timestamp, so uploads without parts cannot be dated; they hold no
 // bytes and are left alone.
 export const cleanupBucketUploads = async (

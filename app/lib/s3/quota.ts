@@ -25,5 +25,5 @@ export const listBucketTotalBytes = async (s3: S3Client, bucket: string): Promis
 }
 
 // Reference quota until the deployment exposes an authoritative value. Matches
-// the docs default of 1 TB per user (docs/requirements.md § quota).
+// the specified default of 1 TB per user.
 export const DEFAULT_QUOTA_BYTES = 1024 ** 4

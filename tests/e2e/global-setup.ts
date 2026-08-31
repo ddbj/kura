@@ -21,7 +21,7 @@ const probe = async (label: string, url: string, check: (res: Response) => Promi
 
 // The SPA's config is baked in at build time, so there is nothing to fetch
 // from the running stack: read the issuer from the env file the dev build was
-// made with (docs/architecture.md frontend).
+// made with.
 const issuerFromEnvDev = (): string => {
   const line = readFileSync(new URL("../../env.dev", import.meta.url), "utf8")
     .split("\n")

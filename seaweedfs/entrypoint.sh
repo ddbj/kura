@@ -226,7 +226,7 @@ cat > /etc/seaweedfs/iam.json <<EOJSON
 }
 EOJSON
 
-# Default-quota reconciler (docs/operations.md): SeaweedFS has no native
+# Default-quota reconciler: SeaweedFS has no native
 # default quota for new buckets, so periodically set it on buckets without
 # one. s3.bucket.list omits the quota field for unset buckets; disabled
 # (negative) quotas also show no field, which is why kura ops never use

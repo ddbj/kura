@@ -1,6 +1,7 @@
 # Test-only overlay. Adds the JWKS server so SeaweedFS's OIDC provider can
-# validate the tokens the test harness mints with its own key
-# (docs/testing.md). Merged on top of compose.yml for `npm test`:
+# validate the tokens the test harness mints with its own key.
+#
+# Merged on top of compose.yml for `npm test`:
 #   docker compose --env-file env.test -f compose.yml -f compose.test.yml up -d
 #
 # Kept separate from compose.yml because podman-compose 1.0.6 ignores

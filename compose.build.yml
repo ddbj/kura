@@ -6,14 +6,13 @@
 # ホストのファイルシステム上に残す必要がある。よって image に焼き込まず、
 # repo を bind mount して container 内で npm ci && npm run build を走らせる。
 #
-# デプロイ固有の設定は VITE_KURA_* として bundle に焼き込まれる
-# (docs/architecture.md frontend)。したがって環境ごとに、その環境の env で
-# ビルドする。
+# デプロイ固有の設定は VITE_KURA_* として bundle に焼き込まれるので、環境ごとに
+# その環境の env でビルドする。
 #
 # node は moving tag ではなく patch version まで pin する。node:24 のような
 # moving tag は npm の minor 差で optional dependency の解決が変わり、同じ
 # package-lock.json でも `npm ci` が失敗することがある。配備先でも同じ version
-# で build する (docs/operations.md)。
+# で build する。
 services:
   build:
     image: docker.io/library/node:24.13.0

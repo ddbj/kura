@@ -12,7 +12,7 @@ const DELETE_BATCH = 1000
 const isFolderKeepMarker = (key: string): boolean =>
   key === ".keep" || key.endsWith("/.keep")
 
-// Deletes objects past the file TTL (docs/operations.md). Creation time is
+// Deletes objects past the file TTL. Creation time is
 // the S3 LastModified, the same basis as the SPA expiry column.
 export const sweepBucketTtl = async (
   s3: S3Client,

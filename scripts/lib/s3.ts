@@ -10,7 +10,7 @@ export const requireEnv = (name: string): string => {
 }
 
 // Root-credential client for ops tasks; user traffic never takes this path
-// (docs/operations.md). SeaweedFS compatibility settings mirror
+// SeaweedFS compatibility settings mirror
 // app/lib/s3/seaweedfs-compat.ts, kept as its own copy rather than importing
 // it: the ops container only mounts scripts/ and node_modules/, not app/
 // (compose.yml), so this file cannot reach across to app/.

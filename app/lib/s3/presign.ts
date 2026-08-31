@@ -9,7 +9,7 @@ export type PresignMethod = "GET" | "PUT"
 export type PresignedShare = {
   url: string
   // When the URL actually stops working: the STS session expiry caps
-  // X-Amz-Expires (docs/architecture.md presign).
+  // X-Amz-Expires.
   expiresAt: Date
 }
 

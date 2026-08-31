@@ -1,4 +1,4 @@
-// SPA delivery (docs/architecture.md「SPA の配信」): serves the static build in
+// SPA delivery: serves the static build in
 // build/client and nothing else.
 //
 // vite's preview server is started programmatically with configFile: false so
@@ -62,7 +62,7 @@ const server = await preview({
     host: true,
     port: 8080,
     strictPort: true,
-    // Only SeaweedFS answers CORS (docs/architecture.md CORS).
+    // Only SeaweedFS answers CORS.
     cors: false,
     allowedHosts,
   },

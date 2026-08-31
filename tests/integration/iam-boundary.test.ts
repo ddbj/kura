@@ -115,7 +115,7 @@ describe("IAM policy boundary", () => {
     expect(await got.Body!.transformToString()).toBe("readable by admin")
   })
 
-  // s3.json defines no anonymous identity (docs/architecture.md), so nothing
+  // s3.json defines no anonymous identity, so nothing
   // reaches S3 without a signature. There is no other unauthenticated path
   // into kura, which is what the whole design rests on.
   it("denies unsigned requests to a bucket, an object and the bucket list", async () => {
@@ -132,7 +132,7 @@ describe("IAM policy boundary", () => {
   // The filer's own HTTP API is not behind S3's IAM, and every container on
   // the compose network can reach it — including the SPA delivery process,
   // which has no business reading buckets. security.toml's read signing key is
-  // what closes that door (docs/architecture.md).
+  // what closes that door.
   it("denies an unauthenticated filer read from another container on the network", () => {
     const status = execFileSync("docker", [
       "exec", "kura-test-ops-1", "sh", "-c",

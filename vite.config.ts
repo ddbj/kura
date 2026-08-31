@@ -10,7 +10,7 @@ const appDir = fileURLToPath(new URL("./app", import.meta.url))
 const envDevPath = fileURLToPath(new URL("./env.dev", import.meta.url))
 
 // Values without which the SPA cannot reach Keycloak or S3. The file TTL is
-// deliberately absent: empty means "no TTL" (docs/operations.md).
+// deliberately absent: empty means "no TTL".
 const REQUIRED_BUILD_ENV = [
   "VITE_KURA_OIDC_ISSUER",
   "VITE_KURA_OIDC_CLIENT_ID",
@@ -48,7 +48,7 @@ const devEnvFromEnvDev = (): Plugin => ({
   },
 })
 
-// Deployment config is baked into the bundle (docs/architecture.md frontend),
+// Deployment config is baked into the bundle,
 // so a missing value would only show up as a broken deployment. Fail here.
 // buildStart, not config: `react-router typegen` resolves the config with
 // command "build" too, and it has no reason to need deployment values.

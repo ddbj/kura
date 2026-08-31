@@ -26,7 +26,7 @@ const optionalDaysEnv = (name: string): number | null => {
   return raw === undefined || raw === "" ? null : parseDays(name, raw)
 }
 
-// One daily ops pass (docs/operations.md): file-TTL sweep (when enabled) and
+// One daily ops pass: file-TTL sweep (when enabled) and
 // stale multipart cleanup.
 export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise<void> => {
   const ttlDays = optionalDaysEnv("KURA_FILE_TTL_DAYS")

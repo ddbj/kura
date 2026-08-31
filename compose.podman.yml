@@ -1,11 +1,6 @@
 # rootless podman-compose overlay。compose.yml と合わせて使う:
 #   podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
 #
-# 配備先固有の前提 (env ファイルの merge が要る理由、subuid の割り当て、bind
-# mount 先のファイルシステム制約) は docs/operations.md の
-# 「a012 (rootless podman) の追加要件」に書いてある。ここに置くのは、その結果と
-# して compose に効かせている設定だけ:
-#
 # - seaweedfs は image が非 root uid で走るため、bind mount 先へ host uid で
 #   到達できるよう userns を固定する。web / ops は container 内 root なので不要
 # - label=disable は SELinux 環境向けの慣習 (他 DDBJ サービスと足並みを揃える)

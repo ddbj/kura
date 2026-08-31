@@ -9,7 +9,7 @@ const base64UrlDecode = (segment: string): string => {
 
 // Claims are decoded without signature verification: the frontend only uses
 // them for display and bucket-name derivation, authorization is enforced by
-// SeaweedFS (docs/architecture.md).
+// SeaweedFS.
 export const decodeJwtPayload = (jwt: string): unknown => {
   const segments = jwt.split(".")
   const payload = segments[1]

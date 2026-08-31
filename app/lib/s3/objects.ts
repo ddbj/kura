@@ -27,8 +27,8 @@ const hasHttpStatus = (err: unknown, status: number): boolean =>
 const isNotFound = (err: unknown): boolean => hasHttpStatus(err, 404)
 
 // CreateBucket on an existing bucket returns 409 (BucketAlreadyExists, even
-// for the owner), so existence is checked with HeadBucket first
-// (docs/architecture.md 配置). Two tabs racing their first access can both
+// for the owner), so existence is checked with HeadBucket first. Two tabs
+// racing their first access can both
 // pass that HeadBucket check, so the loser's CreateBucket 409 is expected
 // (not the caller's problem) and treated the same as already-existing.
 export const ensureOwnBucket = async (s3: S3Client, bucket: string): Promise<void> => {

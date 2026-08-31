@@ -3,7 +3,7 @@ import { describe, expect } from "vitest"
 
 import { isUsableBucketName } from "~/lib/s3/bucket-name"
 
-// The SeaweedFS bucket name shape (docs/architecture.md 配置), redeclared here
+// The SeaweedFS bucket name shape, redeclared here
 // so a change to the implementation regex must also justify a change to the
 // oracle.
 const isIpV4 = (name: string): boolean => {

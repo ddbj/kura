@@ -41,10 +41,9 @@ const get = (path: string, headers: Record<string, string> = {}): Promise<Respon
   })
 }
 
-// The delivery server serves the SPA build and nothing else
-// (docs/architecture.md「SPA の配信」). The build under test may be a
-// placeholder (tests can run before a real build), so these assert the shape
-// of the responses, never the page content.
+// The delivery server serves the SPA build and nothing else. The build under
+// test may be a placeholder (tests can run before a real build), so these
+// assert the shape of the responses, never the page content.
 describe("SPA delivery", () => {
   it("serves index.html at the root", async () => {
     const res = await get("/")

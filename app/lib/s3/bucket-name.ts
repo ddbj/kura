@@ -1,6 +1,6 @@
 // Same acceptance set as SeaweedFS's VerifyS3BucketName, restricted to ASCII:
 // SeaweedFS itself admits any unicode lowercase/digit, but IAM policy variables
-// and the public-delivery routing are ASCII-based (docs/architecture.md 配置).
+// are ASCII-based.
 const VALID_SHAPE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/
 
 const isIpV4 = (name: string): boolean => {

@@ -11,8 +11,8 @@ export type StsCredentials = {
 }
 
 // SeaweedFS serves STS on the same endpoint as S3. The session is capped by
-// min(token exp remaining, DurationSeconds, sts.maxSessionLength) — see
-// docs/architecture.md presign. 43200s (12h) matches sts.maxSessionLength.
+// min(token exp remaining, DurationSeconds, sts.maxSessionLength).
+// 43200s (12h) matches sts.maxSessionLength.
 export const assumeRoleWithToken = async (endpoint: string, token: string): Promise<StsCredentials> => {
   const sts = new STSClient({ endpoint, region: "us-east-1" })
   const res = await sts.send(new AssumeRoleWithWebIdentityCommand({

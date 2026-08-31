@@ -86,7 +86,7 @@ type ListedUpload = {
 }
 
 // ListMultipartUploads wire format: SeaweedFS omits the <Initiated> element
-// per Upload (see docs/architecture.md 配置 / app/lib/s3/multipart.ts:
+// per Upload (see app/lib/s3/multipart.ts:
 // resume recency comes from part LastModified). Kept out of this template
 // so tests never accidentally rely on a timestamp the server never sends.
 export const listMultipartUploadsXml = ({ bucket, uploads, nextKeyMarker, nextUploadIdMarker, truncatedNoMarker }: {
