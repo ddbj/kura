@@ -14,7 +14,7 @@ import { preview } from "vite"
 const outDir = resolve(process.cwd(), "build/client")
 
 // vite always accepts localhost and bare IPs; any other Host — the name the
-// DDBJ gateway forwards — must be listed or the request is rejected.
+// reverse proxy in front forwards — must be listed or the request is rejected.
 const allowedHosts = (process.env["KURA_ALLOWED_HOSTS"] ?? "")
   .split(",")
   .map((host) => host.trim())

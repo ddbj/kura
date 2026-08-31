@@ -40,15 +40,15 @@ services:
     volumes:
       - ./seaweedfs/entrypoint.sh:/kura/entrypoint.sh:ro
       # /data は bind mount で渡す。named / anonymous volume にすると podman が
-      # image 内の初期 dir を volume に copy-up する際に chown 1000:1000 を
-      # 発火し、rootless podman + Lustre では chown 拒否で container が
-      # 起動できない (docs/operations.md)。filer の LevelDB も -dir 配下の
-      # /data/filerldb2 に作られるため、この 1 本で永続データを覆える。
+      # image 内の初期 dir を copy-up する際に chown を発火し、それを拒否する
+      # ファイルシステム上では起動できない (docs/operations.md)。filer の
+      # LevelDB も -dir 配下の /data/filerldb2 に作られるため、この 1 本で
+      # 永続データを覆える。
       - ${KURA_SEAWEEDFS_DATA_DIR:-./data/seaweedfs}:/data
     ports:
       # S3 API のみ公開する。filer (8888) / master (9333) は内部 network に閉じる。
-      # bind 先は default で loopback。前段の gateway が別ホストから来る配備先
-      # だけ KURA_BIND_ADDR で開ける (docs/operations.md)。
+      # bind 先は default で loopback。外から届く必要がある環境だけ
+      # KURA_BIND_ADDR で開ける (docs/operations.md)。
       - "${KURA_BIND_ADDR:-127.0.0.1}:${KURA_S3_PORT}:8333"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
@@ -65,7 +65,7 @@ services:
     working_dir: /kura
     command: ["node", "/kura/scripts/serve-spa.ts"]
     environment:
-      # gateway が転送する Host。空でも localhost / IP 直は通る
+      # 外向きの Host 名。空でも localhost / IP 直打ちは通る
       KURA_ALLOWED_HOSTS: ${KURA_ALLOWED_HOSTS:-}
     volumes:
       # 再ビルドは build/ をディレクトリごと作り直す。起動中の container は

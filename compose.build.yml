@@ -12,8 +12,8 @@
 #
 # node は moving tag ではなく patch version まで pin する。node:24 のような
 # moving tag は npm の minor 差で optional dependency の解決が変わり、同じ
-# package-lock.json でも `npm ci` が失敗することがある。配備先 (a012) も同じ
-# version で build する (docs/operations.md)。
+# package-lock.json でも `npm ci` が失敗することがある。配備先でも同じ version
+# で build する (docs/operations.md)。
 services:
   build:
     image: docker.io/library/node:24.13.0

@@ -1,20 +1,14 @@
-# rootless podman-compose overlay. compose.yml と合わせて使う:
+# rootless podman-compose overlay。compose.yml と合わせて使う:
 #   podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
 #
-# .env は env.production の内容 + secrets を merge した 1 ファイルにする
-# (podman-compose 1.0.6 は --env-file を複数回渡すと最後の 1 個しか読まない)。
+# 配備先固有の前提 (env ファイルの merge が要る理由、subuid の割り当て、bind
+# mount 先のファイルシステム制約) は docs/operations.md の
+# 「a012 (rootless podman) の追加要件」に書いてある。ここに置くのは、その結果と
+# して compose に効かせている設定だけ:
 #
-# rootless podman + Lustre bind mount 上での注意点:
-# - Lustre は subuid range (222700000+) の uid の write / read を拒否するため、
-#   container 内 process が Lustre 上の bind mount を触るには container 内 uid が
-#   host uid (w3ddbjld = 2227) にマップされる必要がある。
-#   * seaweedfs: image が uid 1000 で走る -> `userns_mode: keep-id:uid=1000` で
-#     container 内 uid 1000 = host uid w3ddbjld にマップ
-#   * web / ops: container 内 root で走る (default) → host w3ddbjld として
-#     Lustre を触れる。userns 追加は不要
-#
-# label=disable は SELinux 環境向けの慣習 (a012 の Ubuntu は SELinux 無効なので
-# 実害なし、他 DDBJ サービスと足並みを揃える)。
+# - seaweedfs は image が非 root uid で走るため、bind mount 先へ host uid で
+#   到達できるよう userns を固定する。web / ops は container 内 root なので不要
+# - label=disable は SELinux 環境向けの慣習 (他 DDBJ サービスと足並みを揃える)
 
 services:
   seaweedfs:
