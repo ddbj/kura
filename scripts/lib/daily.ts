@@ -1,8 +1,5 @@
-import { access } from "node:fs/promises"
-
 import type { S3Client } from "@aws-sdk/client-s3"
 
-import { rotateAuditLogs } from "./audit-logs.ts"
 import { cleanupBucketUploads } from "./multipart.ts"
 import { listBucketNames, opsS3Client } from "./s3.ts"
 import { sweepBucketTtl } from "./ttl.ts"
@@ -22,40 +19,24 @@ const daysEnv = (name: string, fallback: number): number => {
   return raw === undefined || raw === "" ? fallback : parseDays(name, raw)
 }
 
-// Empty means disabled (same contract as the SPA's /_config.json).
+// Empty means disabled (same contract as the SPA's baked file TTL).
 const optionalDaysEnv = (name: string): number | null => {
   const raw = process.env[name]
 
   return raw === undefined || raw === "" ? null : parseDays(name, raw)
 }
 
-const nonNegativeSecondsEnv = (name: string, fallback: number): number => {
-  const raw = process.env[name]
-  if (raw === undefined || raw === "") {
-    return fallback
-  }
-  const seconds = Number(raw)
-  if (!Number.isInteger(seconds) || seconds < 0) {
-    throw new Error(`${name} must be a non-negative integer, got "${raw}"`)
-  }
-
-  return seconds
-}
-
-// One daily ops pass (docs/operations.md): file-TTL sweep (when enabled),
-// stale multipart cleanup, and audit log rotation.
+// One daily ops pass (docs/operations.md): file-TTL sweep (when enabled) and
+// stale multipart cleanup.
 export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise<void> => {
   const ttlDays = optionalDaysEnv("KURA_FILE_TTL_DAYS")
   const multipartMaxAgeDays = daysEnv("KURA_MULTIPART_MAX_AGE_DAYS", 7)
-  const auditRetentionDays = daysEnv("KURA_AUDIT_RETENTION_DAYS", 1095)
-  const auditRotateLagSeconds = nonNegativeSecondsEnv("KURA_AUDIT_ROTATE_LAG_SECONDS", 120)
-  const auditLogDir = process.env["KURA_LOG_DIR"] ?? "/var/log/kura"
 
   const buckets = await listBucketNames(s3)
   let ttlDeleted = 0
   let uploadsAborted = 0
   // One bucket's failure (transient S3 error, etc.) must not cost every other
-  // bucket its TTL sweep/multipart cleanup, nor skip audit log rotation below.
+  // bucket its TTL sweep / multipart cleanup.
   const failedBuckets: string[] = []
   for (const bucket of buckets) {
     try {
@@ -69,21 +50,15 @@ export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise
     }
   }
 
-  const logs = await access(auditLogDir).then(
-    () => rotateAuditLogs(auditLogDir, auditRetentionDays, now, auditRotateLagSeconds),
-    () => null,
-  )
-
   console.log(
     `kura-ops: daily pass done: buckets=${buckets.length}`
     + ` ttlDeleted=${ttlDays === null ? "off" : ttlDeleted}`
     + ` uploadsAborted=${uploadsAborted}`
-    + ` logs=${logs === null ? "off" : `compressed:${logs.compressed} deleted:${logs.deleted}`}`
     + (failedBuckets.length === 0 ? "" : ` failedBuckets=${failedBuckets.join(",")}`),
   )
 
-  // Surfaced after everything else ran, so ops-loop.ts still logs the
-  // failure without it blocking unrelated buckets or audit log rotation.
+  // Surfaced after everything else ran, so ops-loop.ts still logs the failure
+  // without it blocking unrelated buckets.
   if (failedBuckets.length > 0) {
     throw new Error(
       `kura-ops: daily pass had failures in ${failedBuckets.length} bucket(s): ${failedBuckets.join(", ")}`,

@@ -27,18 +27,6 @@ export type Resources = {
     discardConfirmBody: string
     discardFailed: string
   }
-  publish: {
-    badge: string
-    title: string
-    toggleAriaLabel: string
-    loading: string
-    publicUrlLabel: string
-    makePublicIntro: string
-    makePublic: string
-    isPublicIntro: string
-    makePrivate: string
-    failed: string
-  }
   presign: {
     getTitle: string
     putTitle: string
@@ -102,8 +90,6 @@ export type Resources = {
     uploadBody: string
     downloadTitle: string
     downloadBody: string
-    publishTitle: string
-    publishBody: string
     presignTitle: string
     presignBody: string
   }
@@ -136,18 +122,6 @@ export const ja: Resources = {
     discardConfirmBody: "{{name}} の中断したアップロードを破棄します。アップロード済みの部分は失われます。",
     discardFailed: "破棄に失敗しました",
   },
-  publish: {
-    badge: "公開中",
-    title: "公開設定",
-    toggleAriaLabel: "{{name}} の公開状態を切り替える",
-    loading: "公開状態を確認中…",
-    publicUrlLabel: "公開 URL",
-    makePublicIntro: "{{name}} を公開します。次の URL で誰でも認証なしでダウンロードできるようになります。",
-    makePublic: "公開する",
-    isPublicIntro: "{{name}} は公開中です。次の URL で誰でもダウンロードできます。",
-    makePrivate: "公開停止",
-    failed: "公開状態の変更に失敗しました",
-  },
   presign: {
     getTitle: "共有 URL を発行",
     putTitle: "アップロード用 URL を発行",
@@ -157,7 +131,7 @@ export const ja: Resources = {
     issue: "発行",
     urlLabel: "presigned URL",
     expiresAt: "{{datetime}} 頃まで有効",
-    note: "presigned URL は短期の受け渡し用です。発行に使うセッションの残り時間で頭打ちになるため、実効上限は約 12 時間です。長期の共有には公開を使ってください。",
+    note: "presigned URL は短期の受け渡し用です。発行に使うセッションの残り時間で頭打ちになるため、実効上限は約 12 時間です。",
     filenameLabel: "ファイル名",
     putUsage: "この URL に対して HTTP PUT でアップロードできます。",
     failed: "URL の発行に失敗しました",
@@ -188,7 +162,7 @@ export const ja: Resources = {
   },
   browse: {
     pageTitle: "マイファイル",
-    pageDescription: "アップロードしたファイルの一覧です。ダウンロード・公開・共有 URL の発行をここから行います。ファイルはドラッグ&ドロップでも追加できます。",
+    pageDescription: "アップロードしたファイルの一覧です。ダウンロード・共有 URL の発行をここから行います。ファイルはドラッグ&ドロップでも追加できます。",
     root: "ホーム",
     breadcrumbLabel: "現在のパス",
     fileListLabel: "ファイル一覧",
@@ -212,8 +186,6 @@ export const ja: Resources = {
     uploadBody: "ログインすると、100 GB クラスのファイルもそのままアップロードできます。",
     downloadTitle: "ダウンロード",
     downloadBody: "アップロードしたファイルは一覧からいつでもダウンロードできます。",
-    publishTitle: "公開",
-    publishBody: "特定のファイルを、誰でも認証なしでダウンロードできる状態にできます。",
     presignTitle: "共有 URL の発行",
     presignBody: "期限付きの URL を発行し、短期間だけファイルを受け渡しできます。",
   },

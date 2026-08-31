@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process"
+
 import {
   CreateBucketCommand,
   DeleteObjectCommand,
@@ -45,13 +47,13 @@ describe("IAM policy boundary", () => {
       new PutObjectTaggingCommand({
         Bucket: username,
         Key: "a/b.txt",
-        Tagging: { TagSet: [{ Key: "kura-public", Value: "true" }] },
+        Tagging: { TagSet: [{ Key: "kura-test", Value: "1" }] },
       }),
     )
     const tags = await s3.send(
       new GetObjectTaggingCommand({ Bucket: username, Key: "a/b.txt" }),
     )
-    expect(tags.TagSet).toContainEqual({ Key: "kura-public", Value: "true" })
+    expect(tags.TagSet).toContainEqual({ Key: "kura-test", Value: "1" })
 
     await s3.send(new DeleteObjectCommand({ Bucket: username, Key: "a/b.txt" }))
   })
@@ -77,7 +79,7 @@ describe("IAM policy boundary", () => {
         new PutObjectTaggingCommand({
           Bucket: bob.username,
           Key: "secret.txt",
-          Tagging: { TagSet: [{ Key: "kura-public", Value: "true" }] },
+          Tagging: { TagSet: [{ Key: "kura-test", Value: "1" }] },
         }),
       ),
     ).rejects.toMatchObject(accessDenied)
@@ -111,6 +113,33 @@ describe("IAM policy boundary", () => {
       new GetObjectCommand({ Bucket: alice.username, Key: "data.txt" }),
     )
     expect(await got.Body!.transformToString()).toBe("readable by admin")
+  })
+
+  // s3.json defines no anonymous identity (docs/architecture.md), so nothing
+  // reaches S3 without a signature. There is no other unauthenticated path
+  // into kura, which is what the whole design rests on.
+  it("denies unsigned requests to a bucket, an object and the bucket list", async () => {
+    const { username, s3 } = await setupUser()
+    await putText(s3, username, "anon.txt", "not for the world")
+    const endpoint = inject("s3Endpoint").replace(/\/+$/, "")
+
+    for (const path of ["/", `/${username}`, `/${username}?list-type=2`, `/${username}/anon.txt`]) {
+      const res = await fetch(`${endpoint}${path}`)
+      expect(res.status, `unsigned GET ${path}`).toBe(403)
+    }
+  })
+
+  // The filer's own HTTP API is not behind S3's IAM, and every container on
+  // the compose network can reach it — including the SPA delivery process,
+  // which has no business reading buckets. security.toml's read signing key is
+  // what closes that door (docs/architecture.md).
+  it("denies an unauthenticated filer read from another container on the network", () => {
+    const status = execFileSync("docker", [
+      "exec", "kura-test-ops-1", "sh", "-c",
+      "wget -S -q -O /dev/null http://seaweedfs:8888/buckets/ 2>&1 | awk '/HTTP\\//{print $2; exit}'",
+    ], { encoding: "utf8" }).trim()
+
+    expect(status).toBe("401")
   })
 
   it("rejects tokens with a wrong audience", async () => {

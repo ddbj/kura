@@ -1,9 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { gunzipSync } from "node:zlib"
 
 import {
   CreateMultipartUploadCommand,
@@ -20,9 +17,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 const daysFromNow = (days: number) => new Date(Date.now() + days * DAY_MS).toISOString()
 
-// Runs one ops pass exactly as the ops container does, against the test
-// stack. The audit log dir defaults to a missing path so only the test that
-// exercises rotation touches files.
+// Runs one ops pass exactly as the ops container does, against the test stack.
 const runOpsDaily = (nowIso: string, extraEnv: Record<string, string> = {}) =>
   execFileSync("node", ["scripts/ops-daily.ts", `--now=${nowIso}`], {
     cwd: repoRoot,
@@ -33,18 +28,16 @@ const runOpsDaily = (nowIso: string, extraEnv: Record<string, string> = {}) =>
       KURA_ROOT_ACCESS_KEY: inject("rootAccessKey"),
       KURA_ROOT_SECRET_KEY: inject("rootSecretKey"),
       KURA_FILE_TTL_DAYS: "30",
-      KURA_LOG_DIR: join(tmpdir(), "kura-audit-disabled"),
       ...extraEnv,
     },
   })
 
 describe("ops service env passthrough", () => {
-  it("forwards the operator-tunable retention env vars into the ops container", () => {
+  it("forwards the operator-tunable retention env var into the ops container", () => {
     const printenv = (name: string) =>
       execFileSync("docker", ["exec", "kura-test-ops-1", "printenv", name], { encoding: "utf8" }).trim()
 
     expect(printenv("KURA_MULTIPART_MAX_AGE_DAYS")).toBe("3")
-    expect(printenv("KURA_AUDIT_RETENTION_DAYS")).toBe("10")
   })
 })
 
@@ -117,56 +110,5 @@ describe("stale multipart cleanup", () => {
     // (SeaweedFS reports no Initiated) and holds no bytes, so it stays.
     runOpsDaily(daysFromNow(8), { KURA_FILE_TTL_DAYS: "" })
     expect(await listKeys()).toEqual(["empty.bin"])
-  })
-})
-
-describe("audit log rotation", () => {
-  // Retention is pinned at a small, exact value so the "just inside" /
-  // "just outside" boundary is one day apart, not "5 days of margin".
-  const RETENTION_DAYS = 10
-
-  it("compresses finished days and deletes files past retention", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "kura-audit-"))
-    const today = new Date().toISOString().slice(0, 10)
-    const oldDay = new Date(Date.now() - 8 * DAY_MS).toISOString().slice(0, 10)
-    // Explicitly past retention (11 days ago vs 10-day window).
-    const ancientDay = new Date(Date.now() - (RETENTION_DAYS + 1) * DAY_MS).toISOString().slice(0, 10)
-    await writeFile(join(dir, `access-${today}.log`), "today line\n")
-    await writeFile(join(dir, `access-${oldDay}.log`), "old line\n")
-    await writeFile(join(dir, `access-${ancientDay}.log`), "ancient line\n")
-    await writeFile(join(dir, "unrelated.txt"), "not a log\n")
-
-    runOpsDaily(new Date().toISOString(), {
-      KURA_FILE_TTL_DAYS: "",
-      KURA_LOG_DIR: dir,
-      KURA_AUDIT_RETENTION_DAYS: String(RETENTION_DAYS),
-    })
-
-    expect((await readdir(dir)).sort()).toEqual([
-      `access-${oldDay}.log.gz`,
-      `access-${today}.log`,
-      "unrelated.txt",
-    ])
-    const unzipped = gunzipSync(await readFile(join(dir, `access-${oldDay}.log.gz`)))
-    expect(unzipped.toString()).toBe("old line\n")
-  })
-
-  it("keeps a log that is still inside the retention window", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "kura-audit-"))
-    // One day inside the window: must survive (as its .gz form).
-    const withinWindow = new Date(Date.now() - (RETENTION_DAYS - 1) * DAY_MS)
-      .toISOString().slice(0, 10)
-    await writeFile(join(dir, `access-${withinWindow}.log`), "in window\n")
-
-    runOpsDaily(new Date().toISOString(), {
-      KURA_FILE_TTL_DAYS: "",
-      KURA_LOG_DIR: dir,
-      KURA_AUDIT_RETENTION_DAYS: String(RETENTION_DAYS),
-    })
-
-    // Compressed (past today), but not deleted.
-    expect((await readdir(dir)).sort()).toEqual([`access-${withinWindow}.log.gz`])
-    const unzipped = gunzipSync(await readFile(join(dir, `access-${withinWindow}.log.gz`)))
-    expect(unzipped.toString()).toBe("in window\n")
   })
 })

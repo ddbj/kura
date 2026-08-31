@@ -1,24 +1,18 @@
 // FILEOPS Domain (scenarios.md §FILEOPS): rename / move / copy / delete
-// (single, multi, folder) + new folder + 公開中 file の rename の tag
-// carry-over + 検証エラー系。
+// (single, multi, folder) + new folder + 検証エラー系。
 import { expect } from "@playwright/test"
 
 import {
   clearClientPrefs,
   createFolderViaSdk,
-  e2eUsername,
   exactPickerItem,
-  expandRow,
   expectUploadRowAutoDismissed,
-  getAnon,
   getBulkBar,
   getFolderRow,
-  getPubPanel,
   getRow,
   openFolderMenu,
   openRowMenu,
   pickerAssertOnScope,
-  publicUrlFor,
   scopeBrowseUrl,
   scopePrefix,
   uniqueFolder,
@@ -238,65 +232,6 @@ test.describe("FILEOPS", () => {
     await expect(page.locator(".emptyzone")).toBeVisible({ timeout: 10_000 })
     // .keep は非表示
     await expect(page.locator(".row.sel").filter({ hasText: ".keep" })).toHaveCount(0)
-  })
-
-  test("S-FILEOPS-10: 公開中 file の rename → 旧 URL 404、新 URL 200", async ({ page, browser }) => {
-    const src = uniqueName("fo10-src")
-    const dst = uniqueName("fo10-dst")
-    const content = "public-rename-carry-over"
-    await page.goto(scopeBrowseUrl())
-    await uploadTextFile(page, src, content)
-    await expectUploadRowAutoDismissed(page, src)
-
-    // publish
-    await getRow(page, src).locator(".pubbtn").click()
-    const modal = page.getByRole("dialog", { name: "ファイルを公開" })
-    await modal.getByRole("button", { name: "公開する" }).click()
-    await expect(modal.locator(".flist .frow").locator(".tag.ok")).toHaveText("完了", { timeout: 15_000 })
-    await modal.getByRole("button", { name: "閉じる" }).click()
-
-    await expandRow(page, src)
-    const oldUrl = await getPubPanel(page, src).locator(".linkbar .u").textContent()
-    expect(oldUrl).not.toBeNull()
-
-    // rename
-    await openRowMenu(page, src)
-    await page.locator(".rowmenu").getByRole("menuitem", { name: "名前を変更" }).click()
-    const renameModal = page.getByRole("dialog", { name: "名前を変更" })
-    await renameModal.getByLabel("新しい名前").fill(dst)
-    await renameModal.getByRole("button", { name: "変更" }).click()
-
-    await expect(getRow(page, dst)).toBeVisible({ timeout: 20_000 })
-    await expect(getRow(page, src)).toHaveCount(0)
-    // tag carry-over
-    await expect(getRow(page, dst).locator(".c-pub .tag.ok")).toHaveText("公開中", { timeout: 15_000 })
-
-    // 新 URL は publicUrl(publicBase, bucket, dstKey) で計算 (SPA と同じ pattern)
-    const bucket = e2eUsername()
-    const publicBase = process.env["KURA_E2E_BASE_URL"] ?? "http://localhost:28080"
-    const dstKey = `${scopePrefix()}${dst}`
-    const newUrl = publicUrlFor(publicBase, bucket, dstKey)
-
-    // 旧 URL 404
-    {
-      const { context, response } = await getAnon(browser, oldUrl!)
-      try {
-        expect(response.status()).toBe(404)
-      } finally {
-        await context.close()
-      }
-    }
-    // 新 URL 200 + byte 一致
-    {
-      const { context, response } = await getAnon(browser, newUrl)
-      try {
-        expect(response.status()).toBe(200)
-        const body = await response.body()
-        expect(body.toString()).toBe(content)
-      } finally {
-        await context.close()
-      }
-    }
   })
 
   test("E-FILEOPS-01: name 衝突 (rename)", async ({ page }) => {

@@ -7,9 +7,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "react-router dev",
+    "dev": "KURA_DEV=1 react-router dev",
     "build": "react-router build",
-    "build:container": "KURA_BUILD_USER=$(id -u):$(id -g) docker compose -f compose.build.yml run --rm build",
+    "build:container": "KURA_BUILD_USER=$(id -u):$(id -g) docker compose --env-file env.dev -f compose.build.yml run --rm build",
     "test": "vitest run",
     "test:unit": "vitest run --project unit --project pbt",
     "test:integration": "vitest run --project integration",
@@ -47,7 +47,6 @@
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.1",
-    "vite": "^7.3.6",
     "vitest": "^4.1.9"
   },
   "dependencies": {
@@ -69,6 +68,7 @@
     "react-i18next": "^17.0.8",
     "react-oidc-context": "^3.3.1",
     "react-router": "^7.18.1",
+    "vite": "^7.3.6",
     "zod": "^4.4.3"
   }
 }

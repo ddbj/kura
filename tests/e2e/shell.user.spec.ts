@@ -14,7 +14,7 @@ test.describe("SHELL", () => {
     const folder = uniqueFolder("shell01")
     await page.goto("/")
     await createFolderViaSdk(page, folder)
-    await page.goto(`/_browse/${folder}/`)
+    await page.goto(`/browse/${folder}/`)
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(folder)
 
     await page.locator(".hdr").getByRole("link", { name: "kura" }).click()

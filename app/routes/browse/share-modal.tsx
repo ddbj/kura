@@ -1,21 +1,11 @@
-import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "react-oidc-context"
 
 import { useConfig } from "~/lib/config"
 import { formatBytes } from "~/lib/format"
-import {
-  accessTokenForDuration,
-  applyPublicState,
-  beginPublicStateChange,
-  presignShareUrl,
-  publicUrl,
-  publishObject,
-  revertPublicStateOnFailure,
-} from "~/lib/s3"
-import { useS3 } from "~/lib/s3/use-s3"
+import { accessTokenForDuration, presignShareUrl } from "~/lib/s3"
 import { addSessionPresigned } from "~/lib/session-presigned"
-import { Button, Callout, Icon, LinkBar, Modal, ModeSwitch, Segmented, Tag } from "~/ui"
+import { Button, Icon, LinkBar, Modal, Segmented, Tag } from "~/ui"
 
 type Target = {
   bucket: string
@@ -28,27 +18,22 @@ type Props = {
   open: boolean
   onClose: () => void
   targets: Target[]
-  initialMode?: "pub" | "temp"
 }
 
-type Mode = "pub" | "temp"
 type Ttl = 15 | 60 | 720
 
 type RowState =
   | { phase: "idle" }
   | { phase: "busy" }
-  | { phase: "ok"; url: string; expiresAt: Date | null }
+  | { phase: "ok"; url: string; expiresAt: Date }
   | { phase: "err"; message: string }
 
-// Design_handoff frames 7 & 8. Runs targets in parallel via allSettled so a
-// single failure doesn't stop the whole batch, and lets the user retry just
-// the failed rows without re-running the successful ones.
-export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Props) => {
+// Design_handoff frame 8. Runs targets in parallel via allSettled so a single
+// failure doesn't stop the whole batch, and lets the user retry just the
+// failed rows without re-running the successful ones.
+export const ShareModal = ({ open, onClose, targets }: Props) => {
   const config = useConfig()
   const auth = useAuth()
-  const s3 = useS3()
-  const queryClient = useQueryClient()
-  const [mode, setMode] = useState<Mode>(initialMode)
   const [ttl, setTtl] = useState<Ttl>(720)
   const [busyBatch, setBusyBatch] = useState(false)
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({})
@@ -57,32 +42,12 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
 
   useEffect(() => {
     if (open) {
-      setMode(initialMode)
       setRowStates({})
       setBusyBatch(false)
     }
-  }, [open, initialMode])
-
-  // Mode switch invalidates any URL already issued — the current mode drives
-  // whether the successful rows are public URLs or presigned URLs.
-  const resetOnModeChange = (next: Mode) => {
-    setMode(next)
-    setRowStates({})
-  }
+  }, [open])
 
   const runOne = async (target: Target): Promise<RowState> => {
-    if (mode === "pub") {
-      const token = beginPublicStateChange(target.bucket, target.key)
-      try {
-        await publishObject(s3, target.bucket, target.key)
-        await applyPublicState(queryClient, target.bucket, target.key, true, token)
-
-        return { phase: "ok", url: publicUrl(config.publicBase, target.bucket, target.key), expiresAt: null }
-      } catch (err) {
-        await revertPublicStateOnFailure(queryClient, target.bucket, target.key, token)
-        throw err
-      }
-    }
     const expiresIn = ttl * 60
     const token = await accessTokenForDuration(auth, expiresIn)
     const presigned = await presignShareUrl({
@@ -150,21 +115,12 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
   }, [rowStates, targets])
 
   const anyIssued = summary.ok > 0 || summary.err > 0
-  const title = mode === "pub" ? "ファイルを公開" : "期限つきリンクを発行"
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="share-title">
       <div className="mh split">
-        <h2 className="mtitle" id="share-title">{title}</h2>
-        <ModeSwitch<Mode>
-          value={mode}
-          onChange={resetOnModeChange}
-          ariaLabel="共有モード"
-          options={[
-            { value: "pub", label: <><Tag tone="ok">公開</Tag>恒久URL</> },
-            { value: "temp", label: <><Tag tone="warn">期限つき</Tag>一時リンク</> },
-          ]}
-        />
+        <h2 className="mtitle" id="share-title">期限つきリンクを発行</h2>
+        <Tag tone="warn">期限つき</Tag>
       </div>
 
       <div className="flist">
@@ -185,39 +141,29 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
         })}
       </div>
 
-      {mode === "pub" ? (
-        <div className="sharemode on">
-          {!anyIssued ? (
-            <Callout tone="ok">
-              リンクを知っていれば、ログインなしで誰でもダウンロードできます。公開を止めるまで有効です。
-            </Callout>
-          ) : null}
-        </div>
-      ) : (
-        <div className="sharemode on">
-          {!anyIssued ? (
-            <>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 12px" }}>
-                <span className="lbl" style={{ color: "var(--inkMid)" }}>有効期限</span>
-                <Segmented<Ttl>
-                  value={ttl}
-                  onChange={setTtl}
-                  ariaLabel="有効期限"
-                  options={[
-                    { value: 15, label: "15分" },
-                    { value: 60, label: "1時間" },
-                    { value: 720, label: "12時間" },
-                  ]}
-                />
-              </div>
-              <div className="banner ochre">
-                <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
-                <div>リンクは最長で約{ttl === 720 ? "12時間" : ttl === 60 ? "1時間" : `${ttl}分`}後に切れます。発行したあとに延長や取り消しはできません。</div>
-              </div>
-            </>
-          ) : null}
-        </div>
-      )}
+      <div className="sharemode on">
+        {!anyIssued ? (
+          <>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 12px" }}>
+              <span className="lbl" style={{ color: "var(--inkMid)" }}>有効期限</span>
+              <Segmented<Ttl>
+                value={ttl}
+                onChange={setTtl}
+                ariaLabel="有効期限"
+                options={[
+                  { value: 15, label: "15分" },
+                  { value: 60, label: "1時間" },
+                  { value: 720, label: "12時間" },
+                ]}
+              />
+            </div>
+            <div className="banner ochre">
+              <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
+              <div>リンクは最長で約{ttl === 720 ? "12時間" : ttl === 60 ? "1時間" : `${ttl}分`}後に切れます。発行したあとに延長や取り消しはできません。</div>
+            </div>
+          </>
+        ) : null}
+      </div>
 
       {anyIssued ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
@@ -236,10 +182,8 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
             return (
               <div key={rowKey(t)}>
                 <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--inkSoft)", marginBottom: 4 }}>{t.name}</div>
-                <LinkBar url={state.url} tone={mode === "pub" ? "ok" : "warn"} copyLabel="コピー" copiedLabel="コピー済み" />
-                {state.expiresAt !== null
-                  ? <div style={{ fontSize: 11, color: "var(--inkSoft)", marginTop: 4 }}>{state.expiresAt.toLocaleString()} まで有効</div>
-                  : null}
+                <LinkBar url={state.url} tone="warn" copyLabel="コピー" copiedLabel="コピー済み" />
+                <div style={{ fontSize: 11, color: "var(--inkSoft)", marginTop: 4 }}>{state.expiresAt.toLocaleString()} まで有効</div>
               </div>
             )
           })}
@@ -252,7 +196,7 @@ export const ShareModal = ({ open, onClose, targets, initialMode = "pub" }: Prop
             <>
               <Button onClick={onClose}>キャンセル</Button>
               <Button kind="pri" disabled={busyBatch} onClick={onSubmitAll}>
-                {busyBatch ? "処理中…" : (mode === "pub" ? "公開する" : "リンクを発行")}
+                {busyBatch ? "処理中…" : "リンクを発行"}
               </Button>
             </>
           )

@@ -5,7 +5,6 @@ type Target = {
   key: string
   name: string
   size: number
-  isPublic?: boolean
 }
 
 type Props = {
@@ -26,8 +25,8 @@ export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
 
   const single = targets.length === 1 ? targets[0] : undefined
   const headline = single !== undefined
-    ? <>「{single.name}」を削除すると元には戻せません。公開中の場合は公開も止まります。</>
-    : <>{targets.length} 件のファイルを削除すると元には戻せません。公開中のファイルは公開も止まります。</>
+    ? <>「{single.name}」を削除すると元には戻せません。</>
+    : <>{targets.length} 件のファイルを削除すると元には戻せません。</>
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="delete-title">

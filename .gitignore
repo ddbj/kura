@@ -5,8 +5,6 @@ build/
 .react-router/
 .claude/
 tests/setup/.jwks/
-tests/setup/.logs/
-logs/
 data/
 test-results/
 playwright-report/

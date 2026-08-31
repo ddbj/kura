@@ -1,18 +1,17 @@
 import { createContext, type ReactNode, useContext } from "react"
 import { z } from "zod"
 
-// Deployment-specific values baked into /_config.json by nginx from env vars
-// (served by a vite middleware in dev). The OIDC redirect URI is derived from
-// window.location.origin and is deliberately not part of this config.
+// Deployment-specific values, baked into the bundle at build time from the
+// VITE_KURA_* env vars (docs/architecture.md frontend). The OIDC redirect URI
+// is derived from window.location.origin and is deliberately not part of this.
 const httpUrl = z.url({ protocol: /^https?$/ })
 
 export const AppConfigSchema = z.object({
   oidcIssuer: httpUrl,
   oidcClientId: z.string().min(1),
   s3Endpoint: httpUrl,
-  publicBase: httpUrl,
-  // envsubst bakes env vars as strings, so the TTL arrives as a decimal
-  // string; empty (or absent) means the deployment has no file TTL.
+  // Env vars arrive as strings, so the TTL is a decimal string; empty (or
+  // absent) means the deployment has no file TTL.
   fileTtlDays: z
     .union([
       z.literal("").transform(() => null),
@@ -23,13 +22,17 @@ export const AppConfigSchema = z.object({
 
 export type AppConfig = z.infer<typeof AppConfigSchema>
 
-export const fetchConfig = async (): Promise<AppConfig> => {
-  const res = await fetch("/_config.json")
-  if (!res.ok) {
-    throw new Error(`GET /_config.json responded with ${res.status}`)
-  }
-  return AppConfigSchema.parse(await res.json())
-}
+// A malformed or missing value is a deployment mistake, not a runtime
+// condition, so this throws rather than falling back to a default.
+export const readConfig = (
+  env: Record<string, string | undefined> = import.meta.env,
+): AppConfig =>
+  AppConfigSchema.parse({
+    oidcIssuer: env["VITE_KURA_OIDC_ISSUER"],
+    oidcClientId: env["VITE_KURA_OIDC_CLIENT_ID"],
+    s3Endpoint: env["VITE_KURA_S3_ENDPOINT"],
+    fileTtlDays: env["VITE_KURA_FILE_TTL_DAYS"] ?? "",
+  })
 
 const ConfigContext = createContext<AppConfig | null>(null)
 

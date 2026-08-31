@@ -10,31 +10,21 @@
 #   host uid (w3ddbjld = 2227) にマップされる必要がある。
 #   * seaweedfs: image が uid 1000 で走る -> `userns_mode: keep-id:uid=1000` で
 #     container 内 uid 1000 = host uid w3ddbjld にマップ
-#   * nginx: worker default uid 101 も subuid range に落ちる -> `user root;` に
-#     置換する docker-entrypoint.d/ init script を bind
-#   * ops / kura-init: container 内 root で走る (default) → host w3ddbjld として
+#   * web / ops: container 内 root で走る (default) → host w3ddbjld として
 #     Lustre を触れる。userns 追加は不要
-# - Lustre は chown を拒否する (subuid target)。kura-init は chmod 0777 に切り替え
-#   済み (base compose.yml)
 #
 # label=disable は SELinux 環境向けの慣習 (a012 の Ubuntu は SELinux 無効なので
 # 実害なし、他 DDBJ サービスと足並みを揃える)。
 
 services:
-  kura-init:
-    security_opt:
-      - label=disable
-
   seaweedfs:
     userns_mode: "keep-id:uid=1000,gid=1000"
     security_opt:
       - label=disable
 
-  nginx:
+  web:
     security_opt:
       - label=disable
-    volumes:
-      - ./nginx/05-strip-user-directive.sh:/docker-entrypoint.d/05-strip-user-directive.sh:ro
 
   ops:
     security_opt:

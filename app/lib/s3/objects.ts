@@ -92,8 +92,7 @@ export const deleteEmptyDirectory = async (s3: S3Client, bucket: string, prefix:
 }
 
 // Server-side copy. TaggingDirective=COPY / MetadataDirective=COPY inherit
-// from the source, so the public tag ("kura-public=true") survives rename /
-// move and objects don't silently go private.
+// from the source, so tags a user set through a CLI survive rename / move.
 export const copyObject = async (
   s3: S3Client,
   bucket: string,

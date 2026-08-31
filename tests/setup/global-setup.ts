@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -33,15 +33,15 @@ const compose = (args: string[], env: NodeJS.ProcessEnv) => {
 const setup = async (project: TestProject) => {
   const testEnv = readEnvFile(join(repoRoot, "env.test"))
 
-  // The nginx service bind-mounts build/client (SPA build output); create it
-  // so docker does not make a root-owned directory when tests run pre-build.
+  // The web service bind-mounts build/ (SPA build output) and refuses to
+  // start without an index.html, but the suite must run before a build
+  // exists. Create the directory (so docker does not make a root-owned one)
+  // and drop in a placeholder when there is no real build.
   mkdirSync(join(repoRoot, "build", "client"), { recursive: true })
-
-  // Audit log directory (KURA_LOG_DIR in env.test). Date-stamped log paths
-  // are opened by the nginx worker (uid 101), which needs write access.
-  const logDir = join(repoRoot, "tests", "setup", ".logs")
-  mkdirSync(logDir, { recursive: true })
-  chmodSync(logDir, 0o777)
+  const indexHtml = join(repoRoot, "build", "client", "index.html")
+  if (!existsSync(indexHtml)) {
+    writeFileSync(indexHtml, "<!doctype html>\n<title>kura</title>\n")
+  }
 
   const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true })
   const jwk = { ...(await exportJWK(publicKey)), kid: "kura-test", alg: "RS256", use: "sig" }
@@ -69,7 +69,7 @@ const setup = async (project: TestProject) => {
   project.provide("oidcIssuer", testEnv["KURA_OIDC_ISSUER"]!)
   project.provide("oidcClientId", testEnv["KURA_OIDC_CLIENT_ID"]!)
   project.provide("s3Endpoint", `http://localhost:${testEnv["KURA_S3_PORT"]}`)
-  project.provide("publicBase", `http://localhost:${testEnv["KURA_HTTP_PORT"]}`)
+  project.provide("spaBase", `http://localhost:${testEnv["KURA_HTTP_PORT"]}`)
   project.provide("rootAccessKey", secrets.KURA_ROOT_ACCESS_KEY)
   project.provide("rootSecretKey", secrets.KURA_ROOT_SECRET_KEY)
 
@@ -90,7 +90,7 @@ declare module "vitest" {
     oidcIssuer: string
     oidcClientId: string
     s3Endpoint: string
-    publicBase: string
+    spaBase: string
     rootAccessKey: string
     rootSecretKey: string
   }

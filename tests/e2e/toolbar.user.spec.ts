@@ -53,33 +53,6 @@ test.describe("TOOLBAR", () => {
     await expect(getRow(page, name)).toBeVisible()
   })
 
-  test("S-TOOLBAR-03: lens 公開中 で公開 file のみに絞る", async ({ page }) => {
-    const a = uniqueName("tb03-A")
-    const b = uniqueName("tb03-B")
-    await page.goto(scopeBrowseUrl())
-    await uploadTextFile(page, a, "a")
-    await uploadTextFile(page, b, "b")
-
-    // publish file A only via ShareModal(pub)
-    await getRow(page, a).locator(".pubbtn").click()
-    const shareModal = page.getByRole("dialog", { name: "ファイルを公開" })
-    await expect(shareModal).toBeVisible()
-    await shareModal.getByRole("button", { name: "公開する" }).click()
-    await expect(shareModal.locator(".flist .tag.ok")).toHaveText("完了", { timeout: 15_000 })
-    await shareModal.getByRole("button", { name: "閉じる" }).click()
-
-    await expect(getRow(page, a).locator(".c-pub .tag.ok")).toHaveText("公開中", { timeout: 10_000 })
-
-    const publicChip = page.locator(".lens").getByRole("button", { name: /公開中/ })
-    await publicChip.click()
-    await expect(publicChip).toHaveAttribute("aria-pressed", "true")
-    // 非選択 chip は aria-pressed 属性を持たない (chip.tsx: undefined when inactive)
-    await expect(page.locator(".lens").getByRole("button", { name: /すべて/ })).not.toHaveAttribute("aria-pressed", "true")
-
-    await expect(getRow(page, a)).toBeVisible()
-    await expect(getRow(page, b)).toHaveCount(0)
-  })
-
   test("S-TOOLBAR-04: lens 期限つき で presigned のみ", async ({ page }) => {
     const name = uniqueName("tb04")
     await page.goto(scopeBrowseUrl())

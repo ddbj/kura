@@ -5,19 +5,9 @@ export { dirName, entryName, keyToUrlPath, parentPrefix, prefixToSegments, prefi
 export { abortPendingUpload, listPendingUploads, listUploadedParts, type PendingUpload, type UploadedPart } from "./multipart"
 export { copyObject, deleteEmptyDirectory, deleteObject, deleteObjects, type DeleteObjectsResult, type DirectoryPage, ensureOwnBucket, type FileEntry, listAllUnderPrefix, listDirectory, presignDownloadUrl, renameObject } from "./objects"
 export { type PresignedShare, type PresignMethod, presignShareUrl } from "./presign"
-export { publicUrl } from "./public-url"
 export { DEFAULT_QUOTA_BYTES, listBucketTotalBytes } from "./quota"
 export { planResume, type PlanResumeResult, type ResumePlan, resumeUpload } from "./resume"
 export { assumeRoleWithToken, type StsCredentials, USER_ROLE_ARN } from "./sts"
-export {
-  applyPublicState,
-  beginPublicStateChange,
-  revertPublicStateOnFailure,
-  tagQueryKey,
-  tagQueryOptions,
-  useObjectPublicFlags,
-} from "./tag-cache"
-export { getObjectIsPublic, isPublicTagging, publishObject, unpublishObject } from "./tags"
 export { computePartSize, type RunningUpload, startUpload, type UploadProgress } from "./upload"
 export { accessTokenForDuration, freshAccessToken, useS3 } from "./use-s3"
 export { ResumeMismatchError } from "./verify"

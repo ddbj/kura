@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react"
 import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "react-oidc-context"
@@ -9,8 +9,6 @@ import { useConfig } from "~/lib/config"
 import { formatBytes } from "~/lib/format"
 import {
   abortPendingUpload,
-  applyPublicState,
-  beginPublicStateChange,
   DEFAULT_QUOTA_BYTES,
   dirName,
   ensureOwnBucket,
@@ -24,10 +22,6 @@ import {
   prefixToSegments,
   prefixToUrlPath,
   presignDownloadUrl,
-  publicUrl,
-  revertPublicStateOnFailure,
-  unpublishObject,
-  useObjectPublicFlags,
 } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
 import { listSessionPresigned, type SessionPresigned } from "~/lib/session-presigned"
@@ -91,7 +85,7 @@ const AuthenticatedBrowse = ({ prefix }: Props) => {
 
 type SortKey = "name" | "size" | "updated"
 type SortDir = "asc" | "desc"
-type Lens = "all" | "public" | "timed"
+type Lens = "all" | "timed"
 
 const formatShortDate = (d: Date): string => {
   const mm = String(d.getMonth() + 1).padStart(2, "0")
@@ -188,8 +182,6 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     [directory.data?.files],
   )
   const dirs = useMemo(() => directory.data?.dirs ?? [], [directory.data?.dirs])
-  const fileKeys = useMemo(() => files.map((f) => f.key), [files])
-  const publicFlags = useObjectPublicFlags(s3, bucket, fileKeys)
 
   // Session-local presigned URL log fuels the "期限つき" lens (design_handoff #1).
   // The 30 s tick only exists to expire rows past their `expiresAt`; if the log
@@ -226,11 +218,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set())
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null)
   const [uploadMenuOpen, setUploadMenuOpen] = useState<"header" | "empty" | null>(null)
-  const [share, setShare] = useState<
-    | { targets: { bucket: string; key: string; name: string; size: number }[]; mode: "pub" | "temp" }
-    | null
-  >(null)
-  const [deleteTargets, setDeleteTargets] = useState<{ bucket: string; key: string; name: string; size: number; isPublic?: boolean }[] | null>(null)
+  const [share, setShare] = useState<{ bucket: string; key: string; name: string; size: number }[] | null>(null)
+  const [deleteTargets, setDeleteTargets] = useState<{ bucket: string; key: string; name: string; size: number }[] | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [expandedRows, setExpandedRows] = useState<ReadonlySet<string>>(new Set())
@@ -330,10 +319,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     const filtered = files.filter((f) => {
       const name = entryName(f.key).toLowerCase()
       if (search !== "" && !name.includes(search.toLowerCase())) return false
-      const isPub = publicFlags.get(f.key) === true
-      const isPres = presignedByKey.has(f.key)
-      if (lens === "public" && !isPub) return false
-      if (lens === "timed" && !isPres) return false
+      if (lens === "timed" && !presignedByKey.has(f.key)) return false
 
       return true
     })
@@ -348,9 +334,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     })
 
     return sorted
-  }, [files, publicFlags, presignedByKey, search, lens, sort])
+  }, [files, presignedByKey, search, lens, sort])
 
-  const publicCount = files.filter((f) => publicFlags.get(f.key) === true).length
   const presignedCount = presignedList.length
   const totalCount = files.length + dirs.length
 
@@ -404,11 +389,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   }
 
   const copyShareUrl = async (key: string) => {
-    const isPub = publicFlags.get(key) === true
-    const presigned = presignedByKey.get(key)
-    const url = isPub
-      ? publicUrl(config.publicBase, bucket, key)
-      : presigned?.url
+    const url = presignedByKey.get(key)?.url
     if (url === undefined) return
     try {
       await navigator.clipboard.writeText(url)
@@ -419,24 +400,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     }
   }
 
-  const unpublish = useMutation({
-    mutationFn: async (key: string) => {
-      const changeToken = beginPublicStateChange(bucket, key)
-      try {
-        await unpublishObject(s3, bucket, key)
-        await applyPublicState(queryClient, bucket, key, false, changeToken)
-      } catch (err) {
-        await revertPublicStateOnFailure(queryClient, bucket, key, changeToken)
-        throw err
-      }
-    },
-    onError: (err) => {
-      const message = err instanceof Error ? err.message : String(err)
-      setFlash({ tone: "red", message: `公開停止に失敗しました: ${message}` })
-    },
-  })
-
-  const openShare = (keys: string[], mode: "pub" | "temp" = "pub") => {
+  const openShare = (keys: string[]) => {
     const targets = keys.flatMap<{ bucket: string; key: string; name: string; size: number }>((k) => {
       const f = files.find((x) => x.key === k)
       if (f === undefined) return []
@@ -444,15 +408,15 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
       return [{ bucket, key: f.key, name: entryName(f.key), size: f.size ?? 0 }]
     })
     if (targets.length === 0) return
-    setShare({ targets, mode })
+    setShare(targets)
   }
 
   const openDelete = (keys: string[]) => {
-    const targets = keys.flatMap<{ bucket: string; key: string; name: string; size: number; isPublic?: boolean }>((k) => {
+    const targets = keys.flatMap<{ bucket: string; key: string; name: string; size: number }>((k) => {
       const f = files.find((x) => x.key === k)
       if (f === undefined) return []
 
-      return [{ bucket, key: f.key, name: entryName(f.key), size: f.size ?? 0, isPublic: publicFlags.get(k) === true }]
+      return [{ bucket, key: f.key, name: entryName(f.key), size: f.size ?? 0 }]
     })
     if (targets.length === 0) return
     setDeleteTargets(targets)
@@ -534,10 +498,10 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const segHref = (idx: number): string => {
     const upTo = segments.slice(0, idx + 1)
 
-    return `/_browse/${prefixToUrlPath(`${upTo.join("/")}/`)}/`
+    return `/browse/${prefixToUrlPath(`${upTo.join("/")}/`)}/`
   }
   const dirHref = (dirPrefix: string): string =>
-    `/_browse/${prefixToUrlPath(dirPrefix)}/`
+    `/browse/${prefixToUrlPath(dirPrefix)}/`
 
   // Pending upload resumption. Selecting a matching file plans the resume
   // against SeaweedFS's part list; the transfers layer runs the rest.
@@ -695,9 +659,6 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           <Chip active={lens === "all"} onClick={() => setLens("all")}>
             すべて <span className="num">{totalCount}</span>
           </Chip>
-          <Chip active={lens === "public"} onClick={() => setLens("public")}>
-            公開中 <span className="num">{publicCount}</span>
-          </Chip>
           <Chip active={lens === "timed"} onClick={() => setLens("timed")}>
             期限つき <span className="num">{presignedCount}</span>
           </Chip>
@@ -765,7 +726,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
               <b>{selection.size}件を選択中</b>
               <Button kind="ghost" size="sm" onClick={clearSelection}>選択解除</Button>
               <span style={{ marginLeft: "auto" }} />
-              <Button kind="po" size="sm" onClick={() => openShare([...selection])}>公開する</Button>
+              <Button kind="po" size="sm" onClick={() => openShare([...selection])}>リンクを発行</Button>
               <Button kind="do" size="sm" onClick={() => openDelete([...selection])}>削除</Button>
             </div>
           )}
@@ -931,16 +892,14 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                     const key = file.key
                     const name = entryName(key)
                     if (name === ".keep") return null
-                    const isPub = publicFlags.get(key) === true
                     const presigned = presignedByKey.get(key)
                     const isSelected = selection.has(key)
                     const isMenuOpen = openRowMenu === key
-                    const canExpand = isPub || presigned !== undefined
+                    const canExpand = presigned !== undefined
                     const isExpanded = canExpand && expandedRows.has(key)
                     const rowClass = cn("row sel", {
                       selected: isSelected,
-                      public: isPub && !isSelected && isExpanded,
-                      presigned: !isPub && presigned !== undefined && !isSelected && isExpanded,
+                      presigned: canExpand && !isSelected && isExpanded,
                       expandable: canExpand,
                       expanded: isExpanded,
                     })
@@ -966,11 +925,9 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                             ) : null}
                           </div>
                           <div className="c-pub">
-                            {isPub
-                              ? <Tag tone="ok" dot>公開中</Tag>
-                              : presigned !== undefined
-                                ? <Tag tone="warn"><Icon name="clock" size={11} />期限つき</Tag>
-                                : null}
+                            {presigned === undefined
+                              ? null
+                              : <Tag tone="warn"><Icon name="clock" size={11} />期限つき</Tag>}
                           </div>
                           <div className="c-size">{file.size === undefined ? "—" : formatBytes(file.size)}</div>
                           <div className="c-date">
@@ -984,13 +941,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                               )}
                           </div>
                           <div className="c-act">
-                            {isPub
-                              ? (
-                                <Button kind="stop" size="sm" className="pubbtn" onClick={() => unpublish.mutate(key)}>
-                                  公開停止
-                                </Button>
-                              )
-                              : <Button kind="po" size="sm" className="pubbtn" onClick={() => openShare([key])}>公開する</Button>}
+                            <Button kind="po" size="sm" className="pubbtn" onClick={() => openShare([key])}>リンクを発行</Button>
                             <IconButton
                               icon="more"
                               ariaLabel={`${name} の操作`}
@@ -1031,15 +982,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                             ) : null}
                           </div>
                         </div>
-                        {isPub && isExpanded ? (
-                          <div className="pubpanel">
-                            <div className="pp-top">
-                              <span className="lbl">公開URL — 認証なしで誰でもダウンロードできます</span>
-                            </div>
-                            <LinkBar url={publicUrl(config.publicBase, bucket, key)} tone="ok" copyLabel="コピー" copiedLabel="コピー済み" />
-                          </div>
-                        ) : null}
-                        {presigned !== undefined && !isPub && isExpanded ? (
+                        {presigned !== undefined && isExpanded ? (
                           <div className="presignpanel">
                             <div className="pp-top">
                               <span className="lbl" style={{ color: "var(--warnFg)" }}>
@@ -1084,8 +1027,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           // React does not observe, so nudge the memo here.
           setPresignedTick((v) => v + 1)
         }}
-        targets={share?.targets ?? []}
-        initialMode={share?.mode ?? "pub"}
+        targets={share ?? []}
       />
 
       <DeleteModal

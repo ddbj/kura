@@ -94,8 +94,6 @@ export const putText = (s3: S3Client, bucket: string, key: string, body: string)
     new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "text/plain" }),
   )
 
-export const publicUrl = (user: string, path: string) => `${inject("publicBase")}/${user}/${path}`
-
 // Runs weed shell commands inside the test SeaweedFS container. Topology
 // commands (volume.vacuum etc.) silently no-op without the exclusive lock,
 // so every batch runs wrapped in lock / unlock.

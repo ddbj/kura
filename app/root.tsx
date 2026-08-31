@@ -16,7 +16,7 @@ import { AuthProvider } from "react-oidc-context"
 import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError } from "react-router"
 
 import { oidcProviderProps } from "~/lib/auth"
-import { ConfigProvider, fetchConfig } from "~/lib/config"
+import { ConfigProvider, readConfig } from "~/lib/config"
 import { LangProvider } from "~/lib/i18n"
 import { createQueryClient } from "~/lib/query"
 import { OverlayProviders } from "~/shell"
@@ -24,7 +24,9 @@ import { LoadingView } from "~/ui"
 
 import type { Route } from "./+types/root"
 
-export const clientLoader = async () => fetchConfig()
+// Runs through the router so a malformed build-time config surfaces in the
+// ErrorBoundary instead of a blank page.
+export const clientLoader = () => readConfig()
 
 export const Layout = ({ children }: { children: ReactNode }) => (
   <html lang="ja">

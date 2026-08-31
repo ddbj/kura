@@ -17,7 +17,6 @@ Playwright を「起動済み dev compose (`docker compose --env-file env.dev --
 
 | Domain | 接頭辞 | 説明 |
 |---|---|---|
-| CONFIG | `S-CONFIG` / `E-CONFIG` | nginx の非 SPA endpoint (`/healthz`, `/_config.json`, `/_assets/*`) と SPA fallback |
 | AUTH | `S-AUTH` / `E-AUTH` | OIDC sign-in / callback / logout / silent renew / エラー |
 | SHELL | `S-SHELL` / `E-SHELL` | Header (wordmark, UserMenu, LangSwitch) と i18n の効果範囲 |
 | BROWSE | `S-BROWSE` / `E-BROWSE` | breadcrumb / directory 遷移 / SPA URL 直打ち / empty state / `.keep` 非表示 |
@@ -25,10 +24,8 @@ Playwright を「起動済み dev compose (`docker compose --env-file env.dev --
 | UPLOAD | `S-UPLOAD` / `E-UPLOAD` | file / folder / dropdown / drag & drop / cancel / conflict / retry |
 | RESUME | `S-RESUME` / `E-RESUME` | offline 中断 → pending 一覧復元 → 再開 / 破棄 / mismatch reject |
 | DOWNLOAD | `S-DOWNLOAD` / `E-DOWNLOAD` | row menu の「ダウンロード」経路 (byte 同一) |
-| PUBLISH | `S-PUBLISH` / `E-PUBLISH` | 公開する / 公開を停止 / 公開バッジ / pubpanel / コピー / bulk / 実 200/404 |
-| PRESIGN | `S-PRESIGN` / `E-PRESIGN` | 公開する → mode 切替 (`期限つき`) / TTL 選択 / 発行 / expiresAt / 実 GET 200 |
-| FILEOPS | `S-FILEOPS` / `E-FILEOPS` | rename / move / copy / delete (single/multi) / folder rename・move・delete / new folder / 公開中 file の rename |
-| PUBSERVE | `S-PUBSERVE` / `E-PUBSERVE` | 未認証で公開 URL 直叩き / 特殊文字 / Range / audit log 実観測 |
+| PRESIGN | `S-PRESIGN` / `E-PRESIGN` | ShareModal / TTL 選択 / 発行 / expiresAt / 未認証での実 GET 200 |
+| FILEOPS | `S-FILEOPS` / `E-FILEOPS` | rename / move / copy / delete (single/multi) / folder rename・move・delete / new folder |
 | FLOW | `S-FLOW` / `E-FLOW` | 複数 Domain を跨ぐ user flow |
 
 ## 3. 共通前提 / 環境
@@ -36,12 +33,11 @@ Playwright を「起動済み dev compose (`docker compose --env-file env.dev --
 ### 3.1 対象環境
 
 - **baseURL**: `http://localhost:28080` (`playwright.config.ts` が `KURA_E2E_BASE_URL` を優先)。
-- **S3 endpoint**: `http://localhost:28333` (`KURA_S3_ENDPOINT`)。SPA から直接叩き、内部 nginx は proxy しない。
+- **S3 endpoint**: `http://localhost:28333` (`KURA_S3_ENDPOINT`)。SPA から直接叩く。SPA 配信 server は経由しない。
 - **`.env`**: gitignored。`E2E_USERNAME` / `E2E_PASSWORD` は必須。
-- **globalSetup** (`tests/e2e/global-setup.ts`): 実行冒頭で以下 3 プローブを直列に走らせ、いずれか失敗で `throw` して全 test を即 abort する:
-  1. `GET ${baseURL}/healthz` → 200 body `ok\n`
-  2. `GET ${baseURL}/_config.json` → 200 + JSON parse 成功 + 5 key 存在
-  3. `GET ${oidcIssuer}/.well-known/openid-configuration` → 200
+- **globalSetup** (`tests/e2e/global-setup.ts`): 実行冒頭で以下 2 プローブを直列に走らせ、いずれか失敗で `throw` して全 test を即 abort する:
+  1. `GET ${baseURL}` → 200 + `content-type: text/html` (SPA 配信)
+  2. `GET ${oidcIssuer}/.well-known/openid-configuration` → 200。issuer は SPA の bundle に焼き込まれていて実行時には取り出せないため、dev build と同じ `env.dev` の `KURA_OIDC_ISSUER` から読む
 - globalSetup は `KURA_E2E_RUN_ID` を確定する: `process.env.KURA_E2E_RUN_ID ?? crypto.randomBytes(8).toString("hex")`。以降 helper が読む。CI で `${{ github.run_id }}` を渡す場合は上書き優先。
 - **`tests/e2e/global-setup.ts`** の存在は `playwright.config.ts` の `globalSetup` オプションで設定。
 
@@ -113,7 +109,6 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 | `KURA_E2E_BASE_URL` | Playwright の baseURL 上書き | 任意 | `http://localhost:28080` |
 | `KURA_E2E_S3_ENDPOINT` | S3 API endpoint (SDK helper 用) | 任意 | `http://localhost:28333` |
 | `KURA_E2E_RUN_ID` | run 識別子 (CI で固定推奨) | 任意 | globalSetup で自動生成 |
-| `KURA_LOG_DIR` | audit log 実観測用 dir | 任意 | `./logs` |
 | `KURA_E2E_KEEP_UPLOADS` | 掃除を無効化 (debug 用) | 任意 | 未設定 |
 | `KURA_E2E_TRACE_UPLOAD` | CI で trace artifact upload を許可 (default false) | 任意 | `false` |
 
@@ -143,10 +138,8 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 | Row selection checkbox | `page.getByRole("checkbox", { name: filename + " を選択" })` |
 | Row kebab | `page.getByRole("button", { name: filename + " の操作" })` |
 | Row menu items | `page.locator(".rowmenu").getByRole("menuitem", { name })` |
-| Row publish/unpublish button | row scope 内 `.pubbtn` (text `公開する` / `公開を停止`) |
-| Public badge | row scope 内 `.c-pub .tag.ok` (text `公開中`) |
+| Row share button | row scope 内 `.pubbtn` (text `リンクを発行`) |
 | Presigned badge | row scope 内 `.c-pub .tag.warn` (text `期限つき`) |
-| Pub panel URL | row 展開後 `.pubpanel .linkbar .u` |
 | Presign panel URL | row 展開後 `.presignpanel .linkbar .u` |
 | LinkBar copy button | 対象 panel 内 `.linkbar .cp` (text `コピー` / `コピー済み`) |
 | Bulk bar (file list) | `page.locator(".row.sel").locator("xpath=..").locator(".bulkbar").getByRole("button", { name })` (pending-uploads card 内の `.bulkbar` と衝突するため、必ず file list scope を絞る。実務上は `page.locator(".card:not(:has([data-testid=\"pending-uploads\"])) .bulkbar")` でも可) |
@@ -155,10 +148,9 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 | Pending row 再開 | 上記内 `getByRole("button", { name: "再開" })` |
 | Pending row 破棄 | 上記内 `getByRole("button", { name: "破棄" })` |
 | Modal | `page.getByRole("dialog", { name })` (name は `<b id>` の text) |
-| Modal confirm submit | modal scope 内 `getByRole("button", { name: submitLabel })` (`削除` / `変更` / `作成` / `コピー` / `移動` / `公開する` / `リンクを発行`) |
+| Modal confirm submit | modal scope 内 `getByRole("button", { name: submitLabel })` (`削除` / `変更` / `作成` / `コピー` / `移動` / `リンクを発行`) |
 | Modal cancel | modal scope 内 `getByRole("button", { name: "キャンセル" })` |
 | Modal name-entry input | modal 内 `getByLabel(inputLabel)` (`新しい名前` / `コピー後の名前` / `フォルダ名`) |
-| ShareModal mode 切替 | modal 内 `getByRole("tablist", { name: "共有モード" }).getByRole("tab", { name })` (`公開` / `期限つき`) |
 | ShareModal TTL 選択 | modal 内 `getByRole("tablist", { name: "有効期限" }).getByRole("tab", { name })` (`15分` / `1時間` / `12時間`) |
 | Upload tray | `page.locator(".upcard")` (rows `.urow`) |
 | Drop overlay | `page.locator(".dropov")` (text `ここにドロップしてアップロード`) |
@@ -170,7 +162,6 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 
 **注記**:
 - MoveModal / FolderMoveModal に「移動先」`<input>` は無い (`<div className="lbl">移動先</div>` + 表示 span、宛先は `選ぶ…` → FolderPicker で選ぶ)。
-- 公開切替は `role=switch` ではなく Button + Tag。`.pubbtn` を text で切り替える。
 - Focus assertion は `await expect(locator).toBeFocused()` に統一 (`document.activeElement` を evaluate しない)。
 - SortButton の方向は class `.desc` のみで、`aria-sort` は無い。可能なら実行前後の row 順を比較して判定。
 
@@ -207,12 +198,11 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
     5. `clearClientPrefs(page)`
   - `clearClientPrefs(page)` → `page.evaluate(() => { localStorage.removeItem("kura.lang"); sessionStorage.removeItem("kura.presigned"); })`
   - `createFolderViaSdk(page, path)` (`.keep` marker を PutObject する SDK helper。`S-BROWSE-06` 等で使う)
-  - `expandRow(page, filename)` → row の `.c-size` セル (非 interactive) をクリックして `.pubpanel` or `.presignpanel` を可視化 (S-PUBLISH-01 / S-FILEOPS-10 で必須)
+  - `expandRow(page, filename)` → row の `.c-size` セル (非 interactive) をクリックして `.presignpanel` を可視化 (S-PRESIGN-01 で必須)
 - Modal
-  - `openPresignModalFromRow(page, filename)` → row の `公開する` を click → ShareModal open (`ファイルを公開`) 待ち → `共有モード` tablist の `期限つき` tab click → modal title が `期限つきリンクを発行` に変わるのを待つ → modal Locator を返す
-- Public / Presign
-  - `getAnon(baseURL, urlPath)` → `browser.newContext({ storageState: undefined })` で fresh anon context を作り `context.request.get(urlPath)` を叩き、response を返す。呼び出し側の `await using` で context.close()
-  - `waitPublicUrl200(baseURL, urlPath, expectedBytes?)` / `waitPublicUrl404(baseURL, urlPath)` → 上記経由で 200/404 を assertion (byte 比較 optional)
+  - `openPresignModalFromRow(page, filename)` → row の `リンクを発行` を click → ShareModal (`期限つきリンクを発行`) の可視化を待って modal Locator を返す
+- Anon
+  - `getAnon(browser, urlPath)` → `browser.newContext()` で fresh anon context を作り `context.request.get(urlPath)` を叩き、context と response を返す。呼び出し側が `finally` で `context.close()`
 - Resume / retry 補助 (route intercept は closure counter で per-test 独立化。route は context に紐づくので `afterEach` で `page.unroute` を呼ぶ)
   - `stallUploadPart(page, { failCount = 1 } = {})`:
     ```
@@ -242,13 +232,11 @@ projects:
 
 - **`chromium-user-first-visit` は不要** (S-AUTH-04 が「HeadBucket 発火のみ pin、CreateBucket は integration に譲る」を採用したため、fresh user は不要)。
 - `sessionStoragePage` fixture (`beforeEach` で `addInitScript` を注入する custom fixture) は `chromium-user` に適用。実装は `tests/e2e/fixtures.ts`。
-- **PUBSERVE Domain は `chromium-user` project に置く** (`pubserve.user.spec.ts`)。理由: fresh anon context を叩くには先に P-USER で publish 済 object を作る必要があり、setup を `chromium-user` の authenticated context で行い、assertion は test 内で `browser.newContext({ storageState: undefined })` を作って anon 相当で叩く形が最も直截的。`chromium-anon` の Password Grant 対応は不要。
 
 ### 5.3 Domain と spec file の対応
 
 | Domain | spec file | project |
 |---|---|---|
-| CONFIG | `config.spec.ts` | chromium-anon |
 | AUTH (anon) | `auth.spec.ts` | chromium-anon |
 | AUTH (user) | `auth.user.spec.ts` | chromium-user |
 | SHELL | `shell.user.spec.ts` | chromium-user |
@@ -257,69 +245,11 @@ projects:
 | UPLOAD | `upload.user.spec.ts` | chromium-user |
 | RESUME | `resume.user.spec.ts` | chromium-user |
 | DOWNLOAD | `download.user.spec.ts` | chromium-user |
-| PUBLISH | `publish.user.spec.ts` | chromium-user |
 | PRESIGN | `presign.user.spec.ts` | chromium-user |
 | FILEOPS | `fileops.user.spec.ts` | chromium-user |
-| PUBSERVE | `pubserve.user.spec.ts` | chromium-user (setup で publish 済 object を作り、test 内 fresh anon context で叩く) |
 | FLOW | `flow.user.spec.ts` | chromium-user |
 
 `test.describe` を Domain 名、`test` 名を `S-DOMAIN-XX: ...` の書式で ID と 1:1。
-
----
-
-## CONFIG Domain
-
-### S-CONFIG-01: `/healthz` が 200 `ok\n` を返す
-
-- **ペルソナ**: P-ANON
-- **前提**: dev compose が globalSetup 通過
-- **手順**:
-  1. `page.request.get("/healthz")` を叩く
-- **期待**:
-  - status 200
-  - body が `ok\n`
-- **備考**: nginx `location = /healthz` (`nginx/kura.conf.template:46-48`)。
-
-### S-CONFIG-02: `/_config.json` は SPA runtime 設定を JSON で返す
-
-- **ペルソナ**: P-ANON
-- **手順**:
-  1. `page.request.get("/_config.json")`
-- **期待**:
-  - status 200、`Content-Type` が `application/json`
-  - JSON に `oidcIssuer` / `oidcClientId` / `s3Endpoint` / `publicBase` / `fileTtlDays` の 5 key があり、すべて string 型
-  - `oidcIssuer` が非空 (env に注入されている)、`oidcClientId` も非空、`fileTtlDays` は空文字 (dev では TTL 無効) または `[1-9][0-9]*` の数字 string
-- **備考**: 具体値 (`kura-dev`) を assertion で hardcode しない。dev / staging / production いずれでも通る shape 検証に留める。
-
-### S-CONFIG-03: SPA route の URL 直打ちで index.html が 200 で返る
-
-- **ペルソナ**: P-ANON
-- **手順**:
-  1. `/_browse/foo/bar/` を直接 `page.request.get`
-  2. `/_auth/callback?code=x&state=y` を直接 `page.request.get`
-- **期待**:
-  - どちらも 200 / `<title>kura</title>` を body に含む / `Cache-Control: no-cache` / `Content-Type: text/html`
-- **備考**: SPA が実際に routing することは AUTH / BROWSE で追検。
-
-### E-CONFIG-01: nginx location にマッチしない path は 404
-
-- **ペルソナ**: P-ANON
-- **手順**:
-  1. `page.request.get("/" + e2eUsername() + "/")` (自 bucket、path 部空)
-  2. `page.request.get("/username_that_is_not_public/anything.txt")` (`_` を含む → username regex にマッチしない)
-- **期待**:
-  - どちらも 404
-- **備考**:
-  - 手順 1 の根拠: nginx `location ~ ^/(?<kura_user>[a-z0-9][a-z0-9.-]{1,62})(?<kura_path>.+)$` の path 部 `.+` に空文字がマッチしない (`nginx/kura.conf.template:86`)。
-  - 手順 2 の根拠: username 部 `[a-z0-9][a-z0-9.-]{1,62}` に `_` を含む文字列がマッチしない。
-
-### E-CONFIG-02: `_` 始まりのパスは 404
-
-- **ペルソナ**: P-ANON
-- **手順**:
-  1. `page.request.get("/_notaroute/anything.txt")`
-- **期待**: status 404
-- **備考**: `_` は username regex の先頭 `[a-z0-9]` にマッチしない。SPA fallback (`/_browse`, `/_auth`, `/_assets`, `/_config.json`) は明示的な location で吸収されるが、それ以外の `/_...` は絶対に配信しない。
 
 ---
 
@@ -613,17 +543,6 @@ projects:
   - `.empty` scope 内 `h2` の text `「zzz-no-match-...」に一致するファイルはありません`
   - `.empty` scope 内 `getByRole("button", { name: "検索をクリア" })` を押す → search box が空、file row 復活
 
-### S-TOOLBAR-03: lens `公開中` で公開 file のみに絞る
-
-- **ペルソナ**: P-USER
-- **手順**:
-  1. 2 file upload、1 file だけ `openShare` → 公開する
-  2. `.lens` の `公開中` chip をクリック
-- **期待**:
-  - clicked chip の `aria-pressed="true"`
-  - 可視 `.row.sel` の全てが `.c-pub .tag.ok` `公開中` を含む
-  - 他 chip (`すべて`, `期限つき`) の `aria-pressed="false"`
-
 ### S-TOOLBAR-04: lens `期限つき` で presigned のみ (self-contained)
 
 - **ペルソナ**: P-USER
@@ -887,133 +806,20 @@ projects:
 
 ---
 
-## PUBLISH Domain
-
-### S-PUBLISH-01: 単一 file を row-inline で公開 → pubpanel 展開 → 公開バッジ
-
-- **ペルソナ**: P-USER
-- **前提**: `pub-${hex}.txt` を upload
-- **手順**:
-  1. row の `.pubbtn` (`公開する`) クリック → ShareModal (`role=dialog`, name `ファイルを公開`) 開く
-  2. modal footer の `公開する` primary button 押す
-  3. modal の `.flist` に `.tag.ok` `完了` 出現待ち → modal footer が `閉じる` に変わる → 押して閉じる
-- **期待**:
-  - 一覧の row に `.c-pub .tag.ok` `公開中` badge
-  - row 内 `.pubbtn` が `公開を停止` にトグル
-  - row を非 interactive エリアクリックで expand → `.pubpanel` に `.linkbar .u` (URL)
-- **備考**: 公開は Button + Tag (switch 無し)。ShareModal 経由が唯一の公開経路。
-
-### S-PUBLISH-02: `.pubpanel` の URL が SPA context 内で GET 200
-
-- **ペルソナ**: P-USER
-- **手順**:
-  1. S-PUBLISH-01 完了後
-  2. `.pubpanel .linkbar .u` の text (URL) を取得
-  3. `page.request.get(url)` を叩く (SPA context、cookie 込み)
-- **期待**:
-  - status 200 (公開 URL は cookie 送っても anonymous 判定)
-- **備考**: byte 一致検証は S-PUBSERVE-01 (fresh anon context) に譲り、ここは「URL が可視化されて叩ける」ことを pin。
-
-### S-PUBLISH-03: `.pubpanel` の コピー button でクリップボードに URL
-
-- **ペルソナ**: P-USER
-- **前提**: `chromium-user` project の `use.permissions = ["clipboard-read", "clipboard-write"]`
-- **手順**:
-  1. `.pubpanel .linkbar .cp` (text `コピー`) を押す
-- **期待**:
-  - button text が `コピー済み` に変わる (1600 ms 内)
-  - `page.evaluate(() => navigator.clipboard.readText())` が URL と一致
-- **備考**: fresh anon context を作る test は permissions が無いが clipboard を使わない、副作用限定。
-
-### S-PUBLISH-04: 公開停止で `公開中` バッジ消失、URL が SPA context 内で 404
-
-- **ペルソナ**: P-USER
-- **手順**:
-  1. S-PUBLISH-01 の続き (row publish 済)
-  2. row の `.pubbtn` (`公開を停止`) 押下 (confirmation なし、即実行)
-  3. `.c-pub` から `公開中` 消失待ち
-  4. 元 URL を `page.request.get` で再取得
-- **期待**:
-  - `公開中` badge 非可視、`.pubbtn` が `公開する` に戻る
-  - GET が 404
-- **備考**: `browse-page.tsx:385-400`。
-
-### S-PUBLISH-05: bulk 公開 (2 件 checkbox 選択 → 公開)
-
-- **ペルソナ**: P-USER
-- **前提**: `bulk1-${hex}.txt`, `bulk2-${hex}.txt` を upload
-- **手順**:
-  1. 各 row の `${name} を選択` checkbox on
-  2. `.bulkbar getByRole("button", { name: "公開する" })` → ShareModal (targets=2)
-  3. modal `公開する` submit
-  4. `.flist` 各行が `完了` に
-  5. modal footer が `閉じる` → 押して閉じる
-- **期待**:
-  - 2 file row に `公開中` badge
-
-### S-PUBLISH-06a: ShareModal で mode 切替 (未発行 → mode swap)
-
-- **ペルソナ**: P-USER
-- **前提**: 1 file select、`.pubbtn` から ShareModal(pub) を開く
-- **手順**:
-  1. tab `期限つき` を選ぶ
-- **期待**:
-  - modal title `期限つきリンクを発行`
-  - `[aria-label="有効期限"]` Segmented 可視 (`15分` / `1時間` / `12時間`、`12時間` が `aria-selected="true"`)
-  - `.flist` の rowStates は初期 (発行前)
-
-### S-PUBLISH-06b: ShareModal で mode 切替 (発行済み → mode swap で state リセット)
-
-- **ペルソナ**: P-USER
-- **前提**: 2 file select、pub mode で **bulk2 key を URL に含む PutObjectTagging のみ** 500 で fulfill (E-PUBLISH-01 と同じ route 記法) → submit → 1 件成功 + 1 件失敗 の rowStates を作る
-- **手順**:
-  1. `page.unroute` で intercept 解除 (後段の retry に影響させない)
-  2. mode を `期限つき` に切替
-- **期待**:
-  - `.flist` の rowStates が空 Map にクリアされ、`.tag.ok` `完了` / `.tag.fail` `失敗` badge が全 row から消えている
-- **備考**: `share-modal.tsx:68-72` の `resetOnModeChange` の完全リセット挙動を pin。key 絞りで並列発火の非決定性を排除。
-
-### E-PUBLISH-01: 混在失敗 → `失敗した N 件を再試行` (multi target)
-
-- **ペルソナ**: P-USER
-- **前提**: 2 file (`bulk1-${hex}`, `bulk2-${hex}`) を upload
-- **手順**:
-  1. `page.route` で **bulk2 の key を URL に含む PutObjectTagging のみ** 500 で fulfill (key で絞ることで並列発火の順序非決定性を排除):
-     ```
-     await page.route((url) => url.pathname.includes(encodeURIComponent(bulk2Key)) && url.search.includes("tagging"), (route) => {
-       if (route.request().method() === "PUT") return route.fulfill({ status: 500 })
-       return route.continue()
-     })
-     ```
-  2. 2 file を bulk 選択 → file list 側の `.bulkbar` `公開する` → ShareModal → `公開する` submit
-  3. `.flist` の bulk1 row = `完了`、bulk2 row = `失敗`
-  4. modal footer button text が `失敗した1件を再試行` (N が数値であることを substring で確認)
-  5. `page.unroute` で intercept 解除
-  6. `失敗した1件を再試行` を押す
-- **期待**:
-  - retry 後 bulk2 row = `完了`
-  - modal 閉じた後、bulk1 & bulk2 両方に `公開中` badge
-- **備考**: `share-modal.tsx:250-269` の rowStates 分岐 (busyBatch / retryTargets) を貫通。presign mode でも同 UI (Non-goals にて言及)。bulk2 の key で URL 絞りをかけないと Promise.all 並列発火で「どちらが 1 件目か」が実行毎に変わる。
-
----
-
 ## PRESIGN Domain
 
-**重要**: SPA に「row menu / bulk bar から直接 temp モードを開く trigger は存在しない**」(`browse-page.tsx` grep で `openShare(_, "temp")` の callsite が 0 件)。したがって全 PRESIGN シナリオは **「row `.pubbtn` (`公開する`) → ShareModal(pub) → `[aria-label="共有モード"]` の `期限つき` tab に切替 → `リンクを発行`」の経路** を採用する。`.pubbtn` を押しても submit しない限り公開は発生しない (副作用ゼロ)。
+ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを発行`) と bulk bar から開く。`openPresignModalFromRow(page, filename)` helper を全 test で使う。
 
-`openPresignModalFromRow(page, filename)` helper を全 test で使う。
-
-### S-PRESIGN-01: row → ShareModal → 期限つき tab → 発行 → badge + panel + byte 一致
+### S-PRESIGN-01: row → ShareModal → 発行 → badge + panel + byte 一致
 
 - **ペルソナ**: P-USER
 - **前提**:
   - `presign01File = uniqueName("presign01")` を `uploadTextFile(page, presign01File, content)` で upload。`content` は 2 KiB 程度、byte 比較用に固定。
-  - 対象 row は未公開・未 presign。
+  - 対象 row はまだ presign していない。
 - **手順**:
   1. `const modal = await openPresignModalFromRow(page, presign01File)`
-     - helper 内: row の `.pubbtn` (`公開する`) → ShareModal (`ファイルを公開`) 開く → `期限つき` tab クリック → title `期限つきリンクを発行` 待ち
-  2. modal 内 tab `期限つき` の `aria-selected="true"` を確認
-  3. `[aria-label="有効期限"]` の default 選択 tab `12時間` が `aria-selected="true"` を確認
+     - helper 内: row の `.pubbtn` (`リンクを発行`) → ShareModal (`期限つきリンクを発行`) の可視化待ち
+  2. `[aria-label="有効期限"]` の default 選択 tab `12時間` が `aria-selected="true"` を確認
   4. modal footer の primary `getByRole("button", { name: "リンクを発行" })` を押す
   5. modal `.flist` の対象 row `.fmeta` に `.tag.ok` `完了` 出現待ち (最大 10s)
   6. 発行行の下 LinkBar `.linkbar .u` から URL を capture、以下を assertion:
@@ -1034,7 +840,7 @@ projects:
 ### S-PRESIGN-02: TTL の 3 tab 切替と banner text の対応
 
 - **ペルソナ**: P-USER
-- **前提**: `openPresignModalFromRow` で temp モードまで到達済、まだ submit していない
+- **前提**: `openPresignModalFromRow` で ShareModal を開いた状態、まだ submit していない
 - **手順**:
   1. `15分` tab クリック → banner text が `リンクは最長で約15分後に切れます` を含む
   2. `1時間` クリック → banner text が `約1時間後` を含む
@@ -1042,10 +848,6 @@ projects:
 - **期待**:
   - 3 tab の `aria-selected` が排他 (1 個 true、他 2 個 false)
   - banner の substring がそれぞれ切り替わる
-
-### E-PRESIGN-01 は削除 (Non-goals §6 で「ShareModal 全体の失敗 → 再試行 UI は E-PUBLISH-01 で担保」に統合)
-
----
 
 ## FILEOPS Domain
 
@@ -1152,27 +954,6 @@ projects:
   - folder row 1 行増える
   - folder に入ると empty state (`.keep` は非表示)
 
-### S-FILEOPS-10: 公開中 file の rename → 旧 URL 404、新 URL 200
-
-- **ペルソナ**: P-USER
-- **前提**: `pub-mv-src-${hex}.txt` を upload + publish
-- **手順**:
-  1. 旧 row を `expandRow(page, "pub-mv-src-${hex}.txt")` で expand → `.pubpanel` 可視化
-  2. `.pubpanel .linkbar .u` から旧 URL を capture (または helper で `publicUrl(publicBase, bucket, key)` を JS 計算 — path 依存を排除)
-  3. row kebab → `名前を変更` → `pub-mv-dst-${hex}.txt` に書き換えて `変更`
-  4. rename 完了後、新 row (`getRow(page, "pub-mv-dst-${hex}.txt")`) を `expandRow` で expand
-  5. `.pubpanel .linkbar .u` から新 URL を capture
-  6. `getAnon(旧 URL)` で status
-  7. `getAnon(新 URL)` で status + byte 一致
-- **期待**:
-  - 旧 URL: status 404
-  - 新 URL: status 200 + upload 内容と一致
-  - 新 row に `.c-pub .tag.ok` `公開中` badge (tag が rename 時に carry over)
-- **備考**:
-  - `publicUrl(publicBase, bucket, key)` は key を URL に埋める → rename で URL が変わる。requirements の「URL はパスをそのまま用いる (不透明化しない)」の完全担保。
-  - `.pubpanel` は `isPub && isExpanded` の 2 条件で render (`browse-page.tsx:928-935`)。publish 直後は展開されていないので expand が必須。
-  - kura の rename 実装は CopyObject + Delete。`CopyObjectCommand` の `TaggingDirective="COPY"` 挙動により `kura-public=true` tag は自動 carry over される (`app/lib/s3/objects.ts` 参照)。
-
 ### E-FILEOPS-01: name 衝突 (rename)
 
 - **ペルソナ**: P-USER
@@ -1224,82 +1005,17 @@ projects:
 
 ---
 
-## PUBSERVE Domain
-
-この Domain は `chromium-user` project (`pubserve.user.spec.ts`) に置く。理由: fresh anon context で公開 URL を叩く前に P-USER で publish 済 object を setup する必要があり、authenticated project 内で SDK 直叩き + fresh anon context 生成 の 2 段構えが最も直截的。
-
-- **setup** (`beforeAll` per spec file): `s3ClientForE2e(page)` を使い、SDK で publish 済 object を用意 (upload + PutObjectTagging with `kura-public=true`)。keys は `uniqueName("pubserve-01")` 等で `e2e/${runId}/` scope に置く。
-- **assertion** (per test): `const anon = await browser.newContext({ storageState: undefined }); await anon.request.get(url)` で fresh anon context 経由の GET。`afterEach` で `anon.close()`。helper `getAnon(url)` が open + close を wrap。
-
-### S-PUBSERVE-01: 公開 tag 有り = 200 + Accept-Ranges + audit log 実観測
-
-- **ペルソナ**: P-ANON
-- **前提**: `beforeAll` で `pubserve-01-${hex}.txt` を upload + publish
-- **手順**:
-  1. fresh context の `page.request.get(publicUrl)`
-  2. `expectAuditLine(needle: encodeURIComponent(key))` で `${KURA_LOG_DIR}/access-<today>.log` を tail (helper が実装可能なら)
-- **期待**:
-  - status 200、body = upload 内容
-  - `Accept-Ranges: bytes` header 存在
-  - audit log にキー入りの行が現れる (実 UA hit を pin、`existingTests.md §4-7`)
-- **備考**: audit log 読み込みは `KURA_LOG_DIR` の bind mount 到達性に依存。到達不可なら test 内で `test.skip(!fs.existsSync(logDir), "audit log dir not mounted")` で soft skip。CI では通常 skip。
-
-### S-PUBSERVE-02: 公開 tag 無し = 404、公開停止直後 = 404
-
-- **ペルソナ**: P-ANON
-- **前提**: publish → unpublish した object
-- **手順**:
-  1. fresh context GET
-- **期待**: status 404
-- **備考**: 情報漏洩防止 (private / 存在なし で同一 404)。
-
-### S-PUBSERVE-03: 特殊文字を含む key の公開配信
-
-- **ペルソナ**: P-ANON
-- **前提**: `pubserve03-${hex}#test space 100%.txt` を publish
-- **手順**:
-  1. fresh context で `context.request.get(encodeURIComponent 済 URL)`
-- **期待**:
-  - status 200 + body 一致
-- **備考**: nginx URI レス proxy_pass の再エスケープ (`nginx/kura.conf.template:112-113`)。integration `public-delivery.test.ts` と 論理重複するが「実 UA HTTP client」経路として 1 本残す。
-
-### S-PUBSERVE-04: Range request で 206
-
-- **ペルソナ**: P-ANON
-- **前提**: `makeMediumBinaryFile(2)` で 2 MiB binary を publish
-- **手順**:
-  1. `context.request.get(url, { headers: { Range: "bytes=0-1023" } })`
-- **期待**:
-  - status 206
-  - `Content-Length: 1024`
-- **備考**: body byte 一致は integration に譲る。E2E は status + Content-Length のみ。
-
-### E-PUBSERVE-01: 存在しない object = 404
-
-- **ペルソナ**: P-ANON
-- **手順**:
-  1. `/${username}/never-existed-${hex}.txt` を GET
-- **期待**: status 404
-
----
-
 ## FLOW Domain
 
-### S-FLOW-01: login → upload → publish → 未認証で URL 200 → unpublish → 未認証で URL 404 → logout
+### S-FLOW-01: login → upload → 期限つきリンク発行 → 未認証で 200 + byte 一致
 
-- **ペルソナ**: P-ANON → P-USER → P-ANON
+- **ペルソナ**: P-USER → P-ANON
 - **手順** (各 `test.step` で段組):
-  1. context 1 fresh で `/` → LoginBox
-  2. login → 認証確立
-  3. `uniqueName("flow01")` を upload
-  4. row `公開する` → ShareModal → `公開する` submit → 完了 → 閉じる
-  5. `.pubpanel .linkbar .u` の URL を取得
-  6. `browser.newContext({ storageState: undefined })` で fresh anon context 2 を作り、`context2.request.get(url)` → 200
-  7. context 1 で row `公開を停止`
-  8. context 2 で 同 URL を再 GET → 404
-  9. context 1 で UserMenu → ログアウト
-  10. context 1 が LoginBox に戻る
-- **期待**: 各段の期待は既存 Domain シナリオ通り
+  1. `uniqueName("flow01")` を upload
+  2. row `リンクを発行` → ShareModal → `リンクを発行` submit → 完了 → 閉じる
+  3. row に `期限つき` badge → `expandRow` → `.presignpanel .linkbar .u` の URL を取得
+  4. `browser.newContext({ storageState: undefined })` で fresh anon context を作り、`context.request.get(url)` → 200 + byte 一致
+- **期待**: 各段の期待は既存 Domain シナリオ通り。logout は S-AUTH-05 が第 2 ユーザーで担保するため、主 test user の SSO session を壊さないようここでは踏まない
 - **備考**: end-to-end smoke test。全 Domain の重要 selector を貫通する monolithic な validation。失敗時 diagnose のため各 step で `page.screenshot()` を artifact に (Playwright の `test.step` で自動)。
 
 ---
@@ -1308,9 +1024,9 @@ projects:
 
 以下は他レイヤで担保され、E2E で書くと重複または不安定になる:
 
-- **filename encoding のバイト透過性の網羅** — integration `public-delivery.test.ts` が固定 (`unicode/percent/space/#/?/+/&/=/(1)~!@` 全パターン)。E2E は代表 (S-DOWNLOAD-02, S-PUBSERVE-03) のみ
+- **filename encoding のバイト透過性の網羅** — key 構築は unit / PBT が網羅する。E2E は代表 (S-DOWNLOAD-02) のみ
 - **IAM 境界の網羅 (他 bucket 拒否 / admin role / audience / exp)** — integration `iam-boundary.test.ts` が固定。SPA に他 bucket 経路が無い
-- **quota reconciler / TTL sweep / multipart sweep / audit rotate の日次挙動** — integration `ops.test.ts` が時間軸込みで固定
+- **quota reconciler / TTL sweep / multipart sweep の日次挙動** — integration `ops.test.ts` が時間軸込みで固定
 - **quota 超過 → PUT 500 → recovery** — integration `quota.test.ts` が実物で担保。UI 側 over-quota banner は unit `browse-page.test.tsx` で
 - **multipart resume ロジック本体 (MD5 / partition / abort)** — integration `upload-resume.test.ts` と unit `resume.test.ts` が完全網羅
 - **key encoding / bucket 名判定 / presign filename** — unit / PBT
@@ -1318,13 +1034,12 @@ projects:
 - **unsupported username 画面遷移** — unit routing 分岐が担保、staging に `_` 入り username を用意できない
 - **initial CreateBucket の 200 応答** — integration `s3-flows.test.ts` が担保。E2E は SPA 起動時の HeadBucket 発火のみ pin (S-AUTH-04)
 - **large-file (100 GB) 実測** — 配備時の手動実測 (`docs/operations.md` の「大容量実測の手順」)
-- **audit log の日次ローテ / gzip / retention** — integration `ops.test.ts` が UTC 境界含めて固定 (E2E は「実 UA hit が audit log に載る」ことを S-PUBSERVE-01 で 1 件だけ pin)
-- **large-file streaming (数十 MB) の download** — integration `public-delivery.test.ts` の Range/streaming と重複度が高い。S-DOWNLOAD-01/02 は small file で完結
-- **presign 発行の server-side failure** — presign は client-side SigV4 計算のため server 失敗経路が薄い。ShareModal 全体の失敗 → 再試行 UI は **E-PUBLISH-01** の multi-target シナリオが pub/temp mode 双方共通の UI (`share-modal.tsx:250-269`) を担保
+- **large-file streaming (数十 MB) の download** — S-DOWNLOAD-01/02 は small file で完結させ、実サイズは配備時の手動実測に譲る
+- **ShareModal の失敗 → 再試行 UI** — unit `share-modal.test.tsx` が STS を落として batch 失敗 → `失敗した N 件を再試行` → 復帰まで固定する。E2E で同じ失敗を作るには STS を落とすしかなく、target 単位の出し分けができないため deterministic に書けない
 - **over-quota state での UI (banner / upload disable)** — integration `quota.test.ts` + unit `browse-page.test.tsx` 双方が SSOT。E2E での `page.route` 差替えでは実 state を作れず不安定
 - **silent renew (automaticSilentRenew) の実 flow 観測** — 実装は refresh_token grant (top-frame `POST /token`、iframe 不使用、`app/lib/auth/oidc.ts:14-16`) で、`AccessTokenTimer` は `UserManager.storeUser()` 契機でのみ再スケジュールされる。sessionStorage 直接書換 → timer 反映 の経路が無いため、E2E で「近接失効 → renew 発火」を deterministic に観測できない。実 upload の 1 時間超セッション継続は配備時の手動 QA (`docs/operations.md` の「大容量実測の手順」) で observe。unit の `use-s3.test.ts` が `signinSilent` coalesce と 120s 閾値の renew ロジックを担保
 - **CORS プリフライトの実 UA 観測** — 実 SPA origin から SeaweedFS S3 endpoint への Allow-Origin / Allow-Headers / Expose-Headers のラウンドトリップは、通常フロー (upload / STS) の実成功で暗黙に担保される (preflight で block されれば S3 op 自体が失敗するため)。専用シナリオを起こす価値は薄く、明示的な test は追加しない
-- **nginx location 分岐の URL bar 経路** — CONFIG Domain の `page.request.get` で叩いた 4 endpoint (`/healthz`, `/_config.json`, `/_browse/*`, `/_auth/callback`) は同じ nginx location 分岐を通る。`page.goto` 経由の観測を別途追加する価値は薄い
+- **SPA 配信の endpoint shape (fallback / asset 404 / Host 検証 / CORS 無干渉)** — integration `spa-delivery.test.ts` が固定する。E2E は実 UA での SPA route 遷移 (AUTH / BROWSE) だけを見る
 
 ## 7. 実装ノート
 
@@ -1423,16 +1138,3 @@ export default defineConfig({
 - 想定所要時間: 全 test で ~15-25 分 (Silent renew test は long-running で 60-90 秒)
 - 手動実行前提。CI 対応 (secret 受け渡し、compose 起動、artifact upload) は別 PR で判断
 - 失敗時 trace / html report はホスト cwd の `playwright-report/` に残る
-
-## 8. 現行 spec との対応関係
-
-現行 `core-flows.spec.ts` / `upload-resume.spec.ts` は selector が実装と齟齬 (`getByRole("switch")`, `getByRole("button", { name: "発行" })`, `getByLabel("presigned URL")`, `getByText("アップロード完了")` などは実装に存在しない)。**本シナリオ set 実装時に置き換えて廃止する**。既存の観点は次のように吸収:
-
-| 現行 spec | 吸収先 |
-|---|---|
-| `core-flows.spec.ts` #1 (updown) | S-UPLOAD-01 + S-DOWNLOAD-01 + S-FILEOPS-05 |
-| `core-flows.spec.ts` #2 (publish 200/404) | S-PUBLISH-01 + S-PUBLISH-02 + S-PUBLISH-04 + S-PUBSERVE-01 + S-PUBSERVE-02 |
-| `core-flows.spec.ts` #3 (encoding) | S-DOWNLOAD-02 + S-PUBSERVE-03 |
-| `core-flows.spec.ts` #4 (drag & drop) | S-UPLOAD-03 |
-| `core-flows.spec.ts` #5 (presign 200) | S-PRESIGN-01 (完全書き直し、`公開する` から mode 切替 経路) |
-| `upload-resume.spec.ts` (offline resume) | S-RESUME-01 (stallUploadPart deterministic) + S-RESUME-02 (別 context) + S-RESUME-03 (同 context reload) |

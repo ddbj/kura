@@ -2,9 +2,13 @@
 # 合成せず単体で使う。ビルドは stack の一部ではなく compose up の前段の作業）:
 #   npm run build:container
 #
-# ビルド成果物 build/client は内側 nginx が bind mount して配信するため、
+# ビルド成果物 build/client は web サービスが bind mount して配信するため、
 # ホストのファイルシステム上に残す必要がある。よって image に焼き込まず、
 # repo を bind mount して container 内で npm ci && npm run build を走らせる。
+#
+# デプロイ固有の設定は VITE_KURA_* として bundle に焼き込まれる
+# (docs/architecture.md frontend)。したがって環境ごとに、その環境の env で
+# ビルドする。
 #
 # node は moving tag ではなく patch version まで pin する。node:24 のような
 # moving tag は npm の minor 差で optional dependency の解決が変わり、同じ
@@ -21,6 +25,10 @@ services:
       # 非 root uid で走るので HOME と npm cache を書ける場所に向ける
       HOME: /tmp
       npm_config_cache: /tmp/.npm
+      VITE_KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
+      VITE_KURA_OIDC_CLIENT_ID: ${KURA_OIDC_CLIENT_ID}
+      VITE_KURA_S3_ENDPOINT: ${KURA_S3_ENDPOINT}
+      VITE_KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
     volumes:
       - .:/app
     command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run build"]

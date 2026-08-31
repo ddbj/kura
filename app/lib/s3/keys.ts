@@ -37,7 +37,7 @@ export const keyToUrlPath = (key: string): string =>
 // prefixToUrlPath always reads back to the same prefix; "" is bucket root
 // rather than one empty segment, matching prefixToSegments("").
 // A single trailing "/" (produced by dirHref appending "/" to prefixToUrlPath
-// output) is stripped here so `/_browse/foo/` and `/_browse/foo` both resolve
+// output) is stripped here so `/browse/foo/` and `/browse/foo` both resolve
 // to segments ["foo"]. Internal "//" is preserved.
 export const splatToPrefix = (splat: string): string => {
   const clean = splat.endsWith("/") ? splat.slice(0, -1) : splat

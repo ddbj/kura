@@ -1,5 +1,5 @@
-// PRESIGN Domain (scenarios.md §PRESIGN): row → ShareModal → 期限つき tab →
-// TTL 選択 → 発行 → badge + panel + fresh anon で byte 一致。
+// PRESIGN Domain (scenarios.md §PRESIGN): row → ShareModal → TTL 選択 →
+// 発行 → badge + panel + fresh anon で byte 一致。
 import { expect } from "@playwright/test"
 
 import {
@@ -21,16 +21,13 @@ test.describe("PRESIGN", () => {
     await clearClientPrefs(page).catch(() => undefined)
   })
 
-  test("S-PRESIGN-01: row → ShareModal → 期限つき tab → 発行 → badge + panel + byte 一致", async ({ browser, page }) => {
+  test("S-PRESIGN-01: row → ShareModal → 発行 → badge + panel + byte 一致", async ({ browser, page }) => {
     const name = uniqueName("presign01")
     const content = "presign01-body-fixed-payload"
     await page.goto(scopeBrowseUrl())
     await uploadTextFile(page, name, content)
 
     const modal = await openPresignModalFromRow(page, name)
-    // 期限つき tab の aria-selected
-    await expect(modal.getByRole("tablist", { name: "共有モード" }).getByRole("tab", { name: "期限つき", selected: true }))
-      .toBeVisible()
     // default TTL は 12時間
     await expect(modal.getByRole("tablist", { name: "有効期限" }).getByRole("tab", { name: "12時間", selected: true }))
       .toBeVisible()

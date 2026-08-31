@@ -7,7 +7,6 @@ const base = {
   oidcIssuer: "https://idp.example.org/realms/master",
   oidcClientId: "kura-dev",
   s3Endpoint: "http://localhost:28333",
-  publicBase: "http://localhost:28080",
 }
 
 const parseTtl = (value: string) => AppConfigSchema.safeParse({ ...base, fileTtlDays: value })

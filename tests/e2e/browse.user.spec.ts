@@ -59,7 +59,7 @@ test.describe("BROWSE", () => {
     await expect(folderRow).toBeVisible({ timeout: 10_000 })
 
     // .keep marker file は render されない
-    await page.goto(`/_browse/e2e/${runId()}/${folder}/`)
+    await page.goto(`/browse/e2e/${runId()}/${folder}/`)
     await expect(page.locator(".row.sel").filter({ hasText: ".keep" })).toHaveCount(0)
   })
 
@@ -72,7 +72,7 @@ test.describe("BROWSE", () => {
     await expect(folderRow).toBeVisible({ timeout: 10_000 })
     await folderRow.getByRole("button", { name: folder, exact: true }).click()
 
-    await page.waitForURL(new RegExp(`/_browse/e2e/${runId()}/${folder}/`), { timeout: 10_000 })
+    await page.waitForURL(new RegExp(`/browse/e2e/${runId()}/${folder}/`), { timeout: 10_000 })
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(folder)
     await expect(page.locator(".emptyzone")).toBeVisible()
   })
@@ -81,11 +81,11 @@ test.describe("BROWSE", () => {
     const parent = uniqueFolder("browse04parent")
     const child = uniqueFolder("browse04child")
     await createFolderViaSdk(page, `e2e/${runId()}/${parent}/${child}`)
-    await page.goto(`/_browse/e2e/${runId()}/${parent}/${child}/`)
+    await page.goto(`/browse/e2e/${runId()}/${parent}/${child}/`)
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(child)
 
     await page.locator(".pathbar .crumb").getByRole("link", { name: parent }).click()
-    await page.waitForURL(new RegExp(`/_browse/e2e/${runId()}/${parent}/$`))
+    await page.waitForURL(new RegExp(`/browse/e2e/${runId()}/${parent}/$`))
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(parent)
   })
 
@@ -94,7 +94,7 @@ test.describe("BROWSE", () => {
     const child = uniqueFolder("browse05child")
     await createFolderViaSdk(page, `e2e/${runId()}/${parent}/${child}`)
 
-    await page.goto(`/_browse/e2e/${runId()}/${parent}/`)
+    await page.goto(`/browse/e2e/${runId()}/${parent}/`)
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(parent)
 
     const childRow = page.locator(".row.sel").filter({ hasText: child }).filter({ has: page.locator(".nm.folder") })
@@ -113,7 +113,7 @@ test.describe("BROWSE", () => {
     const child = uniqueFolder("browse06child")
     await createFolderViaSdk(page, `e2e/${runId()}/${parent}/${child}`)
 
-    await page.goto(`/_browse/e2e/${runId()}/${parent}/${child}/`)
+    await page.goto(`/browse/e2e/${runId()}/${parent}/${child}/`)
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(child)
     await expect(page.locator(".pathbar .crumb").getByRole("link", { name: parent })).toBeVisible()
     await expect(page.locator(".emptyzone")).toBeVisible()
@@ -121,7 +121,7 @@ test.describe("BROWSE", () => {
 
   test("E-BROWSE-01: 存在しない prefix を直打ちしても空 folder として表示される", async ({ page }) => {
     const missing = `never-existed-${randomBytes(4).toString("hex")}`
-    await page.goto(`/_browse/e2e/${runId()}/${missing}/`)
+    await page.goto(`/browse/e2e/${runId()}/${missing}/`)
     await expect(page.locator(".pathbar .crumb .cur")).toHaveText(missing)
     await expect(page.locator(".emptyzone")).toBeVisible()
     await expect(page.locator(".row.sel")).toHaveCount(0)

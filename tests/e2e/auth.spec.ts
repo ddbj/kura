@@ -33,12 +33,12 @@ test.describe("AUTH", () => {
     expect(url.searchParams.get("code_challenge") ?? "").not.toBe("")
     expect(url.searchParams.get("client_id") ?? "").not.toBe("")
     expect((url.searchParams.get("scope") ?? "").split(" ")).toContain("openid")
-    expect(url.searchParams.get("redirect_uri") ?? "").toMatch(/\/_auth\/callback$/)
+    expect(url.searchParams.get("redirect_uri") ?? "").toMatch(/\/auth\/callback$/)
     expect(url.searchParams.get("state") ?? "").not.toBe("")
   })
 
   test("E-AUTH-01: callback error=access_denied でエラーメッセージが出る", async ({ page }) => {
-    await page.goto("/_auth/callback?error=access_denied&error_description=denied&state=x")
+    await page.goto("/auth/callback?error=access_denied&error_description=denied&state=x")
     const alert = page.getByRole("alert")
     await expect(alert).toBeVisible()
     await expect(alert).toContainText("ログインに失敗しました")
@@ -46,7 +46,7 @@ test.describe("AUTH", () => {
   })
 
   test("E-AUTH-02: callback error 画面の「トップへ戻る」で / に戻ると RequireAuth の error Callout が持続する", async ({ page }) => {
-    await page.goto("/_auth/callback?error=access_denied&state=x")
+    await page.goto("/auth/callback?error=access_denied&state=x")
     await page.getByRole("link", { name: "トップへ戻る" }).click()
     await page.waitForURL((url) => new URL(url).pathname === "/", { timeout: 15_000 })
     const alert = page.locator("[role=\"alert\"]").filter({ hasText: "ログインに失敗しました" })
@@ -61,7 +61,7 @@ test.describe("AUTH", () => {
 
     // 元 URL: 存在しない prefix でも SPA fallback で LoginBox に飛ぶ
     const dirName = `e2e-authret-${Date.now().toString(36)}`
-    await page.goto(`/_browse/${dirName}/`)
+    await page.goto(`/browse/${dirName}/`)
     await expect(page.locator(".loginbox")).toBeVisible()
 
     await page.getByRole("button", { name: "DDBJ アカウントでログイン" }).click()
@@ -73,7 +73,7 @@ test.describe("AUTH", () => {
     await page.locator("#kc-login, button[name=login]").click()
 
     // 元 URL に戻ってから SPA 起動を確認 (crumb 内容は BROWSE Domain で担保)
-    await page.waitForURL(new RegExp(`/_browse/${dirName}/`), { timeout: 30_000 })
+    await page.waitForURL(new RegExp(`/browse/${dirName}/`), { timeout: 30_000 })
     await expect(page.locator(".hdr .user")).toBeVisible({ timeout: 30_000 })
   })
 })

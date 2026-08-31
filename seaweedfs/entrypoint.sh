@@ -65,12 +65,17 @@ copy_3 = 3
 copy_other = 1
 EOTOML
 
-# The filer write-signing key puts the filer IAM gRPC service (and filer HTTP
-# writes) behind a Bearer token; in-cluster components sign with this same
-# file. The read key stays unset so public delivery (nginx -> filer GET/HEAD)
-# remains anonymous.
+# Bearer-token gate on the filer's own HTTP API and IAM gRPC service, which
+# S3's IAM never sees. The read key matters because the SPA delivery process
+# sits on the same compose network and has no business reading the filer;
+# without it any process on that network could read every bucket unauthenticated.
+# In-cluster components (the S3 server included) sign with this same file, so
+# one key covers both directions.
 cat > /etc/seaweedfs/security.toml <<EOTOML
 [jwt.filer_signing]
+key = "${filer_jwt_key_json}"
+
+[jwt.filer_signing.read]
 key = "${filer_jwt_key_json}"
 EOTOML
 

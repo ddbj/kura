@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 
 import { defineConfig, devices } from "@playwright/test"
 
-// E2E は起動済みの dev compose (nginx :28080) + DDBJ staging Keycloak を使う
+// E2E は起動済みの dev compose (SPA 配信 :28080) + DDBJ staging Keycloak を使う
 // (docs/testing.md)。テストユーザーの資格情報は gitignored の .env から読む。
 const readEnvFile = (path: string): Record<string, string> => {
   let text: string

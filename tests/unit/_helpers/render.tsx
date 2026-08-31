@@ -15,7 +15,6 @@ export const testConfig: AppConfig = {
   oidcIssuer: "https://idp.test/realms/master",
   oidcClientId: "kura-test",
   s3Endpoint: "http://localhost:28333",
-  publicBase: "http://localhost:28080",
   fileTtlDays: null,
 }
 

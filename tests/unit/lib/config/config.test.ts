@@ -1,15 +1,18 @@
-import { http, HttpResponse } from "msw"
 import { describe, expect, test } from "vitest"
 
-import { AppConfigSchema, fetchConfig } from "~/lib/config"
-
-import { server } from "../../mocks/server"
+import { AppConfigSchema, readConfig } from "~/lib/config"
 
 const validConfig = {
   oidcIssuer: "https://idp-staging.ddbj.nig.ac.jp/realms/master",
   oidcClientId: "kura-dev",
   s3Endpoint: "http://localhost:28333",
-  publicBase: "http://localhost:28080",
+}
+
+const validEnv = {
+  VITE_KURA_OIDC_ISSUER: validConfig.oidcIssuer,
+  VITE_KURA_OIDC_CLIENT_ID: validConfig.oidcClientId,
+  VITE_KURA_S3_ENDPOINT: validConfig.s3Endpoint,
+  VITE_KURA_FILE_TTL_DAYS: "",
 }
 
 describe("AppConfigSchema", () => {
@@ -42,7 +45,6 @@ describe("AppConfigSchema", () => {
     ["oidcIssuer", ""],
     ["oidcClientId", ""],
     ["s3Endpoint", "://bad"],
-    ["publicBase", "localhost:28080"],
   ])("AppConfigSchema_invalid_%s_rejects", (key, value) => {
     expect(() => AppConfigSchema.parse({ ...validConfig, [key]: value })).toThrow()
   })
@@ -53,19 +55,28 @@ describe("AppConfigSchema", () => {
   })
 })
 
-describe("fetchConfig", () => {
-  test("fetchConfig_ok_returnsParsedConfig", async () => {
-    server.use(http.get("/_config.json", () => HttpResponse.json(validConfig)))
-    await expect(fetchConfig()).resolves.toEqual({ ...validConfig, fileTtlDays: null })
+describe("readConfig", () => {
+  test("readConfig_validEnv_returnsParsedConfig", () => {
+    expect(readConfig(validEnv)).toEqual({ ...validConfig, fileTtlDays: null })
   })
 
-  test("fetchConfig_httpError_throws", async () => {
-    server.use(http.get("/_config.json", () => new HttpResponse(null, { status: 404 })))
-    await expect(fetchConfig()).rejects.toThrow(/404/)
+  test("readConfig_ttlSet_parsesToInt", () => {
+    expect(readConfig({ ...validEnv, VITE_KURA_FILE_TTL_DAYS: "30" }).fileTtlDays).toBe(30)
   })
 
-  test("fetchConfig_invalidBody_throws", async () => {
-    server.use(http.get("/_config.json", () => HttpResponse.json({ oidcClientId: "kura-dev" })))
-    await expect(fetchConfig()).rejects.toThrow()
+  // A build that did not receive the value bakes in `undefined`, which must
+  // fail loudly rather than produce a half-configured SPA.
+  test.each(["VITE_KURA_OIDC_ISSUER", "VITE_KURA_OIDC_CLIENT_ID", "VITE_KURA_S3_ENDPOINT"])(
+    "readConfig_missing_%s_throws",
+    (key) => {
+      const { [key as keyof typeof validEnv]: _, ...rest } = validEnv
+      expect(() => readConfig(rest)).toThrow()
+    },
+  )
+
+  // Absent and empty are the same thing for the TTL: no TTL.
+  test("readConfig_ttlAbsent_isNull", () => {
+    const { VITE_KURA_FILE_TTL_DAYS: _, ...rest } = validEnv
+    expect(readConfig(rest).fileTtlDays).toBeNull()
   })
 })

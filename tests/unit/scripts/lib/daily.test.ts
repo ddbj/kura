@@ -1,7 +1,3 @@
-import { mkdtemp, readdir, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-
 import { S3Client } from "@aws-sdk/client-s3"
 import { http, HttpResponse } from "msw"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -19,8 +15,6 @@ const opsClient = (): S3Client =>
     forcePathStyle: true,
     credentials: { accessKeyId: "root", secretAccessKey: "root-secret" },
   })
-
-const DAY_MS = 24 * 60 * 60 * 1000
 
 // Registers ListBuckets + the per-bucket ListMultipartUploads / DeleteObjects
 // handlers runDaily hits when KURA_FILE_TTL_DAYS is empty (no TTL sweep). A
@@ -54,34 +48,25 @@ afterEach(() => {
 })
 
 describe("runDaily bucket isolation", () => {
-  it("buckets_oneFails_othersStillProcessedAndAuditLogsStillRotate", async () => {
+  it("buckets_oneFails_othersStillProcessed", async () => {
     const buckets = [{ name: "alice" }, { name: "bob" }, { name: "carol" }]
     const { attempted } = seedS3({ buckets, fail500: new Set(["bob"]) })
 
-    const dir = await mkdtemp(join(tmpdir(), "kura-audit-test-"))
-    const oldDay = new Date(Date.now() - 8 * DAY_MS).toISOString().slice(0, 10)
-    await writeFile(join(dir, `access-${oldDay}.log`), "line\n")
-    vi.stubEnv("KURA_LOG_DIR", dir)
     vi.stubEnv("KURA_FILE_TTL_DAYS", "")
     vi.stubEnv("KURA_MULTIPART_MAX_AGE_DAYS", "7")
-    vi.stubEnv("KURA_AUDIT_RETENTION_DAYS", "1095")
 
     await expect(runDaily(new Date(), opsClient())).rejects.toThrow(/bob/)
 
     for (const b of buckets) {
       expect(attempted.has(b.name)).toBe(true)
     }
-    // Audit rotation runs even though one bucket errored.
-    await expect(readdir(dir)).resolves.toContainEqual(`access-${oldDay}.log.gz`)
   })
 
   it("buckets_noneFail_resolvesCleanly", async () => {
     seedS3({ buckets: [{ name: "dave" }] })
 
-    vi.stubEnv("KURA_LOG_DIR", join(tmpdir(), "kura-audit-missing"))
     vi.stubEnv("KURA_FILE_TTL_DAYS", "")
     vi.stubEnv("KURA_MULTIPART_MAX_AGE_DAYS", "7")
-    vi.stubEnv("KURA_AUDIT_RETENTION_DAYS", "1095")
 
     await expect(runDaily(new Date(), opsClient())).resolves.toBeUndefined()
   })
@@ -113,10 +98,8 @@ describe("runDaily bucket isolation", () => {
       http.get(`${ENDPOINT}//`, () => { bareBucketHits += 1; return new HttpResponse(null, { status: 400 }) }),
     )
 
-    vi.stubEnv("KURA_LOG_DIR", join(tmpdir(), "kura-audit-missing"))
     vi.stubEnv("KURA_FILE_TTL_DAYS", "")
     vi.stubEnv("KURA_MULTIPART_MAX_AGE_DAYS", "7")
-    vi.stubEnv("KURA_AUDIT_RETENTION_DAYS", "1095")
 
     await expect(runDaily(new Date(), opsClient())).resolves.toBeUndefined()
     expect(bareBucketHits).toBe(0)

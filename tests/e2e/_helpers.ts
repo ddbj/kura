@@ -47,7 +47,7 @@ const hex8 = (): string => randomBytes(8).toString("hex")
 
 // A key that upload flows can pass as the leaf name for setInputFiles.
 // Chromium strips any "/" so we never embed a path here; the enclosing prefix
-// is controlled by first navigating to /_browse/e2e/${runId}/.
+// is controlled by first navigating to /browse/e2e/${runId}/.
 export const uniqueName = (label: string, ext = "txt"): string =>
   `e2e-${label}-${hex8()}.${ext}`
 
@@ -60,7 +60,7 @@ export const uniqueFolder = (label: string): string => `e2e-${label}-${hex8()}`
 export const scopePrefix = (): string => `e2e/${runId()}/`
 
 // URL path that a Playwright test navigates to before starting an upload.
-export const scopeBrowseUrl = (): string => `/_browse/e2e/${runId()}/`
+export const scopeBrowseUrl = (): string => `/browse/e2e/${runId()}/`
 
 // ---------------------------------------------------------------------------
 // selectors
@@ -100,7 +100,7 @@ export const openUploadMenu = async (page: Page): Promise<Locator> => {
   return menu
 }
 
-// Non-interactive click that toggles pubpanel / presignpanel expansion. The
+// Non-interactive click that toggles presignpanel expansion. The
 // `.c-size` cell is a `<div>` (non-interactive) so onRowActivate fires.
 export const expandRow = async (page: Page, filename: string): Promise<void> => {
   const row = getRow(page, filename)
@@ -108,18 +108,15 @@ export const expandRow = async (page: Page, filename: string): Promise<void> => 
   await expect(row).toHaveAttribute("aria-expanded", "true")
 }
 
-// `.pubpanel` / `.presignpanel` are siblings of `.row.sel` (both children of
-// the row's wrapper `<div key={key}>`). `getRow(...).locator(".pubpanel")`
-// wouldn't reach them, so travel up one level via xpath.
-export const getPubPanel = (page: Page, filename: string): Locator =>
-  getRow(page, filename).locator("xpath=..").locator(".pubpanel")
-
+// `.presignpanel` is a sibling of `.row.sel` (both children of the row's
+// wrapper `<div key={key}>`), so `getRow(...).locator(".presignpanel")`
+// wouldn't reach it: travel up one level via xpath.
 export const getPresignPanel = (page: Page, filename: string): Locator =>
   getRow(page, filename).locator("xpath=..").locator(".presignpanel")
 
 // FolderPicker (MoveModal / FolderMoveModal から開かれる) は navigate-into
 // 型で、開いた瞬間の initialPrefix は呼び出し元の現在 browse prefix になる。
-// E2E は `/_browse/e2e/${runId}/` 配下で移動操作を行うので、picker は既に
+// E2E は `/browse/e2e/${runId}/` 配下で移動操作を行うので、picker は既に
 // scope の中で開く。掘り直しは要らず、crumbs が runId で終わっている事を
 // 検証するだけで十分。
 export const pickerAssertOnScope = async (picker: Locator): Promise<void> => {
@@ -328,19 +325,15 @@ export const createFolderViaSdk = async (page: Page, path: string): Promise<void
 // modal / share helpers
 
 export const openPresignModalFromRow = async (page: Page, filename: string): Promise<Locator> => {
-  const row = getRow(page, filename)
-  await row.locator(".pubbtn").click()
-  const modal = page.getByRole("dialog", { name: "ファイルを公開" })
+  await getRow(page, filename).locator(".pubbtn").click()
+  const modal = page.getByRole("dialog", { name: "期限つきリンクを発行" })
   await modal.waitFor({ state: "visible" })
-  await modal.getByRole("tablist", { name: "共有モード" }).getByRole("tab", { name: "期限つき" }).click()
-  const timedModal = page.getByRole("dialog", { name: "期限つきリンクを発行" })
-  await timedModal.waitFor({ state: "visible" })
 
-  return timedModal
+  return modal
 }
 
 // ---------------------------------------------------------------------------
-// anon (public delivery) helpers
+// anon helpers (presigned URL fetched without a session)
 
 export const getAnon = async (
   browser: Browser,
@@ -353,35 +346,6 @@ export const getAnon = async (
 
   return { context, response }
 }
-
-export const waitPublicUrl200 = async (
-  browser: Browser,
-  urlPath: string,
-  expectedBytes?: Buffer,
-): Promise<void> => {
-  const { context, response } = await getAnon(browser, urlPath)
-  try {
-    expect(response.status(), `expected 200 from ${urlPath}`).toBe(200)
-    if (expectedBytes !== undefined) {
-      const body = Buffer.from(await response.body())
-      expect(body.equals(expectedBytes), `byte mismatch on ${urlPath}`).toBe(true)
-    }
-  } finally {
-    await context.close()
-  }
-}
-
-export const waitPublicUrl404 = async (browser: Browser, urlPath: string): Promise<void> => {
-  const { context, response } = await getAnon(browser, urlPath)
-  try {
-    expect(response.status(), `expected 404 from ${urlPath}`).toBe(404)
-  } finally {
-    await context.close()
-  }
-}
-
-export const publicUrlFor = (publicBase: string, bucket: string, key: string): string =>
-  `${publicBase.replace(/\/+$/, "")}/${bucket}/${keyToUrlPath(key)}`
 
 // ---------------------------------------------------------------------------
 // resume / retry helpers (route intercept, closure counter, per-test scoped)
@@ -524,32 +488,4 @@ export const preparePendingUpload = async (
   }
 
   return { key: opts.key, uploadId, buffer, partSize }
-}
-
-// ---------------------------------------------------------------------------
-// audit log observer (S-PUBSERVE-01)
-
-// Reads KURA_LOG_DIR/access-YYYY-MM-DD.log (bind-mounted from the nginx
-// container, compose.yml). Polls up to `timeoutMs` for the needle to appear
-// AFTER a trailing "\n" (avoids partial-line reads on macOS bind mounts).
-export const expectAuditLine = async (needle: string, opts: { timeoutMs?: number } = {}): Promise<void> => {
-  const { readFile, stat } = await import("node:fs/promises")
-  const logDir = process.env["KURA_LOG_DIR"] ?? "./logs"
-  const yyyymmdd = new Date().toISOString().slice(0, 10)
-  const path = `${logDir}/access-${yyyymmdd}.log`
-  const deadline = Date.now() + (opts.timeoutMs ?? 10_000)
-
-  for (;;) {
-    try {
-      await stat(path)
-      const text = await readFile(path, "utf8")
-      if (text.includes(needle) && text.endsWith("\n")) return
-    } catch {
-      // file may not exist yet on very first request of the day
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`expectAuditLine: needle ${JSON.stringify(needle)} not found in ${path} within ${opts.timeoutMs ?? 10_000}ms`)
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
 }
