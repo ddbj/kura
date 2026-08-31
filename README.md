@@ -30,10 +30,12 @@ npm run lint
 dev 環境（DDBJ staging Keycloak を使う。S3 = localhost:28333、UI / 公開配信 = localhost:28080）:
 
 ```sh
-npm run build   # SPA を build/client へビルド (nginx がマウントして配信)
+npm run build:container  # pin した node の container で SPA を build/client へビルド (nginx がマウントして配信)
 docker compose --env-file env.dev --env-file .env up -d --wait
-npm run dev     # SPA の dev server (http://localhost:8080、HMR あり)
+npm run dev              # SPA の dev server (http://localhost:8080、HMR あり)
 ```
+
+ビルドを container で行う理由と、配備先（rootless podman）での手順は [docs/operations.md](./docs/operations.md) の「デプロイ構成」を参照。
 
 `.env` は git 管理外の secret（[docs/operations.md](./docs/operations.md) の「secret 管理」参照）。
 

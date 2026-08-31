@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { Button } from "./button"
 import { Modal } from "./modal"
@@ -59,17 +59,20 @@ export const NameEntryModal = ({
   const [name, setName] = useState("")
   const [error, setError] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
+  const [wasOpen, setWasOpen] = useState(false)
 
-  useEffect(() => {
+  // Seeding happens during render, not in an effect: an effect would let the
+  // input paint empty for a frame and then overwrite whatever was typed in
+  // that gap. initialName is read only on the closed -> open transition —
+  // parent re-renders pass a new closure identity each time.
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) {
       setName(initialName())
       setError(undefined)
       setBusy(false)
     }
-    // initialName is intentionally read only on the open transition — parent
-    // re-renders pass a new closure identity each time.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }
 
   const submit = async () => {
     const trimmed = name.trim()

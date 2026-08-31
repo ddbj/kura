@@ -10,7 +10,7 @@
 
 ## 設定群のテスト
 
-`tests/integration/` に実装（vitest）。`npm test` が compose（`env.test`）と JWKS 配信を自動で起動し、終了時に破棄する。テストごとに一意な username（= bucket）を使い、状態を共有しない。
+`tests/integration/` に実装（vitest）。`npm test` が compose（`env.test`）と JWKS 配信を自動で起動し、終了時に破棄する。テストごとに一意な username（= bucket）を使い、状態を共有しない。test stack は dev stack と port・データディレクトリの両方を分けてあり（`env.test`）、dev を起動したまま実行できる。両者が同じデータディレクトリを指すと、後から起動した側が filer の leveldb の flock を取れずに起動に失敗する。
 
 ### IAM policy boundary test（主要テスト）
 

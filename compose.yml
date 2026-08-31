@@ -52,12 +52,12 @@ services:
       KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}
     volumes:
       - ./seaweedfs/entrypoint.sh:/kura/entrypoint.sh:ro
-      # /data と /filerldb2 は bind mount で渡す。named / anonymous volume に
-      # すると podman が image 内の初期 dir を volume に copy-up する際に
-      # chown 1000:1000 を発火し、rootless podman + Lustre では chown 拒否で
-      # container が起動できない (docs/operations.md)。
+      # /data は bind mount で渡す。named / anonymous volume にすると podman が
+      # image 内の初期 dir を volume に copy-up する際に chown 1000:1000 を
+      # 発火し、rootless podman + Lustre では chown 拒否で container が
+      # 起動できない (docs/operations.md)。filer の LevelDB も -dir 配下の
+      # /data/filerldb2 に作られるため、この 1 本で永続データを覆える。
       - ${KURA_SEAWEEDFS_DATA_DIR:-./data/seaweedfs}:/data
-      - ${KURA_FILER_DIR:-./data/filerldb}:/filerldb2
     ports:
       # S3 API のみ公開する。filer (8888) / master (9333) は内部 network に閉じる
       - "${KURA_S3_PORT}:8333"

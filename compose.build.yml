@@ -1,0 +1,26 @@
+# SPA のビルドを pin した node image で行うための compose（compose.yml とは
+# 合成せず単体で使う。ビルドは stack の一部ではなく compose up の前段の作業）:
+#   npm run build:container
+#
+# ビルド成果物 build/client は内側 nginx が bind mount して配信するため、
+# ホストのファイルシステム上に残す必要がある。よって image に焼き込まず、
+# repo を bind mount して container 内で npm ci && npm run build を走らせる。
+#
+# node は moving tag ではなく patch version まで pin する。node:24 のような
+# moving tag は npm の minor 差で optional dependency の解決が変わり、同じ
+# package-lock.json でも `npm ci` が失敗することがある。配備先 (a012) も同じ
+# version で build する (docs/operations.md)。
+services:
+  build:
+    image: docker.io/library/node:24.13.0
+    working_dir: /app
+    # 成果物 (build/ と node_modules/) をホスト側の所有のまま残す。
+    # npm script が $(id -u):$(id -g) を渡す。
+    user: "${KURA_BUILD_USER:-1000:1000}"
+    environment:
+      # 非 root uid で走るので HOME と npm cache を書ける場所に向ける
+      HOME: /tmp
+      npm_config_cache: /tmp/.npm
+    volumes:
+      - .:/app
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run build"]

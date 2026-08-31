@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "react-router dev",
     "build": "react-router build",
+    "build:container": "KURA_BUILD_USER=$(id -u):$(id -g) docker compose -f compose.build.yml run --rm build",
     "test": "vitest run",
     "test:unit": "vitest run --project unit --project pbt",
     "test:integration": "vitest run --project integration",

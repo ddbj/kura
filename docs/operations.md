@@ -9,9 +9,13 @@
 - 起動:
   - docker (dev): `docker compose --env-file env.dev --env-file .env up -d --wait`
   - a012: `.env` に `env.<環境>` の内容と secrets を merge しておき（podman-compose 1.0.6 は `--env-file` を複数回渡すと最後の 1 つしか読まない）、`podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d`
-- 内側 nginx は SPA のビルド成果物（`build/client`）をマウントして配信するため、compose up の前に `npm ci && npm run build` を実行する。ビルド成果物は環境非依存（デプロイ固有の設定は nginx が env から `/_config.json` として配信する。[architecture.md](./architecture.md)）
+- 内側 nginx は SPA のビルド成果物（`build/client`）をマウントして配信するため、compose up の前にビルドする。ビルド成果物は環境非依存（デプロイ固有の設定は nginx が env から `/_config.json` として配信する。[architecture.md](./architecture.md)）
+- ビルドは patch version まで pin した node の container で行い、ホストの node / npm の version に依存させない。moving tag（`node:24`）は npm の minor 差で optional dependency の解決が変わり、同じ `package-lock.json` でも `npm ci` が失敗する。成果物は image に焼かず、bind mount 経由でホストの `build/client` に置く（nginx がそれをマウントするため）:
+  - docker (dev): `npm run build:container`（`compose.build.yml`。呼び出したユーザーの uid / gid で走らせて成果物をホスト所有のまま残す）
+  - a012 (rootless podman): `podman run --rm -v $PWD:/app -w /app --userns=keep-id -e HOME=/tmp docker.io/library/node:24.13.0 sh -c "npm ci --no-audit --no-fund && npm run build"`
+- ビルドは compose up の前に行う。stack を動かしたまま再ビルドした場合は nginx を再作成する（`docker compose ... up -d --force-recreate nginx`）。ビルドは `build/client` をディレクトリごと作り直すため、起動済みの nginx は削除済みの inode を bind mount したままになり、SPA への request が全て 404 になる
 - volume 設定: per-user bucket は bucket ごとに volume（collection）を消費するため、volume growth は 1 本ずつ（entrypoint が生成する master.toml）、volume 数上限は空きディスクからの自動算出（`-volume.max=0`）にしている。volume 1 本のサイズ上限は env `KURA_VOLUME_SIZE_LIMIT_MB`。**SeaweedFS 4.37 は 30000 以上を起動時に弾く**ため設定値は 30000 未満（dev / test 1024、production 29000）。100 GB クラスは複数 volume に分割保存されるので実使用に影響しない
-- SeaweedFS の /data と filer の /filerldb2 は compose で bind mount 直接（named / anonymous volume は使わない）。rootless podman + Lustre 上では podman が image の初期内容を volume に copy-up する際に発火する `chown 1000:1000` が拒否されるため
+- SeaweedFS のデータディレクトリ（`-dir=/data`）は compose で bind mount 直接（named / anonymous volume は使わない）。rootless podman + Lustre 上では podman が image の初期内容を volume に copy-up する際に発火する `chown 1000:1000` が拒否されるため。filer の LevelDB も `-dir` 配下（`/data/filerldb2`）に作られるので、永続データはこの 1 本の bind mount に収まる
 - 前段の DDBJ gateway（`ddbj/service-gateway-conf`）が `kura.ddbj.nig.ac.jp` -> 内側 nginx（a012:28080）、`kura-s3.ddbj.nig.ac.jp` -> SeaweedFS S3（a012:28333）へ proxy する
 - filer の port（HTTP 8888 / gRPC）は compose の内部 network に閉じ、ホスト外に公開しない
 
@@ -25,7 +29,7 @@ a012 は rootless podman-compose で動かす。dev（docker）とは異なる�
   - ops / kura-init: image default が root なので userns 追加は不要
 - **kura-init は `chmod 0777` で `/var/log/kura` を作る**（`chown 101` は Lustre で拒否されるため）。docker rootful でも同じ shape で動く
 - 前提の `w3ddbjld` は `/etc/subuid` に `222700000:65536` の割り当て済み。無い host に配備する場合は事前に `usermod --add-subuids 222700000-222700065535 --add-subgids 222700000-222700065535 w3ddbjld` を依頼する
-- `KURA_LOG_DIR` / `KURA_SEAWEEDFS_DATA_DIR` / `KURA_FILER_DIR` の bind mount 先はホストで先に mkdir + `chmod 0777` する
+- `KURA_LOG_DIR` / `KURA_SEAWEEDFS_DATA_DIR` の bind mount 先はホストで先に mkdir + `chmod 0777` する
 
 ## SeaweedFS の pin
 
@@ -113,7 +117,7 @@ secret は env / secret 注入で渡し、repo・image・env の example ファ�
 
 1. Keycloak client: production realm に `kura` client を作成する（public / PKCE S256 / redirect `https://kura.ddbj.nig.ac.jp/*` / web origins `https://kura.ddbj.nig.ac.jp` / dedicated scope に audience mapper / access token lifespan override 43200s。[architecture.md](./architecture.md) の Keycloak client）。当面 production realm が使えない期間は staging realm の `kura-dev` client に production origin を追記して共用する
 2. env: `KURA_VOLUME_SIZE_LIMIT_MB` は 30000 未満（SeaweedFS 4.37 が起動時に弾く）。目安 29000。`-volume.max=0` が空きから本数を自動算出するため、slot 数は事実上ディスク空きで決まる。secrets（STS signing key / root credentials / filer JWT key）を新規生成して `.env` に置く。a012 では env.production の内容と secrets を merge した `.env` 1 ファイルにする（podman-compose 1.0.6 の `--env-file` は 1 個しか読まない）
-3. ホスト側ディレクトリ: `KURA_LOG_DIR` / `KURA_SEAWEEDFS_DATA_DIR` / `KURA_FILER_DIR` をホストの恒久ディレクトリに向ける（a012 は Lustre 上の `~w3ddbjld/kura-prod/data/{logs,seaweedfs,filerldb}`）。事前に mkdir + `chmod 0777`（compose の `kura-init` サービスが log 側は起動時に world-writable で作り直す）。gateway の access log の実地確認: `kura-s3` への upload / delete / tagging（`?tagging` の query 含む）が client IP 付きで記録されること、保持 3 年が gateway 側の運用で担保されることを gateway 管理者と確認する
+3. ホスト側ディレクトリ: `KURA_LOG_DIR` / `KURA_SEAWEEDFS_DATA_DIR` をホストの恒久ディレクトリに向ける（a012 は Lustre 上の `~w3ddbjld/kura-prod/data/{logs,seaweedfs}`）。事前に mkdir + `chmod 0777`（compose の `kura-init` サービスが log 側は起動時に world-writable で作り直す）。gateway の access log の実地確認: `kura-s3` への upload / delete / tagging（`?tagging` の query 含む）が client IP 付きで記録されること、保持 3 年が gateway 側の運用で担保されることを gateway 管理者と確認する
 4. gateway の encoded URI 素通しの実地確認: space / `%` / 日本語を含む key の公開 URL が gateway 経由で 200 になること（設定レベルでは URI なし proxy_pass で確認済み）
 5. CORS: `KURA_S3_ALLOWED_ORIGINS` は staging / production では SPA 配信 origin を明示する（`*` は test 専用）。CORS は SeaweedFS が応答する（[architecture.md](./architecture.md) CORS）。gateway 側で `Access-Control-*` を付けたり preflight OPTIONS を短絡させたりしないこと（`service-gateway-conf/nginx/conf.d/kura-s3.conf` は `proxy_pass` だけの素通し）。実地確認は preflight `curl -sS -i -X OPTIONS "$KURA_S3_ENDPOINT/$BUCKET/foo?tagging" -H "Origin: $SPA_ORIGIN" -H "Access-Control-Request-Method: PUT" -H "Access-Control-Request-Headers: authorization,amz-sdk-invocation-id,amz-sdk-request,content-type,x-amz-content-sha256,x-amz-date,x-amz-security-token,x-amz-user-agent,x-amz-sdk-checksum-algorithm,x-amz-checksum-crc32"` で 200 + `Access-Control-Allow-Headers` に requested headers が verbatim で返り、`Access-Control-Allow-Origin` が `$SPA_ORIGIN` と一致すること
 6. 実測（100 GB クラス / 1 時間超）: 下記「大容量実測の手順」
