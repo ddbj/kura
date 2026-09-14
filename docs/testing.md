@@ -52,6 +52,7 @@
 - 構成は unit / pbt / e2e の 3 層。vitest + @testing-library/react + msw、@fast-check/vitest、@playwright/test
 - vitest は projects 構成: `unit`（jsdom、`tests/unit/`）/ `pbt`（node、`tests/pbt/`）/ `integration`（node、`tests/integration/`。compose を起動する globalSetup を持つ）。`npm run test:unit` は unit + pbt のみを実行し docker を必要としない。`npm test` は全 projects を実行する
 - unit テストはコンポーネントを実物の provider（AuthProvider / i18n / react-query）ごと動かす。認証済み状態は oidc-client-ts のストレージ（sessionStorage の `oidc.user:*` キー）へ User を seed して作る（ストレージ = 外部境界）
+- UI の文言は必ず i18n resources を経由する。この不変条件は「`app/` 配下のソース（resources を除く）にコメント以外の日本語リテラルが無いこと」を unit テストで検査して守る
 - PBT（fast-check）の重点対象:
   - key / prefix 構築（`..`、percent-encoding、unicode、空 segment）
   - username の S3 bucket 名適合判定（SeaweedFS の受理集合との一致）

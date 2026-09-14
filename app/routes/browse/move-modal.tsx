@@ -1,6 +1,7 @@
 import { HeadObjectCommand } from "@aws-sdk/client-s3"
 import { useEffect, useState } from "react"
 
+import { useT } from "~/lib/i18n"
 import { useS3 } from "~/lib/s3/use-s3"
 import { Button, Icon, Modal } from "~/ui"
 
@@ -29,6 +30,7 @@ const nameOf = (key: string): string => {
 
 export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) => {
   const s3 = useS3()
+  const t = useT()
   const initialParent = parentOf(srcKey)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [destPrefix, setDestPrefix] = useState<string>(initialParent)
@@ -48,7 +50,7 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
 
   const submit = async () => {
     if (destPrefix === initialParent) {
-      setError("移動先が元の場所と同じです")
+      setError(t("modal.destSame"))
 
       return
     }
@@ -57,7 +59,7 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
     try {
       try {
         await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: destKey }))
-        setError(`移動先に「${name}」が既にあります`)
+        setError(t("modal.destAlreadyExists", { name }))
         setBusy(false)
 
         return
@@ -81,10 +83,10 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
     <>
       <Modal open={open && !pickerOpen} onClose={onClose} labelledBy="move-title">
         <div className="mh">
-          <h2 className="mtitle" id="move-title">ファイルを移動</h2>
+          <h2 className="mtitle" id="move-title">{t("modal.moveTitle")}</h2>
         </div>
         <div className="mdest">
-          <div className="mdest-label">移動元</div>
+          <div className="mdest-label">{t("modal.moveFrom")}</div>
           <div className="mdest-row">
             <div className="mdest-path">
               <Icon name="file" size={14} />
@@ -93,20 +95,20 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
           </div>
         </div>
         <div className="mdest">
-          <div className="mdest-label">移動先</div>
+          <div className="mdest-label">{t("modal.moveTo")}</div>
           <div className="mdest-row">
             <div className="mdest-path">
               <Icon name="folder" size={14} />
               <span className="p" title={displayPath}>{displayPath}</span>
             </div>
-            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>フォルダを選ぶ</Button>
+            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>{t("modal.moveChoose")}</Button>
           </div>
         </div>
         {error !== undefined ? <p className="ferr">{error}</p> : null}
         <div className="mfoot">
-          <Button onClick={onClose} disabled={busy}>キャンセル</Button>
+          <Button onClick={onClose} disabled={busy}>{t("common.cancel")}</Button>
           <Button kind="pri" disabled={busy} onClick={() => void submit()}>
-            {busy ? "確認中…" : "移動"}
+            {busy ? t("common.checking") : t("modal.moveSubmit")}
           </Button>
         </div>
       </Modal>

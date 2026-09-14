@@ -1,3 +1,4 @@
+import { useT } from "~/lib/i18n"
 import { NameEntryModal } from "~/ui"
 
 type Props = {
@@ -9,11 +10,13 @@ type Props = {
 }
 
 export const FolderRenameModal = ({ open, onClose, currentName, siblingNames, onConfirm }: Props) => {
+  const t = useT()
+
   const validate = (trimmed: string): string | undefined => {
-    if (trimmed === "") return "フォルダ名を入力してください"
-    if (trimmed.includes("/")) return "フォルダ名に「/」は使えません"
-    if (trimmed === currentName) return "元の名前と同じです"
-    if (siblingNames.includes(trimmed)) return `「${trimmed}」は既にあります`
+    if (trimmed === "") return t("modal.folderNameRequired")
+    if (trimmed.includes("/")) return t("modal.folderNoSlash")
+    if (trimmed === currentName) return t("modal.sameName")
+    if (siblingNames.includes(trimmed)) return t("modal.alreadyExists", { name: trimmed })
 
     return undefined
   }
@@ -22,15 +25,16 @@ export const FolderRenameModal = ({ open, onClose, currentName, siblingNames, on
     <NameEntryModal
       open={open}
       onClose={onClose}
-      title="フォルダ名を変更"
+      title={t("modal.folderRenameTitle")}
       labelledBy="folder-rename-title"
       inputId="folder-rename-name"
-      inputLabel="新しい名前"
-      placeholder="新しい名前"
+      inputLabel={t("modal.renameInput")}
+      placeholder={t("modal.renameInput")}
       initialName={() => currentName}
       validate={validate}
       onConfirm={onConfirm}
-      submitLabel="変更"
+      cancelLabel={t("common.cancel")}
+      submitLabel={t("modal.renameSubmit")}
     />
   )
 }

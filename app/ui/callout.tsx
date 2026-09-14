@@ -16,12 +16,15 @@ type Props = {
   // Right-side action(s), e.g. a retry button. Rendered before the dismiss
   // button when both are present.
   actions?: ReactNode
-  // When set, a × close button appears at the far right and calls this on click.
-  onDismiss?: () => void
-  dismissAriaLabel?: string
   className?: string
   role?: "alert" | "status"
 }
+
+// The × button carries no text, so its label is not optional: pairing the two
+// in a union makes "dismissable without a label" unrepresentable.
+type DismissProps =
+  | { onDismiss: () => void; dismissAriaLabel: string }
+  | { onDismiss?: undefined; dismissAriaLabel?: undefined }
 
 const iconFor: Record<Tone, IconName> = {
   info: "globe",
@@ -46,10 +49,10 @@ export const Callout = ({
   icon,
   actions,
   onDismiss,
-  dismissAriaLabel = "閉じる",
+  dismissAriaLabel,
   className,
   role,
-}: Props) => {
+}: Props & DismissProps) => {
   const hasRight = actions !== undefined || onDismiss !== undefined
 
   return (

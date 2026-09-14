@@ -165,19 +165,21 @@ export const renameObject = async (
 // ContinuationToken. Includes marker entries like ".keep" — the caller
 // decides whether to filter them. Size is undefined when the server omitted
 // it, mirroring FileEntry.
+export type PrefixEntry = { key: string; size: number | undefined; lastModified: Date | undefined }
+
 export const listAllUnderPrefix = async (
   s3: S3Client,
   bucket: string,
   prefix: string,
-): Promise<{ key: string; size: number | undefined }[]> =>
-  collectAllPages<ListObjectsV2CommandOutput, { key: string; size: number | undefined }, string>(
+): Promise<PrefixEntry[]> =>
+  collectAllPages<ListObjectsV2CommandOutput, PrefixEntry, string>(
     (marker) => s3.send(new ListObjectsV2Command({
       Bucket: bucket,
       Prefix: prefix,
       ...(marker === undefined ? {} : { ContinuationToken: marker }),
     })),
     (page) => (page.Contents ?? []).flatMap((o) =>
-      o.Key === undefined ? [] : [{ key: o.Key, size: o.Size }]),
+      o.Key === undefined ? [] : [{ key: o.Key, size: o.Size, lastModified: o.LastModified }]),
     (page) => {
       const next = page.NextContinuationToken
 

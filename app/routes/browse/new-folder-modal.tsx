@@ -1,5 +1,6 @@
 import { PutObjectCommand } from "@aws-sdk/client-s3"
 
+import { useT } from "~/lib/i18n"
 import { useS3 } from "~/lib/s3/use-s3"
 import { NameEntryModal } from "~/ui"
 
@@ -14,11 +15,12 @@ type Props = {
 
 export const NewFolderModal = ({ open, onClose, bucket, prefix, existingNames, onCreated }: Props) => {
   const s3 = useS3()
+  const t = useT()
 
   const validate = (trimmed: string): string | undefined => {
-    if (trimmed === "") return "フォルダ名を入力してください"
-    if (trimmed.includes("/")) return "フォルダ名に「/」は使えません"
-    if (existingNames.includes(trimmed)) return `「${trimmed}」は既にあります`
+    if (trimmed === "") return t("modal.folderNameRequired")
+    if (trimmed.includes("/")) return t("modal.folderNoSlash")
+    if (existingNames.includes(trimmed)) return t("modal.alreadyExists", { name: trimmed })
 
     return undefined
   }
@@ -33,16 +35,17 @@ export const NewFolderModal = ({ open, onClose, bucket, prefix, existingNames, o
     <NameEntryModal
       open={open}
       onClose={onClose}
-      title="新しいフォルダ"
+      title={t("modal.newFolderTitle")}
       labelledBy="newfolder-title"
       inputId="newfolder-name"
-      inputLabel="フォルダ名"
-      placeholder="フォルダ名"
+      inputLabel={t("modal.newFolderInput")}
+      placeholder={t("modal.newFolderInput")}
       initialName={() => ""}
       validate={validate}
       onConfirm={create}
-      submitLabel="作成"
-      busyLabel="作成中…"
+      cancelLabel={t("common.cancel")}
+      submitLabel={t("modal.newFolderSubmit")}
+      busyLabel={t("modal.newFolderBusy")}
     />
   )
 }

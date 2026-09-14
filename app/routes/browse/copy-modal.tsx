@@ -1,5 +1,6 @@
 import { HeadObjectCommand } from "@aws-sdk/client-s3"
 
+import { type TFn, useT } from "~/lib/i18n"
 import { useS3 } from "~/lib/s3/use-s3"
 import { NameEntryModal } from "~/ui"
 
@@ -24,14 +25,18 @@ const nameOf = (key: string): string => {
   return slash === -1 ? key : key.slice(slash + 1)
 }
 
-const suggestCopyName = (name: string, siblings: readonly string[]): string => {
+const suggestCopyName = (
+  name: string,
+  siblings: readonly string[],
+  t: TFn,
+): string => {
   const dot = name.lastIndexOf(".")
   const stem = dot <= 0 ? name : name.slice(0, dot)
   const ext = dot <= 0 ? "" : name.slice(dot)
-  let candidate = `${stem} のコピー${ext}`
+  let candidate = t("modal.copySuffix", { stem, ext })
   let n = 2
   while (siblings.includes(candidate)) {
-    candidate = `${stem} のコピー (${n})${ext}`
+    candidate = t("modal.copySuffixNumbered", { stem, ext, n })
     n += 1
   }
 
@@ -45,12 +50,13 @@ const httpStatusOf = (err: unknown): number | undefined =>
 
 export const CopyModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfirm }: Props) => {
   const s3 = useS3()
+  const t = useT()
   const original = nameOf(srcKey)
 
   const validate = (trimmed: string): string | undefined => {
-    if (trimmed === "") return "名前を入力してください"
-    if (trimmed.includes("/")) return "名前に「/」は使えません"
-    if (siblingNames.includes(trimmed)) return `「${trimmed}」は既にあります`
+    if (trimmed === "") return t("modal.nameRequired")
+    if (trimmed.includes("/")) return t("modal.noSlash")
+    if (siblingNames.includes(trimmed)) return t("modal.alreadyExists", { name: trimmed })
 
     return undefined
   }
@@ -60,7 +66,7 @@ export const CopyModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfi
     try {
       await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: destKey }))
 
-      return `「${trimmed}」は既にあります`
+      return t("modal.alreadyExists", { name: trimmed })
     } catch (err) {
       const status = httpStatusOf(err)
       if (status === 404 || status === 403) return undefined
@@ -72,17 +78,18 @@ export const CopyModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfi
     <NameEntryModal
       open={open}
       onClose={onClose}
-      title="コピーを作成"
+      title={t("modal.copyTitle")}
       labelledBy="copy-title"
       inputId="copy-name"
-      inputLabel="コピー後の名前"
-      placeholder="コピー後の名前"
-      initialName={() => suggestCopyName(original, siblingNames)}
+      inputLabel={t("modal.copyInput")}
+      placeholder={t("modal.copyInput")}
+      initialName={() => suggestCopyName(original, siblingNames, t)}
       validate={validate}
       verify={verify}
       onConfirm={(trimmed) => onConfirm(`${parentOf(srcKey)}${trimmed}`)}
-      submitLabel="コピー"
-      busyLabel="確認中…"
+      cancelLabel={t("common.cancel")}
+      submitLabel={t("common.copy")}
+      busyLabel={t("common.checking")}
     />
   )
 }

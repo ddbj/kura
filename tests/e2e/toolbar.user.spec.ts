@@ -4,9 +4,13 @@ import { expect } from "@playwright/test"
 
 import {
   clearClientPrefs,
+  createFolderViaSdk,
+  getFolderRow,
   getRow,
   openPresignModalFromRow,
+  runId,
   scopeBrowseUrl,
+  uniqueFolder,
   uniqueName,
   uploadTextFile,
 } from "./_helpers"
@@ -55,6 +59,8 @@ test.describe("TOOLBAR", () => {
 
   test("S-TOOLBAR-04: lens 期限つき で presigned のみ", async ({ page }) => {
     const name = uniqueName("tb04")
+    const folder = uniqueFolder("tb04")
+    await createFolderViaSdk(page, `e2e/${runId()}/${folder}`)
     await page.goto(scopeBrowseUrl())
     await uploadTextFile(page, name, "x")
     await page.locator(".upcard .urow").filter({ hasText: name }).waitFor({ state: "detached", timeout: 15_000 })
@@ -68,9 +74,18 @@ test.describe("TOOLBAR", () => {
     await expect(getRow(page, name).locator(".c-pub .tag.warn")).toHaveText("期限つき", { timeout: 10_000 })
 
     const timedChip = page.locator(".lens").getByRole("button", { name: /期限つき/ })
+    await expect(timedChip.locator(".num")).toHaveText("1")
     await timedChip.click()
     await expect(timedChip).toHaveAttribute("aria-pressed", "true")
     await expect(getRow(page, name)).toBeVisible()
+    // 絞り込み結果に folder が混ざらない
+    await expect(getFolderRow(page, folder)).toHaveCount(0)
+
+    // 件数は「いま見えている一覧」のもの。別の階層へ移れば 0 に戻る
+    await page.goto(`/browse/e2e/${runId()}/${folder}/`)
+    await expect(page.locator(".pathbar .crumb .cur")).toHaveText(folder)
+    await expect(timedChip.locator(".num")).toHaveText("0")
+    await expect(page.locator(".empty h2")).toHaveCount(0)
   })
 
   test("S-TOOLBAR-05: sort カラムで並び順が変わる", async ({ page }) => {

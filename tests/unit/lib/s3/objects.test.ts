@@ -373,7 +373,11 @@ describe("listAllUnderPrefix", () => {
       }),
     )
     const entries = await listAllUnderPrefix(client(), BUCKET, "docs/")
-    expect(entries).toEqual([{ key: "docs/a.txt", size: 1 }, { key: "docs/b.txt", size: 2 }])
+    // zip の timestamp に使うので lastModified も持ち回る
+    expect(entries).toEqual([
+      { key: "docs/a.txt", size: 1, lastModified: new Date("2026-07-01T10:00:00.000Z") },
+      { key: "docs/b.txt", size: 2, lastModified: new Date("2026-07-01T10:00:00.000Z") },
+    ])
     expect(seenDelimiters).toEqual([null, null])
     expect(seenTokens).toEqual([null, "next"])
   })

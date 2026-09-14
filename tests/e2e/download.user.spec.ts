@@ -7,11 +7,16 @@ import { expect } from "@playwright/test"
 
 import {
   clearClientPrefs,
+  createFolderViaSdk,
+  getFolderRow,
   getRow,
+  openFolderMenu,
   openRowMenu,
   openUploadMenu,
   pickFileMenuInput,
+  runId,
   scopeBrowseUrl,
+  uniqueFolder,
   uniqueName,
 } from "./_helpers"
 import { test } from "./fixtures"
@@ -74,5 +79,70 @@ test.describe("DOWNLOAD", () => {
     expect(download.suggestedFilename().normalize("NFC")).toBe(name.normalize("NFC"))
     const path = await download.path()
     expect(Buffer.from(readFileSync(path)).equals(content)).toBe(true)
+  })
+
+  // 無圧縮 (store) なので、entry 名も中身も zip の中に平文で並ぶ
+  const zipContains = (bytes: Buffer, needle: string): boolean =>
+    bytes.includes(Buffer.from(needle, "utf8"))
+
+  test("S-DOWNLOAD-03: 複数選択を zip でまとめて download", async ({ page }) => {
+    const first = uniqueName("dl03-a")
+    const second = uniqueName("dl03-b")
+    await uploadInline(page, first, Buffer.from("first-payload"))
+    await uploadInline(page, second, Buffer.from("second-payload"))
+
+    await page.getByRole("checkbox", { name: `${first} を選択` }).check()
+    await page.getByRole("checkbox", { name: `${second} を選択` }).check()
+
+    const download = await Promise.all([
+      page.waitForEvent("download"),
+      page.locator('.card:not(:has([data-testid="pending-uploads"])) .bulkbar')
+        .getByRole("button", { name: "zip でダウンロード" }).click(),
+    ]).then(([d]) => d)
+
+    expect(download.suggestedFilename()).toBe(`${runId()}.zip`)
+    const bytes = Buffer.from(readFileSync(await download.path()))
+    expect(bytes.subarray(0, 2).toString("utf8")).toBe("PK")
+    expect(zipContains(bytes, first)).toBe(true)
+    expect(zipContains(bytes, second)).toBe(true)
+    expect(zipContains(bytes, "first-payload")).toBe(true)
+    expect(zipContains(bytes, "second-payload")).toBe(true)
+  })
+
+  test("S-DOWNLOAD-04: folder を zip で download (相対パスと空 folder を保つ)", async ({ page }) => {
+    const folder = uniqueFolder("dl04")
+    const inner = "nested.txt"
+    await createFolderViaSdk(page, `e2e/${runId()}/${folder}`)
+    await createFolderViaSdk(page, `e2e/${runId()}/${folder}/empty-child`)
+    await page.goto(`/browse/e2e/${runId()}/${folder}/`)
+    await openUploadMenu(page)
+    await page.locator(".uploadmenu").getByRole("menuitem", { name: "ファイルを選択" }).click()
+    await pickFileMenuInput(page).setInputFiles({
+      name: inner,
+      mimeType: "text/plain",
+      buffer: Buffer.from("nested-payload"),
+    })
+    await expect(getRow(page, inner)).toBeVisible({ timeout: 30_000 })
+
+    await page.goto(scopeBrowseUrl())
+    await expect(getFolderRow(page, folder)).toBeVisible({ timeout: 15_000 })
+
+    const download = await Promise.all([
+      page.waitForEvent("download"),
+      (async () => {
+        await openFolderMenu(page, folder)
+        await page.locator(".rowmenu").getByRole("menuitem", { name: "zip でダウンロード" }).click()
+      })(),
+    ]).then(([d]) => d)
+
+    expect(download.suggestedFilename()).toBe(`${folder}.zip`)
+    const bytes = Buffer.from(readFileSync(await download.path()))
+    expect(bytes.subarray(0, 2).toString("utf8")).toBe("PK")
+    // folder 内の相対パスで入る (folder 名は zip 名が担う)
+    expect(zipContains(bytes, inner)).toBe(true)
+    expect(zipContains(bytes, "nested-payload")).toBe(true)
+    // 空 folder は folder entry として残る。.keep そのものは入らない
+    expect(zipContains(bytes, "empty-child/")).toBe(true)
+    expect(zipContains(bytes, ".keep")).toBe(false)
   })
 })

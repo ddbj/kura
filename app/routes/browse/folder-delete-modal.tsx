@@ -1,3 +1,4 @@
+import { useT } from "~/lib/i18n"
 import { Button, Icon, Modal } from "~/ui"
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
 // name is spelled out in the banner so accidents ("wait, THAT folder?")
 // remain catchable without a dedicated target box.
 export const FolderDeleteModal = ({ open, onClose, folderName, onConfirm }: Props) => {
+  const t = useT()
   const submit = () => {
     onConfirm()
     onClose()
@@ -19,15 +21,15 @@ export const FolderDeleteModal = ({ open, onClose, folderName, onConfirm }: Prop
   return (
     <Modal open={open} onClose={onClose} labelledBy="folder-delete-title">
       <div className="mh">
-        <h2 className="mtitle" id="folder-delete-title">フォルダを削除</h2>
+        <h2 className="mtitle" id="folder-delete-title">{t("modal.folderDeleteTitle")}</h2>
       </div>
       <div className="banner red">
         <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />
-        <div>フォルダ「{folderName}」とその中身がすべて削除されます。公開中のファイルも公開が止まります。元には戻せません。</div>
+        <div>{t("modal.folderDeleteBody", { name: folderName })}</div>
       </div>
       <div className="mfoot">
-        <Button onClick={onClose}>キャンセル</Button>
-        <Button kind="dangerbox" onClick={submit}>削除</Button>
+        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button kind="dangerbox" onClick={submit}>{t("common.delete")}</Button>
       </div>
     </Modal>
   )

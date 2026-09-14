@@ -36,7 +36,7 @@ export const TextInput = ({
     ref={ref}
     id={id}
     type={type}
-    className={cn("finput", { err: error === true })}
+    className={cn("finput", { "is-error": error === true })}
     value={value}
     onChange={(event) => onChange(event.target.value)}
     onKeyDown={onKeyDown}

@@ -1,3 +1,4 @@
+import { useT } from "~/lib/i18n"
 import { Button, Icon, Modal } from "~/ui"
 
 type Target = {
@@ -18,6 +19,7 @@ type Props = {
 // runs as a tray operation (enqueueDelete) so progress and partial-failure
 // state show up alongside uploads instead of inside the modal.
 export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
+  const t = useT()
   const submit = () => {
     onConfirm()
     onClose()
@@ -25,21 +27,21 @@ export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
 
   const single = targets.length === 1 ? targets[0] : undefined
   const headline = single !== undefined
-    ? <>「{single.name}」を削除すると元には戻せません。</>
-    : <>{targets.length} 件のファイルを削除すると元には戻せません。</>
+    ? t("modal.deleteBodyOne", { name: single.name })
+    : t("modal.deleteBodyMany", { n: targets.length })
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="delete-title">
       <div className="mh">
-        <h2 className="mtitle" id="delete-title">ファイルを削除</h2>
+        <h2 className="mtitle" id="delete-title">{t("modal.deleteTitle")}</h2>
       </div>
       <div className="banner red">
         <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />
         <div>{headline}</div>
       </div>
       <div className="mfoot">
-        <Button onClick={onClose}>キャンセル</Button>
-        <Button kind="dangerbox" onClick={submit}>削除</Button>
+        <Button onClick={onClose}>{t("common.cancel")}</Button>
+        <Button kind="dangerbox" onClick={submit}>{t("common.delete")}</Button>
       </div>
     </Modal>
   )

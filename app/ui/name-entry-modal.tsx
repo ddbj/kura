@@ -32,11 +32,12 @@ type Props = {
   onConfirm: (name: string) => void | Promise<void>
   submitLabel: string
   busyLabel?: string
+  cancelLabel: string
 }
 
 // Shared shape behind rename / copy / new-folder / folder-rename modals: a
 // TextInput seeded on open, Enter submits, error rendered below, footer holds
-// キャンセル + primary. Reset is keyed on open transitions only so a parent
+// cancel + primary. Reset is keyed on open transitions only so a parent
 // that re-renders during typing does not clobber user input (H-C).
 export const NameEntryModal = ({
   open,
@@ -55,6 +56,7 @@ export const NameEntryModal = ({
   onConfirm,
   submitLabel,
   busyLabel,
+  cancelLabel,
 }: Props) => {
   const [name, setName] = useState("")
   const [error, setError] = useState<string | undefined>()
@@ -130,7 +132,7 @@ export const NameEntryModal = ({
       {error !== undefined ? <p className="ferr" style={{ marginTop: 8 }}>{error}</p> : null}
       {footerSlot}
       <div className="mfoot">
-        <Button onClick={onClose} disabled={busy}>キャンセル</Button>
+        <Button onClick={onClose} disabled={busy}>{cancelLabel}</Button>
         <Button kind="pri" disabled={busy} onClick={() => void submit()}>
           {busy ? (busyLabel ?? submitLabel) : submitLabel}
         </Button>

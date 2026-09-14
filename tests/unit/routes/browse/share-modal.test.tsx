@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, test } from "vitest"
 
 import { oidcProviderProps } from "~/lib/auth"
 import { ConfigProvider } from "~/lib/config"
+import { type Lang, LangProvider } from "~/lib/i18n"
 import { ShareModal } from "~/routes/browse/share-modal"
 
 import { seedAuthenticatedUser } from "../../_helpers/oidc"
@@ -38,11 +39,13 @@ const AuthReady = () => {
   return <span data-testid="auth-state">{auth.user ? "ready" : "pending"}</span>
 }
 
-const Wrapper = ({ children }: { children: ReactNode }) => (
+const Wrapper = ({ children, lang = "ja" }: { children: ReactNode; lang?: Lang }) => (
   <ConfigProvider value={testConfig}>
     <AuthProvider {...testAuthProps}>
-      <AuthReady />
-      {children}
+      <LangProvider initialLang={lang}>
+        <AuthReady />
+        {children}
+      </LangProvider>
     </AuthProvider>
   </ConfigProvider>
 )
@@ -141,5 +144,18 @@ describe("ShareModal", () => {
     expect(within(modal).queryByRole("tablist", { name: "有効期限" })).not.toBeInTheDocument()
     expect(within(modal).queryByRole("button", { name: "リンクを発行" })).not.toBeInTheDocument()
     expect(within(modal).getByRole("button", { name: "閉じる" })).toBeInTheDocument()
+  })
+
+  // The dialog is one of the screens that used to be Japanese-only; keep an
+  // end-to-end check that switching the language actually swaps the copy.
+  test("renders English copy when the language is en", async () => {
+    stsOk()
+    render(<Wrapper lang="en"><ShareModal open onClose={() => undefined} targets={TARGETS} /></Wrapper>)
+    await waitFor(() => expect(screen.getByTestId("auth-state")).toHaveTextContent("ready"))
+
+    const modal = screen.getByRole("dialog", { name: "Create a timed link" })
+    expect(within(modal).getByRole("tab", { name: "15 min" })).toBeInTheDocument()
+    expect(within(modal).getByRole("button", { name: "Create link" })).toBeInTheDocument()
+    expect(within(modal).getByText(/The link expires in about/)).toBeInTheDocument()
   })
 })

@@ -1,5 +1,6 @@
 import { HeadObjectCommand } from "@aws-sdk/client-s3"
 
+import { useT } from "~/lib/i18n"
 import { useS3 } from "~/lib/s3/use-s3"
 import { NameEntryModal } from "~/ui"
 
@@ -31,13 +32,14 @@ const httpStatusOf = (err: unknown): number | undefined =>
 
 export const RenameModal = ({ open, onClose, bucket, srcKey, siblingNames, onConfirm }: Props) => {
   const s3 = useS3()
+  const t = useT()
   const currentName = nameOf(srcKey)
 
   const validate = (trimmed: string): string | undefined => {
-    if (trimmed === "") return "名前を入力してください"
-    if (trimmed.includes("/")) return "名前に「/」は使えません"
-    if (trimmed === currentName) return "元の名前と同じです"
-    if (siblingNames.includes(trimmed)) return `「${trimmed}」は既にあります`
+    if (trimmed === "") return t("modal.nameRequired")
+    if (trimmed.includes("/")) return t("modal.noSlash")
+    if (trimmed === currentName) return t("modal.sameName")
+    if (siblingNames.includes(trimmed)) return t("modal.alreadyExists", { name: trimmed })
 
     return undefined
   }
@@ -47,7 +49,7 @@ export const RenameModal = ({ open, onClose, bucket, srcKey, siblingNames, onCon
     try {
       await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: destKey }))
 
-      return `「${trimmed}」は既にあります`
+      return t("modal.alreadyExists", { name: trimmed })
     } catch (err) {
       const status = httpStatusOf(err)
       if (status === 404 || status === 403) return undefined
@@ -59,17 +61,18 @@ export const RenameModal = ({ open, onClose, bucket, srcKey, siblingNames, onCon
     <NameEntryModal
       open={open}
       onClose={onClose}
-      title="名前を変更"
+      title={t("modal.renameTitle")}
       labelledBy="rename-title"
       inputId="rename-name"
-      inputLabel="新しい名前"
-      placeholder="新しい名前"
+      inputLabel={t("modal.renameInput")}
+      placeholder={t("modal.renameInput")}
       initialName={() => currentName}
       validate={validate}
       verify={verify}
       onConfirm={(trimmed) => onConfirm(`${parentOf(srcKey)}${trimmed}`)}
-      submitLabel="変更"
-      busyLabel="確認中…"
+      cancelLabel={t("common.cancel")}
+      submitLabel={t("modal.renameSubmit")}
+      busyLabel={t("common.checking")}
     />
   )
 }

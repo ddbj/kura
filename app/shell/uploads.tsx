@@ -3,9 +3,12 @@ import { useQueryClient } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
+import { formatBytes } from "~/lib/format"
+import { useT } from "~/lib/i18n"
 import type { RunningUpload, UploadProgress } from "~/lib/s3"
-import { copyObject, deleteEmptyDirectory, deleteObjects, listAllUnderPrefix, renameObject, ResumeMismatchError, resumeUpload, startUpload } from "~/lib/s3"
+import { copyObject, deleteEmptyDirectory, deleteObjects, isSaveCancelled, isZipTooLargeForMemory, listAllUnderPrefix, makeZipStream, MEMORY_ZIP_LIMIT_BYTES, predictZipSize, renameObject, ResumeMismatchError, resumeUpload, saveZipStream, startUpload, zipEntriesForPrefix,type ZipEntry } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
+import { dropSessionPresigned, dropSessionPresignedUnder } from "~/lib/session-presigned"
 
 export type TransferState =
   | "checking"
@@ -18,6 +21,7 @@ export type TransferState =
 
 export type OperationKind =
   | "upload"
+  | "download"
   | "delete"
   | "rename"
   | "move"
@@ -65,7 +69,7 @@ type TransfersApi = {
   retry: (id: string) => void
   cancelAll: () => void
   // Removes every row that isn't actively running (done / failed / conflict /
-  // paused). Wired to the upcard's "閉じる" button, which only appears when
+  // paused). Wired to the upcard's close button, which only appears when
   // there is no in-flight work.
   dismissAll: () => void
   // Removes only "done" rows and leaves failed / conflict / paused untouched.
@@ -83,6 +87,9 @@ type TransfersApi = {
   // srcPrefix / destPrefix both end with "/". Used for both rename (same
   // parent, different name) and move (different parent, same name).
   enqueueFolderMove: (bucket: string, srcPrefix: string, destPrefix: string, kind: "folder-rename" | "folder-move") => Promise<BatchOutcome<string>>
+  // まとめて download。zip はブラウザ内で組み立てる。
+  enqueueZipDownload: (bucket: string, entries: readonly ZipEntry[], zipName: string) => Promise<void>
+  enqueueFolderZipDownload: (bucket: string, prefix: string, zipName: string) => Promise<void>
 }
 
 const TransfersContext = createContext<TransfersApi | null>(null)
@@ -180,8 +187,11 @@ const runBatch = async <T,>(
 export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const s3 = useS3()
   const queryClient = useQueryClient()
+  const t = useT()
   const [transfers, setTransfers] = useState<readonly Transfer[]>([])
   const runningMap = useRef(new Map<string, Running>())
+  // zip download は upload と経路が別なので、中断用の controller を分けて持つ
+  const downloadAborts = useRef(new Map<string, AbortController>())
   // File objects live outside React state because they aren't serialisable
   // and only the transfer state needs to re-render.
   const filesRef = useRef(new Map<string, File>())
@@ -393,6 +403,12 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   }, [removeOne])
 
   const cancel = useCallback((id: string): void => {
+    const download = downloadAborts.current.get(id)
+    if (download !== undefined) {
+      download.abort()
+
+      return
+    }
     const r = runningMap.current.get(id)
     if (r !== undefined) {
       void r.abort()
@@ -468,6 +484,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   }, [updateOne, runResume])
 
   const cancelAll = useCallback((): void => {
+    for (const controller of downloadAborts.current.values()) controller.abort()
     for (const [id, r] of runningMap.current.entries()) {
       void r.abort()
       updateOne(id, { state: "failed", error: "cancelled" })
@@ -490,7 +507,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   }, [updateOne])
 
   const dismissAll = useCallback((): void => {
-    // Wired to the upcard "閉じる" button, which the UI only shows when nothing
+    // Wired to the upcard close button, which the UI only shows when nothing
     // is uploading / queued / checking. Every remaining row is a settled state
     // (done / failed / conflict / paused) that the user has acknowledged.
     setTransfers((prev) => {
@@ -528,7 +545,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const resumePending = useCallback((bucket: string, key: string, uploadId: string, file: File): void => {
     const id = `resume-${Date.now()}-${key}`
     filesRef.current.set(id, file)
-    const t: Transfer = {
+    const transfer: Transfer = {
       id,
       kind: "upload",
       bucket,
@@ -539,7 +556,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       loaded: 0,
       total: file.size,
     }
-    setTransfers((prev) => [...prev, t])
+    setTransfers((prev) => [...prev, transfer])
     runningCountRef.current += 1
 
     const cancelState = { requested: false }
@@ -594,8 +611,10 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     if (targets.length === 0) return { ok: [], failed: [] }
     const id = nextId("delete")
     const primary = targets[0] as DeleteTarget
-    const displayName = targets.length === 1 ? entryName(primary.key) : `${targets.length} 件のファイル`
-    const t: Transfer = {
+    const displayName = targets.length === 1
+      ? entryName(primary.key)
+      : t("transfers.targetsCount", { n: targets.length })
+    const transfer: Transfer = {
       id,
       kind: "delete",
       bucket,
@@ -606,12 +625,16 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       loaded: 0,
       total: targets.length,
     }
-    setTransfers((prev) => [...prev, t])
+    setTransfers((prev) => [...prev, transfer])
     try {
       const res = await deleteObjects(s3, bucket, targets.map((x) => x.key))
+      // 消えた key の presign 記録を落とす。S3 応答の Deleted ではなく「失敗しな
+      // かった key」を使う: Quiet 応答の実装だと Deleted が空で返りうるため。
+      const failedKeys = new Set(res.failed.map((f) => f.key))
+      dropSessionPresigned(bucket, targets.map((x) => x.key).filter((key) => !failedKeys.has(key)))
       updateOne(id, { loaded: res.deleted.length })
       if (res.failed.length > 0) {
-        finishOperation(id, `${res.failed.length} 件の削除に失敗しました`)
+        finishOperation(id, t("transfers.deleteFailedCount", { n: res.failed.length }))
       } else {
         finishOperation(id)
       }
@@ -625,7 +648,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
 
       return { ok: [], failed: targets.map((x) => ({ key: x.key, message })) }
     }
-  }, [s3, queryClient, updateOne, finishOperation])
+  }, [s3, queryClient, updateOne, finishOperation, t])
 
   const runSingleOp = useCallback(async (
     bucket: string,
@@ -635,7 +658,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     action: () => Promise<void>,
   ): Promise<void> => {
     const id = nextId(kind)
-    const t: Transfer = {
+    const transfer: Transfer = {
       id,
       kind,
       bucket,
@@ -647,9 +670,10 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       loaded: 0,
       total: 1,
     }
-    setTransfers((prev) => [...prev, t])
+    setTransfers((prev) => [...prev, transfer])
     try {
       await action()
+      if (kind !== "copy") dropSessionPresigned(bucket, [srcKey])
       updateOne(id, { loaded: 1 })
       finishOperation(id)
       void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
@@ -676,7 +700,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const enqueueFolderDelete = useCallback(async (bucket: string, prefix: string): Promise<BatchOutcome<string>> => {
     const id = nextId("folder-delete")
     const displayName = prefix === "" ? bucket : (prefix.slice(0, -1).split("/").pop() ?? prefix)
-    const t: Transfer = {
+    const transfer: Transfer = {
       id,
       kind: "folder-delete",
       bucket,
@@ -688,14 +712,15 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       total: 0,
       isFolder: true,
     }
-    setTransfers((prev) => [...prev, t])
+    setTransfers((prev) => [...prev, transfer])
     try {
       const entries = await listAllUnderPrefix(s3, bucket, prefix)
       updateOne(id, { total: entries.length, fileCount: entries.length })
       const res = await deleteObjects(s3, bucket, entries.map((e) => e.key))
+      dropSessionPresignedUnder(bucket, prefix)
       updateOne(id, { loaded: res.deleted.length })
       if (res.failed.length > 0) {
-        finishOperation(id, `${res.failed.length} 件の削除に失敗しました`)
+        finishOperation(id, t("transfers.deleteFailedCount", { n: res.failed.length }))
       } else {
         finishOperation(id)
       }
@@ -714,7 +739,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
 
       return { ok: [], failed: [{ key: prefix, message }] }
     }
-  }, [s3, queryClient, updateOne, finishOperation])
+  }, [s3, queryClient, updateOne, finishOperation, t])
 
   const enqueueFolderMove = useCallback(async (
     bucket: string,
@@ -724,7 +749,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   ): Promise<BatchOutcome<string>> => {
     const id = nextId(kind)
     const displayName = srcPrefix === "" ? bucket : (srcPrefix.slice(0, -1).split("/").pop() ?? srcPrefix)
-    const t: Transfer = {
+    const transfer: Transfer = {
       id,
       kind,
       bucket,
@@ -737,7 +762,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       total: 0,
       isFolder: true,
     }
-    setTransfers((prev) => [...prev, t])
+    setTransfers((prev) => [...prev, transfer])
     try {
       const entries = await listAllUnderPrefix(s3, bucket, srcPrefix)
       updateOne(id, { total: entries.length, fileCount: entries.length })
@@ -754,8 +779,9 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
         if (result.ok) ok.push(entry.key)
         else failed.push({ key: entry.key, message: result.message })
       })
+      dropSessionPresigned(bucket, ok)
       if (failed.length > 0) {
-        finishOperation(id, `${failed.length} 件の移動に失敗しました`)
+        finishOperation(id, t("transfers.moveFailedCount", { n: failed.length }))
       } else {
         finishOperation(id)
       }
@@ -772,7 +798,79 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
 
       return { ok: [], failed: [{ key: srcPrefix, message }] }
     }
-  }, [s3, queryClient, updateOne, finishOperation])
+  }, [s3, queryClient, updateOne, finishOperation, t])
+
+  // zip はブラウザ内で組み立てて、その場でディスクへ流す。進捗は転送済みバイト。
+  const enqueueZipDownload = useCallback(async (
+    bucket: string,
+    entries: readonly ZipEntry[],
+    zipName: string,
+  ): Promise<void> => {
+    if (entries.length === 0) return
+    const id = nextId("download")
+    const totalBytes = predictZipSize(entries)
+    const transfer: Transfer = {
+      id,
+      kind: "download",
+      bucket,
+      key: zipName,
+      name: zipName,
+      size: totalBytes,
+      state: "uploading",
+      loaded: 0,
+      total: totalBytes,
+      fileCount: entries.length,
+    }
+    setTransfers((prev) => [...prev, transfer])
+
+    if (isZipTooLargeForMemory(entries)) {
+      finishOperation(id, t("notice.zipTooLarge", { limit: formatBytes(MEMORY_ZIP_LIMIT_BYTES, 0) }))
+
+      return
+    }
+
+    const controller = new AbortController()
+    downloadAborts.current.set(id, controller)
+    // chunk ごとに state を触ると再 render が過剰になるので間引く
+    let lastTick = 0
+    try {
+      const stream = makeZipStream({
+        s3,
+        bucket,
+        entries,
+        signal: controller.signal,
+        onProgress: (loaded) => {
+          const now = Date.now()
+          if (now - lastTick < 200 && loaded < totalBytes) return
+          lastTick = now
+          updateOne(id, { loaded })
+        },
+      })
+      await saveZipStream(stream, zipName, totalBytes)
+      updateOne(id, { loaded: totalBytes })
+      finishOperation(id)
+    } catch (err) {
+      // 保存ダイアログを閉じた / 明示的に中断した場合は失敗として残さない
+      if (isSaveCancelled(err) || controller.signal.aborted) {
+        removeOne(id)
+
+        return
+      }
+      finishOperation(id, err instanceof Error ? err.message : String(err))
+    } finally {
+      downloadAborts.current.delete(id)
+    }
+  }, [s3, updateOne, removeOne, finishOperation, t])
+
+  const enqueueFolderZipDownload = useCallback(async (
+    bucket: string,
+    prefix: string,
+    zipName: string,
+  ): Promise<void> => {
+    const listed = await listAllUnderPrefix(s3, bucket, prefix)
+
+    await enqueueZipDownload(bucket, zipEntriesForPrefix(prefix, listed), zipName)
+  }, [s3, enqueueZipDownload])
 
   const api = useMemo<TransfersApi>(() => ({
     transfers,
@@ -793,7 +891,9 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     enqueueCopy,
     enqueueFolderDelete,
     enqueueFolderMove,
-  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, dismissDone, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove])
+    enqueueZipDownload,
+    enqueueFolderZipDownload,
+  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, dismissDone, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove, enqueueZipDownload, enqueueFolderZipDownload])
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>
 }

@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw"
 import { describe, expect, test } from "vitest"
 
-import { listBucketTotalBytes } from "~/lib/s3/quota"
+import { foldBucketStats, listBucketStats } from "~/lib/s3/quota"
 
 import { TEST_S3_ENDPOINT as ENDPOINT, testS3 } from "../../_helpers/s3"
 import { s3ErrorXml } from "../../mocks/s3-xml"
@@ -24,8 +24,8 @@ const listXml = ({
   ${objects.map((o) => `<Contents><Key>${o.key}</Key>${o.sizeXml}<LastModified>2026-07-01T10:00:00.000Z</LastModified><ETag>&quot;e&quot;</ETag><StorageClass>STANDARD</StorageClass></Contents>`).join("\n  ")}
 </ListBucketResult>`
 
-describe("listBucketTotalBytes", () => {
-  test("listBucketTotalBytes_singlePage_sumsSizes", async () => {
+describe("listBucketStats", () => {
+  test("listBucketStats_singlePage_sumsSizes", async () => {
     server.use(
       http.get(`${ENDPOINT}/${BUCKET}`, () =>
         HttpResponse.xml(listXml({
@@ -35,18 +35,18 @@ describe("listBucketTotalBytes", () => {
           ],
         }))),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).resolves.toBe(35)
+    await expect(listBucketStats(testS3(), BUCKET)).resolves.toMatchObject({ totalBytes: 35 })
   })
 
-  test("listBucketTotalBytes_emptyBucket_returnsZero", async () => {
+  test("listBucketStats_emptyBucket_returnsZero", async () => {
     server.use(
       http.get(`${ENDPOINT}/${BUCKET}`, () =>
         HttpResponse.xml(listXml({ objects: [] }))),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).resolves.toBe(0)
+    await expect(listBucketStats(testS3(), BUCKET)).resolves.toMatchObject({ totalBytes: 0 })
   })
 
-  test("listBucketTotalBytes_missingSizeElement_countsAsZero", async () => {
+  test("listBucketStats_missingSizeElement_countsAsZero", async () => {
     // A <Contents> without a <Size> tag (spec quirk in some backends) must
     // not tank the whole tally to NaN.
     server.use(
@@ -58,10 +58,10 @@ describe("listBucketTotalBytes", () => {
           ],
         }))),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).resolves.toBe(7)
+    await expect(listBucketStats(testS3(), BUCKET)).resolves.toMatchObject({ totalBytes: 7 })
   })
 
-  test("listBucketTotalBytes_multiplePages_paginatesUntilExhausted", async () => {
+  test("listBucketStats_multiplePages_paginatesUntilExhausted", async () => {
     const sentTokens: (string | null)[] = []
     server.use(
       http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
@@ -84,11 +84,11 @@ describe("listBucketTotalBytes", () => {
         }))
       }),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).resolves.toBe(350)
+    await expect(listBucketStats(testS3(), BUCKET)).resolves.toMatchObject({ totalBytes: 350 })
     expect(sentTokens).toEqual([null, "page-2", "page-3"])
   })
 
-  test("listBucketTotalBytes_truncatedWithoutNextToken_stopsCleanlyOnFinalPage", async () => {
+  test("listBucketStats_truncatedWithoutNextToken_stopsCleanlyOnFinalPage", async () => {
     // IsTruncated=false with no NextContinuationToken -> the loop stops
     // after one page; no infinite polling for a missing token.
     server.use(
@@ -97,10 +97,10 @@ describe("listBucketTotalBytes", () => {
           objects: [{ key: "only.txt", sizeXml: "<Size>42</Size>" }],
         }))),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).resolves.toBe(42)
+    await expect(listBucketStats(testS3(), BUCKET)).resolves.toMatchObject({ totalBytes: 42 })
   })
 
-  test("listBucketTotalBytes_serverError_propagates", async () => {
+  test("listBucketStats_serverError_propagates", async () => {
     server.use(
       http.get(`${ENDPOINT}/${BUCKET}`, () =>
         new HttpResponse(s3ErrorXml("AccessDenied", "denied"), {
@@ -108,10 +108,10 @@ describe("listBucketTotalBytes", () => {
           headers: { "Content-Type": "application/xml" },
         })),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).rejects.toThrow()
+    await expect(listBucketStats(testS3(), BUCKET)).rejects.toThrow()
   })
 
-  test("listBucketTotalBytes_truncatedWithoutNextToken_stopsInsteadOfLooping", async () => {
+  test("listBucketStats_truncatedWithoutNextToken_stopsInsteadOfLooping", async () => {
     // A server that returns IsTruncated=true with no NextContinuationToken
     // used to trap the naive loop into resending the same request forever.
     // Treat "no next marker" as end-of-list and count only what was returned.
@@ -128,7 +128,52 @@ describe("listBucketTotalBytes", () => {
 </ListBucketResult>`, { headers: { "Content-Type": "application/xml" } })
       }),
     )
-    await expect(listBucketTotalBytes(testS3(), BUCKET)).resolves.toBe(17)
+    await expect(listBucketStats(testS3(), BUCKET)).resolves.toMatchObject({ totalBytes: 17 })
     expect(calls).toBe(1)
+  })
+})
+
+// フォルダ行のサイズ / 更新日は、使用量の走査結果を畳んで作る。中間 prefix を
+// 取りこぼすと、深い階層のフォルダだけ値が出ないという形で壊れる。
+describe("foldBucketStats", () => {
+  const at = (iso: string): number => new Date(iso).getTime()
+
+  test("foldBucketStats_nestedKeys_accumulateIntoEveryAncestor", () => {
+    const stats = foldBucketStats([
+      { key: "a/b/deep.bin", size: 100, lastModifiedMs: at("2026-03-01T00:00:00Z") },
+      { key: "a/shallow.txt", size: 20, lastModifiedMs: at("2026-05-01T00:00:00Z") },
+      { key: "root.txt", size: 3, lastModifiedMs: at("2026-01-01T00:00:00Z") },
+    ])
+
+    expect(stats.totalBytes).toBe(123)
+    expect(stats.folders.get("a/")).toEqual({ bytes: 120, lastModifiedMs: at("2026-05-01T00:00:00Z") })
+    expect(stats.folders.get("a/b/")).toEqual({ bytes: 100, lastModifiedMs: at("2026-03-01T00:00:00Z") })
+    // ルート直下のファイルはどのフォルダにも属さない
+    expect(stats.folders.has("root.txt")).toBe(false)
+  })
+
+  test("foldBucketStats_similarlyNamedSiblings_doNotBleedIntoEachOther", () => {
+    const stats = foldBucketStats([
+      { key: "docs/a.txt", size: 10, lastModifiedMs: at("2026-01-01T00:00:00Z") },
+      { key: "docs-2/b.txt", size: 40, lastModifiedMs: at("2026-01-02T00:00:00Z") },
+    ])
+
+    expect(stats.folders.get("docs/")?.bytes).toBe(10)
+    expect(stats.folders.get("docs-2/")?.bytes).toBe(40)
+  })
+
+  test("foldBucketStats_folderMarkerOnly_isStillListedWithZeroBytes", () => {
+    const stats = foldBucketStats([
+      { key: "empty/.keep", size: 0, lastModifiedMs: at("2026-04-01T09:00:00Z") },
+    ])
+
+    expect(stats.folders.get("empty/")).toEqual({ bytes: 0, lastModifiedMs: at("2026-04-01T09:00:00Z") })
+  })
+
+  test("foldBucketStats_noObjects_isEmpty", () => {
+    const stats = foldBucketStats([])
+
+    expect(stats.totalBytes).toBe(0)
+    expect(stats.folders.size).toBe(0)
   })
 })

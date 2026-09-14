@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "react-oidc-context"
 
 import { useConfig } from "~/lib/config"
-import { formatBytes } from "~/lib/format"
-import { accessTokenForDuration, presignShareUrl } from "~/lib/s3"
+import { formatBytes, formatDuration } from "~/lib/format"
+import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
+import { accessTokenForDuration, freshAccessToken, presignShareUrl } from "~/lib/s3"
 import { addSessionPresigned } from "~/lib/session-presigned"
 import { Button, Icon, LinkBar, Modal, Segmented, Tag } from "~/ui"
 
@@ -20,7 +21,11 @@ type Props = {
   targets: Target[]
 }
 
-type Ttl = 15 | 60 | 720
+// SeaweedFS の STS が持つ DurationSeconds の固定上限。"max" はこれを要求し、
+// 実際の寿命は access token の残り寿命まで STS 側で切り詰められる。
+const MAX_PRESIGN_SECONDS = 43_200
+
+type Ttl = 15 | 60 | "max"
 
 type RowState =
   | { phase: "idle" }
@@ -28,13 +33,17 @@ type RowState =
   | { phase: "ok"; url: string; expiresAt: Date }
   | { phase: "err"; message: string }
 
-// Design_handoff frame 8. Runs targets in parallel via allSettled so a single
-// failure doesn't stop the whole batch, and lets the user retry just the
-// failed rows without re-running the successful ones.
+// Runs targets in parallel via allSettled so a single failure doesn't stop the
+// whole batch, and lets the user retry just the failed rows without re-running
+// the successful ones.
 export const ShareModal = ({ open, onClose, targets }: Props) => {
   const config = useConfig()
   const auth = useAuth()
-  const [ttl, setTtl] = useState<Ttl>(720)
+  const t = useT()
+  const lang = useLang()
+  const [ttl, setTtl] = useState<Ttl>("max")
+  // モーダルを開いた時点のセッション残り。表示だけに使うので開くたびに固定する。
+  const [sessionRemainingS, setSessionRemainingS] = useState<number | undefined>(undefined)
   const [busyBatch, setBusyBatch] = useState(false)
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({})
 
@@ -44,12 +53,23 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
     if (open) {
       setRowStates({})
       setBusyBatch(false)
+      setSessionRemainingS(typeof auth.user?.expires_in === "number" ? auth.user.expires_in : undefined)
     }
-  }, [open])
+  }, [open, auth.user])
+
+  const requestedSeconds = ttl === "max" ? MAX_PRESIGN_SECONDS : ttl * 60
+  // 認証セッションの残りが要求より短ければ、そちらが実際の寿命になる。
+  const effectiveSeconds = sessionRemainingS === undefined
+    ? requestedSeconds
+    : Math.min(requestedSeconds, sessionRemainingS)
 
   const runOne = async (target: Target): Promise<RowState> => {
-    const expiresIn = ttl * 60
-    const token = await accessTokenForDuration(auth, expiresIn)
+    const expiresIn = requestedSeconds
+    // "max" はセッションの残りをそのまま使う。満たしようのない長さを要求して
+    // 無駄な renew を走らせない。
+    const token = ttl === "max"
+      ? await freshAccessToken(auth)
+      : await accessTokenForDuration(auth, expiresIn)
     const presigned = await presignShareUrl({
       endpoint: config.s3Endpoint,
       token,
@@ -97,14 +117,14 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
 
   const onSubmitAll = () => void runBatch(targets)
   const onRetryFailed = () => {
-    const failed = targets.filter((t) => rowStates[rowKey(t)]?.phase === "err")
+    const failed = targets.filter((target) => rowStates[rowKey(target)]?.phase === "err")
     void runBatch(failed)
   }
 
   const summary = useMemo(() => {
     let ok = 0, err = 0, busy = 0
-    for (const t of targets) {
-      const s = rowStates[rowKey(t)]
+    for (const target of targets) {
+      const s = rowStates[rowKey(target)]
       if (s === undefined) continue
       if (s.phase === "ok") ok += 1
       else if (s.phase === "err") err += 1
@@ -119,22 +139,22 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
   return (
     <Modal open={open} onClose={onClose} labelledBy="share-title">
       <div className="mh split">
-        <h2 className="mtitle" id="share-title">期限つきリンクを発行</h2>
-        <Tag tone="warn">期限つき</Tag>
+        <h2 className="mtitle" id="share-title">{t("share.title")}</h2>
+        <Tag tone="warn">{t("browse.timedTag")}</Tag>
       </div>
 
       <div className="flist">
-        {targets.map((t) => {
-          const state = rowStates[rowKey(t)]
+        {targets.map((target) => {
+          const state = rowStates[rowKey(target)]
 
           return (
-            <div className="frow" key={rowKey(t)}>
-              <span className="fn" title={t.key}>{t.name}</span>
+            <div className="frow" key={rowKey(target)}>
+              <span className="fn" title={target.key}>{target.name}</span>
               <span className="fmeta" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {state?.phase === "busy" ? <Tag tone="run">発行中</Tag> : null}
-                {state?.phase === "ok" ? <Tag tone="ok">完了</Tag> : null}
-                {state?.phase === "err" ? <Tag tone="fail">失敗</Tag> : null}
-                <span>{formatBytes(t.size)}</span>
+                {state?.phase === "busy" ? <Tag tone="run">{t("share.statusIssuing")}</Tag> : null}
+                {state?.phase === "ok" ? <Tag tone="ok">{t("share.statusDone")}</Tag> : null}
+                {state?.phase === "err" ? <Tag tone="fail">{t("share.statusFailed")}</Tag> : null}
+                <span>{formatBytes(target.size)}</span>
               </span>
             </div>
           )
@@ -145,21 +165,21 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
         {!anyIssued ? (
           <>
             <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 12px" }}>
-              <span className="lbl" style={{ color: "var(--inkMid)" }}>有効期限</span>
+              <span className="lbl" style={{ color: "var(--inkMid)" }}>{t("share.ttlLabel")}</span>
               <Segmented<Ttl>
                 value={ttl}
                 onChange={setTtl}
-                ariaLabel="有効期限"
+                ariaLabel={t("share.ttlLabel")}
                 options={[
-                  { value: 15, label: "15分" },
-                  { value: 60, label: "1時間" },
-                  { value: 720, label: "12時間" },
+                  { value: 15, label: t("share.ttl15") },
+                  { value: 60, label: t("share.ttl60") },
+                  { value: "max", label: t("share.ttlMax") },
                 ]}
               />
             </div>
             <div className="banner ochre">
               <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
-              <div>リンクは最長で約{ttl === 720 ? "12時間" : ttl === 60 ? "1時間" : `${ttl}分`}後に切れます。発行したあとに延長や取り消しはできません。</div>
+              <div>{t(ttl === "max" ? "share.noticeMax" : "share.notice", { duration: formatDuration(effectiveSeconds / 60, t) })}</div>
             </div>
           </>
         ) : null}
@@ -167,23 +187,25 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
 
       {anyIssued ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
-          {targets.map((t) => {
-            const state = rowStates[rowKey(t)]
+          {targets.map((target) => {
+            const state = rowStates[rowKey(target)]
             if (state === undefined || state.phase === "idle" || state.phase === "busy") return null
             if (state.phase === "err") {
               return (
-                <div key={rowKey(t)}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--inkSoft)", marginBottom: 4 }}>{t.name}</div>
-                  <p className="err" style={{ margin: 0 }}>失敗: {state.message}</p>
+                <div key={rowKey(target)}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--inkSoft)", marginBottom: 4 }}>{target.name}</div>
+                  <p className="err" style={{ margin: 0 }}>{t("share.failedPrefix", { message: state.message })}</p>
                 </div>
               )
             }
 
             return (
-              <div key={rowKey(t)}>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--inkSoft)", marginBottom: 4 }}>{t.name}</div>
-                <LinkBar url={state.url} tone="warn" copyLabel="コピー" copiedLabel="コピー済み" />
-                <div style={{ fontSize: 11, color: "var(--inkSoft)", marginTop: 4 }}>{state.expiresAt.toLocaleString()} まで有効</div>
+              <div key={rowKey(target)}>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--inkSoft)", marginBottom: 4 }}>{target.name}</div>
+                <LinkBar url={state.url} tone="warn" copyLabel={t("common.copy")} copiedLabel={t("common.copied")} />
+                <div style={{ fontSize: 11, color: "var(--inkSoft)", marginTop: 4 }}>
+                  {t("share.expiresAt", { datetime: formatDateTimeLocalized(state.expiresAt, lang) })}
+                </div>
               </div>
             )
           })}
@@ -194,22 +216,22 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
         {!anyIssued
           ? (
             <>
-              <Button onClick={onClose}>キャンセル</Button>
+              <Button onClick={onClose}>{t("common.cancel")}</Button>
               <Button kind="pri" disabled={busyBatch} onClick={onSubmitAll}>
-                {busyBatch ? "処理中…" : "リンクを発行"}
+                {busyBatch ? t("share.issuing") : t("share.issue")}
               </Button>
             </>
           )
           : summary.err > 0
             ? (
               <>
-                <Button onClick={onClose}>閉じる</Button>
+                <Button onClick={onClose}>{t("common.close")}</Button>
                 <Button kind="pri" disabled={busyBatch} onClick={onRetryFailed}>
-                  {busyBatch ? "再試行中…" : `失敗した${summary.err}件を再試行`}
+                  {busyBatch ? t("share.retrying") : t("share.retryFailed", { n: summary.err })}
                 </Button>
               </>
             )
-            : <Button kind="pri" onClick={onClose}>閉じる</Button>}
+            : <Button kind="pri" onClick={onClose}>{t("common.close")}</Button>}
       </div>
     </Modal>
   )

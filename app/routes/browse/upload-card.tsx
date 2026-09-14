@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { formatBytes } from "~/lib/format"
+import { type TFn, useT } from "~/lib/i18n"
 import { DONE_DISMISS_MS, type OperationKind, type Transfer } from "~/shell"
 import { Button, Icon, type IconName, Tag } from "~/ui"
 
@@ -12,6 +13,7 @@ const headerIcon = (kinds: ReadonlySet<OperationKind>): IconName | null => {
   if (kinds.size !== 1) return null
   const only = [...kinds][0] as OperationKind
   if (only === "upload") return "up"
+  if (only === "download") return "dl"
   if (only === "delete" || only === "folder-delete") return "trash"
 
   return null
@@ -35,85 +37,95 @@ const formatSpeed = (bps: number | undefined): string => {
   return `${formatBytes(bps)}/s`
 }
 
-// Present-tense verb per operation kind, shown in the "状態" column while an
+// Present-tense verb per operation kind, shown in the state column while an
 // operation is running.
-const runningVerb = (kind: OperationKind): string => {
+const runningVerb = (kind: OperationKind, t: TFn): string => {
   switch (kind) {
-    case "upload": return "アップロード中"
-    case "delete":
-    case "folder-delete": return "削除中"
-    case "rename": return "名前変更中"
-    case "move":
-    case "folder-move": return "移動中"
-    case "copy": return "コピー中"
-    case "folder-rename": return "フォルダ名変更中"
+    case "upload": return t("transfers.runningUpload")
+    case "download": return t("transfers.runningDownload")
+    case "delete": return t("transfers.runningDelete")
+    case "folder-delete": return t("transfers.runningFolderDelete")
+    case "rename": return t("transfers.runningRename")
+    case "move": return t("transfers.runningMove")
+    case "folder-move": return t("transfers.runningFolderMove")
+    case "copy": return t("transfers.runningCopy")
+    case "folder-rename": return t("transfers.runningFolderRename")
   }
 }
 
-const headerLabel = (kinds: ReadonlySet<OperationKind>): string => {
-  if (kinds.size === 0) return "操作"
+const headerLabel = (kinds: ReadonlySet<OperationKind>, t: TFn): string => {
+  if (kinds.size === 0) return t("transfers.fallbackLabel")
   if (kinds.size === 1) {
     const only = [...kinds][0] as OperationKind
     switch (only) {
-      case "upload": return "アップロード"
-      case "delete":
-      case "folder-delete": return "削除"
-      case "rename": return "名前変更"
-      case "move":
-      case "folder-move": return "移動"
-      case "copy": return "コピー"
-      case "folder-rename": return "フォルダ名変更"
+      case "upload": return t("transfers.kindUpload")
+      case "download": return t("transfers.kindDownload")
+      case "delete": return t("transfers.kindDelete")
+      case "folder-delete": return t("transfers.kindFolderDelete")
+      case "rename": return t("transfers.kindRename")
+      case "move": return t("transfers.kindMove")
+      case "folder-move": return t("transfers.kindFolderMove")
+      case "copy": return t("transfers.kindCopy")
+      case "folder-rename": return t("transfers.kindFolderRename")
     }
   }
 
-  return "進行中"
+  return t("transfers.inProgress")
 }
 
-const rowIcon = (t: Transfer): IconName => {
-  if (t.state === "done") return "check"
-  if (t.isFolder === true) return "folder"
-  if (t.kind === "upload") return "file"
-  if (t.kind === "delete" || t.kind === "folder-delete") return "trash"
-  if (t.kind === "copy") return "file"
+const rowIcon = (transfer: Transfer): IconName => {
+  if (transfer.state === "done") return "check"
+  if (transfer.isFolder === true) return "folder"
+  if (transfer.kind === "upload") return "file"
+  if (transfer.kind === "download") return "dl"
+  if (transfer.kind === "delete" || transfer.kind === "folder-delete") return "trash"
 
   return "file"
 }
 
-// upload は bytes、他 kind は件数 で "n 件完了 / m 件" を出す。
-const detailText = (t: Transfer): string => {
-  if (t.kind === "upload") {
-    if (t.state === "uploading" || t.state === "checking") {
-      return `${formatBytes(t.loaded)} / ${formatBytes(t.total)}${t.speedBps !== undefined ? ` · ${formatSpeed(t.speedBps)}` : ""}`
+// upload は bytes、他 kind は件数で進捗を出す。
+const detailText = (transfer: Transfer, t: TFn): string => {
+  if (transfer.kind === "upload" || transfer.kind === "download") {
+    if (transfer.state === "uploading" || transfer.state === "checking") {
+      const speed = transfer.speedBps !== undefined ? ` · ${formatSpeed(transfer.speedBps)}` : ""
+
+      return `${formatBytes(transfer.loaded)} / ${formatBytes(transfer.total)}${speed}`
     }
-    if (t.state === "failed") {
-      return t.error === "content mismatch" ? "内容が一致しません" : t.error === "cancelled" ? "キャンセル済み" : "エラー発生"
+    if (transfer.state === "failed") {
+      if (transfer.error === "content mismatch") return t("transfers.detailMismatch")
+
+      return transfer.error === "cancelled" ? t("transfers.detailCancelled") : t("transfers.detailError")
     }
-    if (t.state === "conflict") return "同名が既に存在"
-    if (t.state === "done") return formatBytes(t.total)
+    if (transfer.state === "conflict") return t("transfers.detailConflict")
+    if (transfer.state === "done") return formatBytes(transfer.total)
 
     return ""
   }
-  if (t.state === "failed") return t.error === undefined || t.error === "" ? "エラー発生" : t.error
-  if (t.total > 1) return `${t.loaded} / ${t.total} 件`
-  if (t.state === "done") return "完了"
+  if (transfer.state === "failed") {
+    return transfer.error === undefined || transfer.error === "" ? t("transfers.detailError") : transfer.error
+  }
+  if (transfer.total > 1) return t("transfers.detailCount", { loaded: transfer.loaded, total: transfer.total })
+  if (transfer.state === "done") return t("transfers.stateDone")
 
   return ""
 }
 
-const stateTag = (t: Transfer) => {
-  if (t.state === "uploading" || t.state === "checking") return <Tag tone="run">{runningVerb(t.kind)}</Tag>
-  if (t.state === "queued") return <Tag tone="neutral">待機中</Tag>
-  if (t.state === "failed") return <Tag tone="fail">失敗</Tag>
-  if (t.state === "conflict") return <Tag tone="warn">衝突</Tag>
-  if (t.state === "paused") return <Tag tone="neutral">一時停止</Tag>
+const stateTag = (transfer: Transfer, t: TFn) => {
+  if (transfer.state === "uploading" || transfer.state === "checking") {
+    return <Tag tone="run">{runningVerb(transfer.kind, t)}</Tag>
+  }
+  if (transfer.state === "queued") return <Tag tone="neutral">{t("transfers.stateQueued")}</Tag>
+  if (transfer.state === "failed") return <Tag tone="fail">{t("transfers.stateFailed")}</Tag>
+  if (transfer.state === "conflict") return <Tag tone="warn">{t("transfers.stateConflict")}</Tag>
+  if (transfer.state === "paused") return <Tag tone="neutral">{t("transfers.statePaused")}</Tag>
 
-  return <Tag tone="ok">完了</Tag>
+  return <Tag tone="ok">{t("transfers.stateDone")}</Tag>
 }
 
-// Design_handoff frame 5.
 export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwrite, onSaveAs, onSkip, onDismissAll, onDismissDone }: Props) => {
-  const active = transfers.filter((t) => t.state === "uploading" || t.state === "queued" || t.state === "checking").length
-  const done = transfers.filter((t) => t.state === "done").length
+  const t = useT()
+  const active = transfers.filter((tr) => tr.state === "uploading" || tr.state === "queued" || tr.state === "checking").length
+  const done = transfers.filter((tr) => tr.state === "done").length
 
   // pause the auto-dismiss timer while the pointer is over the card or a
   // control inside it holds focus, so a user reading a settled batch is never
@@ -129,8 +141,8 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
   }, [canDismiss, onDismissDone])
 
   if (transfers.length === 0) return null
-  const kinds = new Set<OperationKind>(transfers.map((t) => t.kind))
-  const label = headerLabel(kinds)
+  const kinds = new Set<OperationKind>(transfers.map((tr) => tr.kind))
+  const label = headerLabel(kinds, t)
   const icon = headerIcon(kinds)
 
   return (
@@ -145,72 +157,77 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
     >
       <div className="uph">
         {icon !== null ? <Icon name={icon} size={15} style={{ color: "var(--brand)" }} /> : null}
-        {label} · {active}件処理中 · {done}件完了
+        {t("transfers.header", { label, active, done })}
         <span className="sp">
           {active > 0
-            ? <Button kind="do" size="sm" onClick={onCancelAll}>すべてキャンセル</Button>
-            : <Button kind="stop" size="sm" onClick={onDismissAll}>閉じる</Button>}
+            ? <Button kind="do" size="sm" onClick={onCancelAll}>{t("transfers.cancelAll")}</Button>
+            : <Button kind="stop" size="sm" onClick={onDismissAll}>{t("common.close")}</Button>}
         </span>
       </div>
       <div className="uhead">
-        <span>名前</span>
-        <span className="c">状態</span>
-        <span>進捗</span>
-        <span className="r">詳細</span>
-        <span className="r">操作</span>
+        <span>{t("transfers.colName")}</span>
+        <span className="c">{t("transfers.colState")}</span>
+        <span>{t("transfers.colProgress")}</span>
+        <span className="r">{t("transfers.colDetail")}</span>
+        <span className="r">{t("transfers.colActions")}</span>
       </div>
-      {transfers.map((t) => {
-        const pct = t.total > 0 ? Math.min(100, Math.round((t.loaded / t.total) * 100)) : 0
-        const isDone = t.state === "done"
-        const isProgressive = t.kind === "upload"
-          ? (t.state === "uploading" || t.state === "checking" || t.state === "queued" || isDone)
-          : (t.total > 0 && (t.state === "uploading" || isDone))
-        const showRetry = t.kind === "upload" && t.state === "failed"
-        const retryLabel = showRetry && t.uploadId !== undefined ? "再開" : "再試行"
-        const showConflict = t.kind === "upload" && t.state === "conflict"
+      {transfers.map((transfer) => {
+        const pct = transfer.total > 0 ? Math.min(100, Math.round((transfer.loaded / transfer.total) * 100)) : 0
+        const isDone = transfer.state === "done"
+        const isProgressive = transfer.kind === "upload" || transfer.kind === "download"
+          ? (transfer.state === "uploading" || transfer.state === "checking" || transfer.state === "queued" || isDone)
+          : (transfer.total > 0 && (transfer.state === "uploading" || isDone))
+        const showRetry = transfer.kind === "upload" && transfer.state === "failed"
+        const retryLabel = showRetry && transfer.uploadId !== undefined ? t("pendingUploads.resume") : t("common.retry")
+        const showConflict = transfer.kind === "upload" && transfer.state === "conflict"
 
         return (
-          <div className="urow" key={t.id}>
+          <div className="urow" key={transfer.id}>
             <div className="un">
               {isDone
                 ? <Icon name="check" size={16} style={{ color: "var(--green)" }} />
-                : <Icon name={rowIcon(t)} size={16} className="ico" />}
-              <span title={t.name}>{t.name}</span>
+                : <Icon name={rowIcon(transfer)} size={16} className="ico" />}
+              <span title={transfer.name}>{transfer.name}</span>
             </div>
             <div className="c">
-              {stateTag(t)}
+              {stateTag(transfer, t)}
             </div>
             <div>
               {isProgressive
                 ? (
-                  <div className="pbar" style={t.state === "queued" ? { opacity: 0.4 } : undefined}>
+                  <div className="pbar" style={transfer.state === "queued" ? { opacity: 0.4 } : undefined}>
                     <i style={{ width: `${pct}%`, ...(isDone ? { background: "var(--green)" } : {}) }} />
                   </div>
                 )
                 : null}
             </div>
-            <div className="umeta" style={t.state === "failed" ? { color: "var(--red)" } : t.state === "conflict" ? { color: "var(--warnFg)" } : undefined}>
-              {detailText(t)}
+            <div
+              className="umeta"
+              style={transfer.state === "failed"
+                ? { color: "var(--red)" }
+                : transfer.state === "conflict" ? { color: "var(--warnFg)" } : undefined}
+            >
+              {detailText(transfer, t)}
             </div>
             <div className="uact">
-              {t.state === "uploading" || t.state === "checking"
-                ? (t.kind === "upload"
-                  ? <Button kind="stop" size="sm" onClick={() => onCancel(t.id)}>キャンセル</Button>
+              {transfer.state === "uploading" || transfer.state === "checking"
+                ? (transfer.kind === "upload" || transfer.kind === "download"
+                  ? <Button kind="stop" size="sm" onClick={() => onCancel(transfer.id)}>{t("common.cancel")}</Button>
                   : null)
-                : t.state === "queued"
-                  ? <Button kind="do" size="sm" onClick={() => onCancel(t.id)}>キャンセル</Button>
+                : transfer.state === "queued"
+                  ? <Button kind="do" size="sm" onClick={() => onCancel(transfer.id)}>{t("common.cancel")}</Button>
                   : showRetry
-                    ? <Button kind="po" size="sm" onClick={() => onRetry(t.id)}>{retryLabel}</Button>
+                    ? <Button kind="po" size="sm" onClick={() => onRetry(transfer.id)}>{retryLabel}</Button>
                     : showConflict
                       ? (
                         <>
-                          <Button kind="do" size="sm" onClick={() => onOverwrite(t.id)}>上書き</Button>
-                          <Button kind="po" size="sm" onClick={() => onSaveAs(t.id)}>別名で保存</Button>
-                          <Button kind="stop" size="sm" onClick={() => onSkip(t.id)}>スキップ</Button>
+                          <Button kind="do" size="sm" onClick={() => onOverwrite(transfer.id)}>{t("transfers.actionOverwrite")}</Button>
+                          <Button kind="po" size="sm" onClick={() => onSaveAs(transfer.id)}>{t("transfers.actionSaveAs")}</Button>
+                          <Button kind="stop" size="sm" onClick={() => onSkip(transfer.id)}>{t("transfers.actionSkip")}</Button>
                         </>
                       )
-                      : t.state === "failed"
-                        ? <Button kind="stop" size="sm" onClick={() => onSkip(t.id)}>閉じる</Button>
+                      : transfer.state === "failed"
+                        ? <Button kind="stop" size="sm" onClick={() => onSkip(transfer.id)}>{t("common.close")}</Button>
                         : null}
             </div>
           </div>

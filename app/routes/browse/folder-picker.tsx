@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Fragment, useEffect, useState } from "react"
 
+import { useT } from "~/lib/i18n"
 import { dirName, listDirectory } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
 import { Button, Icon, Modal } from "~/ui"
@@ -27,13 +28,14 @@ export const FolderPicker = ({
   open,
   onClose,
   bucket,
-  title = "移動先のフォルダを選ぶ",
-  submitLabel = "この場所を選ぶ",
+  title,
+  submitLabel,
   initialPrefix = "",
   disabledPrefix,
   onSelect,
 }: Props) => {
   const s3 = useS3()
+  const t = useT()
   const [currentPrefix, setCurrentPrefix] = useState<string>(initialPrefix)
 
   useEffect(() => {
@@ -63,11 +65,11 @@ export const FolderPicker = ({
   return (
     <Modal open={open} onClose={onClose} labelledBy="picker-title">
       <div className="mh">
-        <h2 className="mtitle" id="picker-title">{title}</h2>
+        <h2 className="mtitle" id="picker-title">{title ?? t("modal.pickerTitle")}</h2>
       </div>
 
-      <div className="mdest-label">移動先</div>
-      <div className="picker-crumbs" aria-label="移動先">
+      <div className="mdest-label">{t("modal.moveTo")}</div>
+      <div className="picker-crumbs" aria-label={t("modal.moveTo")}>
         {segments.length === 0
           ? <span className="cur">{bucket}</span>
           : <Button unstyled onClick={() => goTo(-1)}>{bucket}</Button>}
@@ -92,17 +94,17 @@ export const FolderPicker = ({
       />
 
       {isCurrentDisabled
-        ? <p className="ferr" style={{ marginTop: 10 }}>この場所には移動できません</p>
+        ? <p className="ferr" style={{ marginTop: 10 }}>{t("modal.pickerCannotMove")}</p>
         : null}
 
       <div className="mfoot">
-        <Button onClick={onClose}>キャンセル</Button>
+        <Button onClick={onClose}>{t("common.cancel")}</Button>
         <Button
           kind="pri"
           disabled={isCurrentDisabled}
           onClick={() => { onSelect(currentPrefix); onClose() }}
         >
-          {submitLabel}
+          {submitLabel ?? t("modal.pickerSubmit")}
         </Button>
       </div>
     </Modal>
@@ -118,15 +120,17 @@ type PickerListProps = {
 }
 
 const PickerList = ({ q, disabledPrefix, onEnter }: PickerListProps) => {
+  const t = useT()
+
   if (q.isLoading) {
-    return <div className="picker-list"><div className="picker-empty">読み込み中…</div></div>
+    return <div className="picker-list"><div className="picker-empty">{t("modal.pickerLoading")}</div></div>
   }
   if (q.isError) {
-    return <div className="picker-list"><div className="picker-empty" style={{ color: "var(--red)" }}>取得に失敗しました</div></div>
+    return <div className="picker-list"><div className="picker-empty" style={{ color: "var(--red)" }}>{t("modal.pickerError")}</div></div>
   }
   const dirs = q.data?.dirs ?? []
   if (dirs.length === 0) {
-    return <div className="picker-list"><div className="picker-empty">サブフォルダはありません</div></div>
+    return <div className="picker-list"><div className="picker-empty">{t("modal.pickerEmpty")}</div></div>
   }
 
   return (
@@ -147,7 +151,7 @@ const PickerList = ({ q, disabledPrefix, onEnter }: PickerListProps) => {
           >
             <Icon name="folder" size={16} />
             <span className="nm">{name}</span>
-            <span className="opencue" aria-hidden="true">開く</span>
+            <span className="opencue" aria-hidden="true">{t("common.open")}</span>
             <Icon name="caret" size={12} className="chev" />
           </Button>
         )

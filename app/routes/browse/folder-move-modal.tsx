@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { useT } from "~/lib/i18n"
 import { Button, Icon, Modal } from "~/ui"
 
 import { FolderPicker } from "./folder-picker"
@@ -29,6 +30,7 @@ const folderName = (prefix: string): string => {
 }
 
 export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }: Props) => {
+  const t = useT()
   const initialParent = parentOfPrefix(srcPrefix)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [destParent, setDestParent] = useState<string>(initialParent)
@@ -44,12 +46,12 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
 
   const submit = () => {
     if (destParent === initialParent) {
-      setError("移動先が元の場所と同じです")
+      setError(t("modal.destSame"))
 
       return
     }
     if (destParent === srcPrefix || destParent.startsWith(srcPrefix)) {
-      setError("自分自身の中には移動できません")
+      setError(t("modal.intoSelf"))
 
       return
     }
@@ -64,10 +66,10 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
     <>
       <Modal open={open && !pickerOpen} onClose={onClose} labelledBy="folder-move-title">
         <div className="mh">
-          <h2 className="mtitle" id="folder-move-title">フォルダを移動</h2>
+          <h2 className="mtitle" id="folder-move-title">{t("modal.folderMoveTitle")}</h2>
         </div>
         <div className="mdest">
-          <div className="mdest-label">移動元</div>
+          <div className="mdest-label">{t("modal.moveFrom")}</div>
           <div className="mdest-row">
             <div className="mdest-path">
               <Icon name="folder" size={14} />
@@ -76,23 +78,23 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
           </div>
         </div>
         <div className="mdest">
-          <div className="mdest-label">移動先</div>
+          <div className="mdest-label">{t("modal.moveTo")}</div>
           <div className="mdest-row">
             <div className="mdest-path">
               <Icon name="folder" size={14} />
               <span className="p" title={displayPath}>{displayPath}</span>
             </div>
-            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>フォルダを選ぶ</Button>
+            <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>{t("modal.moveChoose")}</Button>
           </div>
         </div>
         <div className="banner ochre">
           <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
-          <div>中身の件数が多い場合、移動には時間がかかります。進行状況は右下の操作カードに表示されます。</div>
+          <div>{t("modal.folderMoveNote")}</div>
         </div>
         {error !== undefined ? <p className="ferr">{error}</p> : null}
         <div className="mfoot">
-          <Button onClick={onClose}>キャンセル</Button>
-          <Button kind="pri" onClick={submit}>移動</Button>
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          <Button kind="pri" onClick={submit}>{t("modal.moveSubmit")}</Button>
         </div>
       </Modal>
       <FolderPicker

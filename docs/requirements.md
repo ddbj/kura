@@ -39,12 +39,17 @@ kura のファイルに触れるのは、本人と、本人が明示的に権限
 ## download・一覧・削除
 
 - 認証されたユーザーは自分のファイルを一覧・download・削除できる
+- 複数のファイルやディレクトリは zip にまとめて download できる。zip はブラウザ内で組み立てるため、
+  ファイルの中身はブラウザとストレージの間で直接やり取りされる（詳細は [architecture.md](./architecture.md) の「frontend」）
+- 合計 2 GB までは通常の download として受け取れる。それを超えるものは保存先をブラウザに指定してもらう必要があり
+  （zip 全体をメモリに載せずに済ませるため）、その機能を持たないブラウザでは受け付けない。
+  大容量のまとめ取得は S3 client（CLI）で行う
 - 削除は即時の完全消去である。ゴミ箱・復旧猶予は設けない
 
 ## presigned URL
 
 - ユーザーは自分のファイルに対して presigned URL（GET / PUT）を発行できる。認証を持たない相手にファイルを渡す・受け取るための、短期の受け渡し専用の手段である
-- 有効期間の実効上限は約 12 時間である。これは SeaweedFS の STS が一時 credentials の寿命に固定上限を持つためで、kura 側の設定では変えられない（[architecture.md](./architecture.md) の「presign」を参照）
+- 有効期間の上限は、発行した時点の認証セッションの残り時間である。SeaweedFS の STS が持つ 12 時間の固定上限と、DDBJ account の SSO session（10 時間、ログイン時刻起点）のうち短い方が効くため、実際には 10 時間を超えず、ログインからの経過とともに縮む。どちらも kura 側の設定では変えられない（[architecture.md](./architecture.md) の「presign」を参照）
 - presigned URL の生成は client 側で完結する署名計算であり、kura に発行 API は無い。一時 credentials を持つ者は誰でも発行できるため、kura 側でこれを禁止する手段は存在しない。UI が発行操作を提供するのは、S3 client でできることの reference としてである
 - 12 時間を超える共有の手段は kura では提供しない
 

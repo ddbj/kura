@@ -48,28 +48,32 @@ test.describe("SHELL", () => {
     await expect(trigger).toBeFocused()
   })
 
-  test("S-SHELL-04: LangSwitch で EN に切替 → i18n 効果範囲が明確", async ({ page }) => {
+  test("S-SHELL-04: LangSwitch で EN に切替 → browse 画面まで英語になる", async ({ page }) => {
     await page.goto("/")
 
     // 初期は JA (project の locale: ja-JP + 未設定の localStorage)
     await expect(page.locator("html")).toHaveAttribute("lang", "ja")
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" })).toBeVisible()
+
     await page.locator(".lang").getByRole("button", { name: "EN" }).click()
     await expect(page.locator("html")).toHaveAttribute("lang", "en")
 
     const trigger = page.locator(".hdr .user")
     await trigger.click()
-    await expect(page.locator(".usermenu").getByRole("menuitem", { name: "Log out" })).toBeVisible()
+    await expect(page.locator(".usermenu").getByRole("menuitem", { name: "Sign out" })).toBeVisible()
+    await page.keyboard.press("Escape")
+
+    // shell だけでなく browse 画面の操作・列見出しも切り替わる
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "＋ New folder" })).toBeVisible()
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: /Upload/ })).toBeVisible()
+    await expect(page.locator(".thead").getByRole("button", { name: "Name" })).toBeVisible()
+    await expect(page.getByPlaceholder("Filter by file name")).toBeVisible()
+    // negative: ja の literal が残っていない
+    await expect(page.getByRole("button", { name: "＋ 新規フォルダ" })).toHaveCount(0)
 
     // localStorage 永続化
     const stored = await page.evaluate(() => localStorage.getItem("kura.lang"))
     expect(stored).toBe("en")
-
-    // 効果範囲外: browse ページの「＋ 新規フォルダ」/「アップロード」は literal ja
-    await page.keyboard.press("Escape")
-    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" })).toBeVisible()
-    await expect(page.locator(".pathbar .actions").getByRole("button", { name: /アップロード/ })).toBeVisible()
-    // negative: Upload という英語文言は無い
-    await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0)
   })
 
   test("S-SHELL-05: ?lang=en 直打ちで one-shot 上書き", async ({ page }) => {

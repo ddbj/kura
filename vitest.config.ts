@@ -13,6 +13,9 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "jsdom",
+          // スタイルの静的検査 (tests/unit/ui/style-modifiers) が CSS を ?raw で
+          // 読む。false のままだと CSS の解決が空文字に潰される。
+          css: true,
           include: ["tests/unit/**/*.test.{ts,tsx}"],
           setupFiles: ["tests/unit/setup.ts"],
         },

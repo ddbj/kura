@@ -45,7 +45,7 @@ Playwright を「起動済み dev compose (`docker compose --env-file env.dev --
 
 Playwright の `storageState()` は **cookie + localStorage のみ** を保存する (Playwright 公式仕様、1.4x-1.6x で不変)。IndexedDB / sessionStorage は保存対象外。react-oidc-context は access token / refresh token を `sessionStorage["oidc.user:${issuer}:${clientId}"]` に置くため、素朴な storageState 再利用では認証状態が復元されない。以下の 2 段構えで解決する:
 
-1. **`auth.setup.ts`** (`setup` project) が Keycloak login → `/_auth/callback` 復帰まで実施。完了後:
+1. **`auth.setup.ts`** (`setup` project) が Keycloak login → `/auth/callback` 復帰まで実施。完了後:
    - Playwright の `storageState()` で cookie / localStorage を `tests/e2e/.auth/user.storage.json` に保存 (Keycloak 側 SSO cookie もここに入る)。
    - **Storage API を canonical iteration で叩いて** sessionStorage snapshot を抽出 (下記) し、`tests/e2e/.auth/user.session.json` に **別ファイル** で保存:
      ```
@@ -151,7 +151,7 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 | Modal confirm submit | modal scope 内 `getByRole("button", { name: submitLabel })` (`削除` / `変更` / `作成` / `コピー` / `移動` / `リンクを発行`) |
 | Modal cancel | modal scope 内 `getByRole("button", { name: "キャンセル" })` |
 | Modal name-entry input | modal 内 `getByLabel(inputLabel)` (`新しい名前` / `コピー後の名前` / `フォルダ名`) |
-| ShareModal TTL 選択 | modal 内 `getByRole("tablist", { name: "有効期限" }).getByRole("tab", { name })` (`15分` / `1時間` / `12時間`) |
+| ShareModal TTL 選択 | modal 内 `getByRole("tablist", { name: "有効期限" }).getByRole("tab", { name })` (`15分` / `1時間` / `最長`) |
 | Upload tray | `page.locator(".upcard")` (rows `.urow`) |
 | Drop overlay | `page.locator(".dropov")` (text `ここにドロップしてアップロード`) |
 | Over-quota banner | `page.locator(".banner.red")` text 部分一致 `容量が上限に達しています` |
@@ -275,7 +275,7 @@ projects:
   3. `page.waitForURL(url => new URL(url).hostname === new URL(oidcIssuer).hostname)`
 - **期待**:
   - URL host が `oidcIssuer` と一致、pathname が `/realms/master/protocol/openid-connect/auth`
-  - query に `response_type=code`, `code_challenge_method=S256`, `code_challenge` (非空), `client_id` (非空), `scope=openid`, `redirect_uri` が baseURL + `/_auth/callback` (末尾一致), `state` (非空)
+  - query に `response_type=code`, `code_challenge_method=S256`, `code_challenge` (非空), `client_id` (非空), `scope=openid`, `redirect_uri` が baseURL + `/auth/callback` (末尾一致), `state` (非空)
 - **備考**: `signinRedirect({ state: location.pathname + location.search })` (`require-auth.tsx:20`)。
 
 ### S-AUTH-03: Keycloak login → callback → `/` 復帰
@@ -285,7 +285,7 @@ projects:
   1. `/` を goto
   2. 「DDBJ アカウントでログイン」をクリック
   3. Keycloak login form (`#username` に fallback `input[name=username]`、`#password` / `input[name=password]`、`#kc-login` / `button[name=login]`) にテストユーザーを入力して submit
-  4. `/_auth/callback?...` に戻ってきたら `<Navigate to="/" replace />` が動き、`.hdr` が可視化するまで待つ
+  4. `/auth/callback?...` に戻ってきたら `<Navigate to="/" replace />` が動き、`.hdr` が可視化するまで待つ
 - **期待**:
   - `new URL(page.url()).pathname === "/"` かつ `hash === ""` かつ `search === ""` (Navigate replace で history 置換)
   - `page.locator(".hdr .wordmark")` (accessible name `kura`) と `.hdr .user` (accessible name = `E2E_USERNAME`) が可視
@@ -329,7 +329,7 @@ projects:
 
 - **ペルソナ**: P-ANON
 - **手順**:
-  1. `/_auth/callback?error=access_denied&error_description=denied&state=x` を直接 goto
+  1. `/auth/callback?error=access_denied&error_description=denied&state=x` を直接 goto
 - **期待**:
   - `getByRole("alert")` に text `ログインに失敗しました` (`t("auth.errorTitle")`) を含む
   - text link `トップへ戻る` (`role=link`) 可視、href `/`
@@ -340,7 +340,7 @@ projects:
 - **ペルソナ**: P-ANON
 - **前提**: E-AUTH-01 のエラー状態 (test 単体で完結、依存しない)
 - **手順**:
-  1. `/_auth/callback?error=access_denied&state=x` を直接 goto
+  1. `/auth/callback?error=access_denied&state=x` を直接 goto
   2. `トップへ戻る` link をクリック
 - **期待**:
   - URL が `/`
@@ -353,11 +353,11 @@ projects:
 - **ペルソナ**: P-ANON → P-USER 昇格
 - **前提**: fresh context (storageState なし)
 - **手順**:
-  1. `/_browse/some-dir/` を直接 goto
+  1. `/browse/some-dir/` を直接 goto
   2. LoginBox 可視を確認
   3. 「DDBJ アカウントでログイン」→ Keycloak login → callback
 - **期待**:
-  - callback 後 URL が `/_browse/some-dir/` に戻る
+  - callback 後 URL が `/browse/some-dir/` に戻る
   - `.hdr .user` が可視 (認証確立)
 - **備考**: `signinRedirect({ state: pathname + search })` → `safeReturnTo(state)`。crumb text の詳細は BROWSE Domain (S-BROWSE-06) が担保するので、AUTH では URL 復帰 + 認証確立のみを pin する。
 
@@ -384,7 +384,7 @@ projects:
 - **ペルソナ**: P-USER
 - **前提**: 事前に `createFolderViaSdk("nav-01")` で folder を作り、そこに移動する
 - **手順**:
-  1. `/_browse/nav-01/` に移動
+  1. `/browse/nav-01/` に移動
   2. `.hdr .wordmark` (name `kura`) をクリック
 - **期待**:
   - URL `/`、`.pathbar .crumb .cur` が username
@@ -410,20 +410,20 @@ projects:
   - `.usermenu` 非可視
   - `expect(page.locator(".hdr .user")).toBeFocused()`
 
-### S-SHELL-04: LangSwitch で EN に切替 → i18n 効果範囲が明確
+### S-SHELL-04: LangSwitch で EN に切替 → browse 画面まで英語になる
 
 - **ペルソナ**: P-USER
 - **手順**:
-  1. `/` を開く
+  1. `/` を開く (初期は JA、`＋ 新規フォルダ` が可視)
   2. `.lang` の `EN` button クリック
   3. `.hdr .user` を開いて UserMenu 表示
 - **期待**:
   - `document.documentElement.lang === "en"`
-  - UserMenu の menuitem text が `Log out`
+  - UserMenu の menuitem text が `Sign out`
+  - browse 画面の `.pathbar .actions` が `＋ New folder` / `Upload`、列見出しが `Name`、検索の placeholder が `Filter by file name`
+  - **negative assertion**: `＋ 新規フォルダ` が 0 件
   - `localStorage["kura.lang"] === "en"`
-  - **効果範囲外**: browse ページの `.pathbar .actions` の button text が `＋ 新規フォルダ` / `アップロード` のまま (literal ja 固定、frontend.md §11)
-  - **negative assertion**: `getByRole("button", { name: "Upload" })` が 0 件、`＋ 新規フォルダ` は依然可視
-- **備考**: i18n が適用されるのは RequireAuth loading/error, AuthCallback, UserMenu の 3 箇所のみ。これはオープンな UX 決定で仕様不整合ではないため、E2E で明示的に「効果範囲」を pin する。`afterEach` で `clearClientPrefs` を呼び他 test に carry over させない。
+- **備考**: UI 文言は全画面 i18n resources 経由という不変条件の E2E 側の担保 (ソース側は unit の localized-ui テスト)。`afterEach` で `clearClientPrefs` を呼び他 test に carry over させない。
 
 ### S-SHELL-05: `?lang=en` 直打ちで one-shot 上書き
 
@@ -444,7 +444,7 @@ projects:
 - **ペルソナ**: P-USER
 - **前提**: `beforeAll` で `resetE2eScope` 済 → 自 runId scope (`e2e/${runId}/`) が空
 - **手順**:
-  1. `/_browse/e2e/${runId}/` を goto
+  1. `/browse/e2e/${runId}/` を goto
 - **期待**:
   - `.emptyzone .ez-title` text `まだファイルがありません`
   - `.ez-actions` primary button (`アップロード`) 可視
@@ -471,7 +471,7 @@ projects:
 - **手順**:
   1. folder row の `.c-name .nm.folder` (button) をクリック
 - **期待**:
-  - URL が `/_browse/${encodeURIComponent(folderName)}/`
+  - URL が `/browse/${encodeURIComponent(folderName)}/`
   - 中間 crumb `getByRole("link", { name: username })`、末尾 `.cur` text = folder name
   - empty state 可視 (folder は作られたばかり)
 
@@ -480,16 +480,16 @@ projects:
 - **ペルソナ**: P-USER
 - **前提**: `createFolderViaSdk("browse04/child")` で 2 段ネスト
 - **手順**:
-  1. `/_browse/browse04/child/` を goto
+  1. `/browse/browse04/child/` を goto
   2. `.pathbar .crumb` の中間 `getByRole("link", { name: "browse04" })` をクリック
 - **期待**:
-  - URL `/_browse/browse04/`
+  - URL `/browse/browse04/`
   - `.pathbar .crumb .cur` text = `browse04`
 
 ### S-BROWSE-05: ブラウザ戻る / 進むが SPA history と整合
 
 - **ペルソナ**: P-USER
-- **前提**: `/_browse/browse04/child/` で開始 → `browse04` に戻る → 再度 `child` に入る
+- **前提**: `/browse/browse04/child/` で開始 → `browse04` に戻る → 再度 `child` に入る
 - **手順**:
   1. `page.goBack()`
   2. `page.goForward()`
@@ -502,7 +502,7 @@ projects:
 - **ペルソナ**: P-USER
 - **前提**: `createFolderViaSdk("urlpath/child")` (SDK helper で `.keep` を put)
 - **手順**:
-  1. `/_browse/urlpath/child/` を直接 goto
+  1. `/browse/urlpath/child/` を直接 goto
 - **期待**:
   - crumb が root → `urlpath` → `child` (末尾 `.cur`)
   - empty state 可視
@@ -511,7 +511,7 @@ projects:
 
 - **ペルソナ**: P-USER
 - **手順**:
-  1. `/_browse/never-existed-${hex}/` を直接 goto
+  1. `/browse/never-existed-${hex}/` を直接 goto
 - **期待**:
   - HTTP status 200 (SPA fallback)
   - `.pathbar .crumb .cur` text = `never-existed-${hex}`
@@ -598,7 +598,7 @@ projects:
 
 - **ペルソナ**: P-USER (`beforeAll` で `resetE2eScope` 済、runId scope に navigate)
 - **手順**:
-  1. `/_browse/e2e/${runId}/` を goto
+  1. `/browse/e2e/${runId}/` を goto
   2. `.emptyzone .ez-actions` の `アップロード` primary button をクリック
   3. hidden input に setInputFiles
   4. `expectUploadDone`
@@ -806,6 +806,29 @@ projects:
 
 ---
 
+
+### S-DOWNLOAD-03: 複数選択を zip でまとめて download
+
+- **ペルソナ**: P-USER
+- **前提**: 2 file を upload して両方を選択
+- **手順**:
+  1. 一括操作バーの `zip でダウンロード`
+- **期待**:
+  - download の suggestedFilename が `<現在の folder 名>.zip`
+  - 先頭 2 byte が `PK`。無圧縮 (store) なので、両方の file 名と中身が zip 内に平文で現れる
+- **備考**: 2 GB 未満なので保存ダイアログは出ず、通常の download として落ちてくる (File System Access API は上限を超えるときだけ使う)。
+
+### S-DOWNLOAD-04: folder を zip で download
+
+- **ペルソナ**: P-USER
+- **前提**: folder の中に file 1 つと空の子 folder
+- **手順**:
+  1. folder 行の menu から `zip でダウンロード`
+- **期待**:
+  - suggestedFilename が `<folder 名>.zip`
+  - 中身は folder 相対のパス。空 folder は folder entry (`empty-child/`) として残り、marker の `.keep` は入らない
+- **備考**: 取得対象そのものの `.keep` は zip の root にあたるため落とす。名前が空の entry を作ると zip の組み立てごと失敗する。
+
 ## PRESIGN Domain
 
 ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを発行`) と bulk bar から開く。`openPresignModalFromRow(page, filename)` helper を全 test で使う。
@@ -819,7 +842,7 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
 - **手順**:
   1. `const modal = await openPresignModalFromRow(page, presign01File)`
      - helper 内: row の `.pubbtn` (`リンクを発行`) → ShareModal (`期限つきリンクを発行`) の可視化待ち
-  2. `[aria-label="有効期限"]` の default 選択 tab `12時間` が `aria-selected="true"` を確認
+  2. `[aria-label="有効期限"]` の default 選択 tab `最長` が `aria-selected="true"` を確認
   4. modal footer の primary `getByRole("button", { name: "リンクを発行" })` を押す
   5. modal `.flist` の対象 row `.fmeta` に `.tag.ok` `完了` 出現待ち (最大 10s)
   6. 発行行の下 LinkBar `.linkbar .u` から URL を capture、以下を assertion:
@@ -829,7 +852,7 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
   8. modal footer が single `閉じる` button に切り替わる → 押して閉じる
   9. 一覧に戻って対象 row の `.c-pub .tag.warn` `期限つき` badge 可視
   10. row を非 interactive エリアクリックで expand → `.presignpanel .linkbar .u` に modal で見た URL と一致
-  11. `.presignpanel .pp-top .lbl` に text `期限つきリンク — 約` と `分後に自動で失効します` の substring 両方を含む (中間の分数は timing 依存で範囲チェックしない)
+  11. `.presignpanel .pp-top .lbl` が `期限つきリンク — 約(N 時間)?(M 分)?後に自動で失効します` にマッチする (残り時間の値は session 寿命と tick 次第なので pin しない)
   12. `page.evaluate(() => sessionStorage.getItem("kura.presigned"))` が bucket-scoped entry を含み URL 完全一致
   13. **fresh anon context** (`getAnon`) で URL を GET → status 200 + body byte 一致
 - **期待**: 上記 assertion 全て
@@ -842,12 +865,34 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
 - **ペルソナ**: P-USER
 - **前提**: `openPresignModalFromRow` で ShareModal を開いた状態、まだ submit していない
 - **手順**:
-  1. `15分` tab クリック → banner text が `リンクは最長で約15分後に切れます` を含む
-  2. `1時間` クリック → banner text が `約1時間後` を含む
-  3. `12時間` クリック → banner text が `約12時間後` を含む
+  1. `15分` tab クリック → banner text が `リンクは約15 分後に切れます` を含む
+  2. `1時間` クリック → banner text が `リンクは約1 時間後に切れます` を含む
+  3. `最長` クリック → banner text が「いまの認証セッションの残り時間」である旨と `リンクは約N 時間M 分後に切れます` を含む
 - **期待**:
   - 3 tab の `aria-selected` が排他 (1 個 true、他 2 個 false)
   - banner の substring がそれぞれ切り替わる
+- **備考**: `最長` の実際の値は認証セッションの残り (ログイン時刻 + realm の SSO session max) 次第なので pin しない。
+
+### S-PRESIGN-03: rename すると presign の記録が落ちて lens も戻る
+
+- **ペルソナ**: P-USER
+- **前提**: upload した file に対して presign を発行済み (lens `期限つき` が 1)
+- **手順**:
+  1. row menu から `名前を変更` で別名に変更
+- **期待**:
+  - 新しい名前の row が出る
+  - lens `期限つき` の数字が 0 に戻り、row に `期限つき` tag も残らない
+  - `sessionStorage["kura.presigned"]` から元 key の entry が消えている
+- **備考**: presigned URL は object key に対する署名なので、rename (copy + delete) のあとの URL は必ず 404 になる。記録を残すと件数だけが実体なく残る。
+
+### S-PRESIGN-04: 削除すると presign の記録が落ちて lens も戻る
+
+- **ペルソナ**: P-USER
+- **前提**: S-PRESIGN-03 と同じ
+- **手順**:
+  1. row menu から `削除` → 確認 dialog で `削除`
+- **期待**: row が消え、lens `期限つき` が 0、`sessionStorage` からも entry が消えている
+- **備考**: 落とす対象は S3 応答の `Deleted` ではなく「失敗しなかった key」。Quiet な応答を返す実装で `Deleted` が空でも取りこぼさないため。
 
 ## FILEOPS Domain
 
@@ -884,7 +929,7 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
   3. picker で `dst-${hex}` を選択 → `選択` 押下
   4. 外側 MoveModal で `移動` submit
 - **期待**:
-  - file row が root から消え、`/_browse/dst-${hex}/` に入ると存在
+  - file row が root から消え、`/browse/dst-${hex}/` に入ると存在
 - **備考**: MoveModal は `open && !pickerOpen` で picker open 中は unmount。
 
 ### S-FILEOPS-04: copy (file)
@@ -942,7 +987,7 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
   3. `移動` submit
 - **期待**:
   - root から `src-...` 消失
-  - `/_browse/dst-.../src-.../` に入ると中の file 存在
+  - `/browse/dst-.../src-.../` に入ると中の file 存在
 
 ### S-FILEOPS-09: new folder (empty folder)
 
@@ -962,6 +1007,7 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
   1. `dup-a` の rename modal → input を `dup-b-${hex}.txt` に書き換えて `変更`
 - **期待**:
   - modal は閉じず、`.ferr` text `「dup-b-${hex}.txt」は既にあります`
+  - `input.finput` の背景は白のまま（エラーで変わるのは枠線だけ。バナー用の `.err` と modifier 名が衝突して背景・padding まで変わっていた回帰の検知）
 
 ### E-FILEOPS-02: 元の名前と同じで rename 拒否
 

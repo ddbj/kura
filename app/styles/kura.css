@@ -1,13 +1,9 @@
 /* ============================================================
    COLOR SEMANTICS
    brand (purple) = action / selection / links (state-agnostic)
-   green (ok)     = 公開中 — permanent public state
-   ochre (warn)   = 期限つき — time-limited / presigned state
+   green (ok)     = completed operation
+   ochre (warn)   = time-limited / presigned state
    red            = destructive / quota exceeded / failure
-
-   SSOT: .claude/design_handoff_kura/source/kura-states.css
-   Canvas-only rules (.frame, .cap, .screen positioning, body #8f8d86)
-   have been stripped for the SPA context.
    ============================================================ */
 :root{
   --brand:#6B3FA0; --brandDeep:#4B2A78; --brandLight:#9B7BC8; --brandSoft:#EFE7F6; --brandSofter:#F6F1FB;
@@ -82,7 +78,6 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .btn.dangerbox:hover{background:#a53326;border-color:#a53326;}
 .btn.do{color:var(--red);border-color:var(--red);background:#fff;}
 .btn.do:hover{background:var(--redBg);border-color:var(--red);}
-.btn.ok{background:var(--green);color:#fff;border-color:var(--green);}
 .btn.linky{border:0;background:transparent;color:var(--brand);padding:0;font-weight:600;}
 .btn.po{color:var(--brand);border-color:var(--brand);background:#fff;}
 .btn.po:hover{background:var(--brandSofter);border-color:var(--brand);}
@@ -116,10 +111,10 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 
 /* ---------- table ---------- */
 .card{position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--cardShadow);background:#fff;}
-.thead{display:grid;grid-template-columns:34px 1fr 140px 92px 92px 150px;gap:14px;align-items:center;padding:11px 18px;border-bottom:1px solid var(--border);background:var(--surfaceSubtle);
+.thead{display:grid;grid-template-columns:34px 1fr 140px 92px 128px 150px;gap:14px;align-items:center;padding:11px 18px;border-bottom:1px solid var(--border);background:var(--surfaceSubtle);
   font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--inkMid);text-transform:uppercase;}
-.thead.nosel,.row.nosel{grid-template-columns:1fr 140px 92px 92px 150px;}
-.thead.sel,.row.sel{grid-template-columns:34px 1fr 140px 92px 92px 150px;}
+.thead.nosel,.row.nosel{grid-template-columns:1fr 140px 92px 128px 150px;}
+.thead.sel,.row.sel{grid-template-columns:34px 1fr 140px 92px 128px 150px;}
 .sort{display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--inkMid);background:none;border:0;font:inherit;letter-spacing:inherit;text-transform:inherit;padding:0;}
 .sort:hover{color:var(--brand);}
 .sort .ar{width:9px;height:9px;opacity:0;color:currentColor;transition:transform .15s;}
@@ -128,13 +123,11 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 /* Handoff shows arrow-down for desc (default). Asc flips to arrow-up. */
 .sort.on:not(.desc) .ar{transform:rotate(180deg);}
 .sort.r{flex-direction:row;justify-content:flex-end;text-align:right;}
-.row{display:grid;grid-template-columns:34px 1fr 140px 92px 92px 150px;gap:14px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--borderSoft);background:#fff;}
+.row{display:grid;grid-template-columns:34px 1fr 140px 92px 128px 150px;gap:14px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--borderSoft);background:#fff;}
 .row:last-child{border-bottom:0;}
 .row:hover{background:var(--surfaceSubtle);}
 .row.selected{background:var(--brandSofter);}
 .row.selected:hover{background:var(--brandSofter);}
-.row.public{background:var(--okBg);}
-.row.public:hover{background:var(--okBg);}
 .row.presigned{background:var(--warnBg);}
 .row.presigned:hover{background:var(--warnBg);}
 .row.expandable{cursor:pointer;}
@@ -155,6 +148,7 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .row.expandable:hover .c-name .row-chev{opacity:1;color:var(--brand);}
 .row.expanded .c-name .row-chev{opacity:1;transform:rotate(180deg);color:var(--brand);}
 .c-pub{display:flex;align-items:center;justify-content:center;}
+.c-pub .dash{font-family:var(--mono);font-size:12px;color:var(--inkSofter);}
 .c-size{text-align:right;font-family:var(--mono);font-size:12px;color:var(--inkMid);}
 .c-date{text-align:right;font-family:var(--mono);font-size:12px;color:var(--inkSoft);}
 .thead .col-center{text-align:center;}
@@ -192,10 +186,10 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .card.menuopen .row.sel:last-child{border-bottom-left-radius:10px;border-bottom-right-radius:10px;}
 
 /* Responsive: shrink columns first, then drop the optional ones, so the name
-   column never collapses. Priority: 名前 > アクション > 公開 > サイズ / 更新日. */
+   column never collapses. Priority: name > actions > sharing > size / updated. */
 @media (max-width:900px){
-  .thead.sel,.row.sel{grid-template-columns:34px 1fr 90px 72px 72px 120px;}
-  .thead.nosel,.row.nosel{grid-template-columns:1fr 90px 72px 72px 120px;}
+  .thead.sel,.row.sel{grid-template-columns:34px 1fr 90px 72px 104px 120px;}
+  .thead.nosel,.row.nosel{grid-template-columns:1fr 90px 72px 104px 120px;}
   .pubbtn{min-width:80px;}
   .search{min-width:220px;}
   .search input{width:auto;flex:1;min-width:0;}
@@ -218,17 +212,10 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .tag.run{background:var(--brandSoft);color:var(--brandDeep);border-color:var(--brandLight);}
 .tag.fail{background:var(--redBg);color:var(--red);border-color:var(--redBorder);}
 
-/* public expanded panel */
-.pubpanel{background:var(--okBg);border-bottom:1px solid var(--borderSoft);padding:8px 18px 10px 49px;}
 .presignpanel{background:var(--warnBg);border-bottom:1px solid var(--borderSoft);padding:8px 18px 10px 49px;}
-.lbl{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--okFg);}
+.lbl{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--inkMid);}
 .pp-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 7px;}
 .pp-top .btn.do,.pp-top .tag{flex:none;}
-.urlrow{display:flex;gap:10px;align-items:center;margin-top:0;}
-.urlbox{flex:1;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:#fff;border:1px solid var(--okBorder);border-radius:6px;padding:9px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.pubmeta{display:flex;align-items:center;gap:16px;margin-top:9px;font-size:12px;color:var(--inkSoft);}
-.pubmeta .warnnote{display:inline-flex;align-items:center;gap:6px;}
-.pubmeta .warnnote .d{width:6px;height:6px;border-radius:50%;background:var(--warnDot);}
 .pubmeta .sp{margin-left:auto;display:flex;gap:14px;align-items:center;}
 
 /* card body — DnD target. position:relative so .dropov is scoped inside. */
@@ -305,8 +292,6 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .flist .frow + .frow{border-top:1px solid var(--borderSoft);}
 .flist .fn{display:flex;align-items:center;gap:8px;min-width:0;margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.4;color:var(--ink);}
 .flist .fmeta{font-family:var(--mono);font-size:11.5px;line-height:1.4;color:var(--inkSoft);white-space:nowrap;}
-.flist .pubmark{display:inline-flex;align-items:center;gap:5px;color:var(--okFg);font-size:11px;font-weight:700;line-height:1.4;white-space:nowrap;}
-.flist .pubmark .d{width:6px;height:6px;border-radius:50%;background:currentColor;}
 .modal .banner{align-items:center;}
 
 /* move / folder-move dialog: destination picker slot */
@@ -341,8 +326,8 @@ body{margin:0;background:var(--surface);font-family:var(--sans);color:var(--ink)
 .field .fhint{font-size:11.5px;color:var(--inkSoft);}
 .finput{width:100%;font-family:var(--mono);font-size:13px;color:var(--ink);background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;line-height:1.4;}
 .finput:focus{border-color:var(--brand);outline:2px solid var(--brandSofter);outline-offset:0;}
-.finput.err{border-color:var(--red);}
-.finput.err:focus{outline-color:var(--redBg);}
+.finput.is-error{border-color:var(--red);}
+.finput.is-error:focus{outline-color:var(--redBg);}
 .ferr{font-size:12px;color:var(--red);margin-top:0;line-height:1.4;}
 
 /* inline upload card */

@@ -9,7 +9,6 @@ export type ButtonKind =
   | "po"
   | "do"
   | "stop"
-  | "ok"
   | "dangerbox"
   | "linky"
 
@@ -39,7 +38,7 @@ export const Button = ({
     type={type}
     className={unstyled
       ? cn(className)
-      : cn("btn", { pri: kind === "pri", ghost: kind === "ghost", po: kind === "po", do: kind === "do", stop: kind === "stop", ok: kind === "ok", dangerbox: kind === "dangerbox", linky: kind === "linky" }, { sm: size === "sm", big: size === "big" }, className)}
+      : cn("btn", { pri: kind === "pri", ghost: kind === "ghost", po: kind === "po", do: kind === "do", stop: kind === "stop", dangerbox: kind === "dangerbox", linky: kind === "linky" }, { sm: size === "sm", big: size === "big" }, className)}
     {...rest}
   >
     {children}

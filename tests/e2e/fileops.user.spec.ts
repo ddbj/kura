@@ -251,6 +251,10 @@ test.describe("FILEOPS", () => {
     await expect(modal.locator(".ferr")).toHaveText(`「${b}」は既にあります`, { timeout: 5_000 })
     // modal は閉じていない
     await expect(modal).toBeVisible()
+    // エラー時に色を変えるのは枠線だけ。入力欄の中身は白のままにする
+    const input = modal.locator("input.finput")
+    await expect(input).toHaveCSS("background-color", "rgb(255, 255, 255)")
+    await expect(input).not.toHaveCSS("border-color", "rgb(218, 214, 224)")
   })
 
   test("E-FILEOPS-02: 元の名前と同じで rename 拒否", async ({ page }) => {

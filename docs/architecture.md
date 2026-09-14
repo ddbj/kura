@@ -67,9 +67,10 @@ SeaweedFS の設定:
 ## presign
 
 - SPA / CLI が一時 credentials で SigV4 presigned URL（GET / PUT）を自己生成する。サーバ側に発行 API は無く、署名計算は client 側で完結する。したがって一時 credentials を持つ者による presign の発行を kura 側で禁止する手段は無い
-- 寿命は STS session の残り時間に cap される（session が切れた presign は `X-Amz-Expires` が残っていても 403）。session 長は min(元 access token の exp 残り, `DurationSeconds`, `sts.maxSessionLength`) で決まり、`DurationSeconds` の上限 43200s (12h) は SeaweedFS 内の固定値のため設定では超えられない。よって presign の実効上限は約 12 時間である
-- 発行時点で fresh な access token を取得してから STS を切る（[frontend](#frontendreference-spa) 参照）ため、認証からの経過時間にかかわらず発行から最大 12 時間まで有効な URL を作れる
-- STS session は SeaweedFS 側で発行後 revoke できない（AWS 仕様どおり）。credential 漏洩・presign 誤配布時の暴露は最大 12 時間（自然失効まで）
+- 寿命は STS session の残り時間に cap される（session が切れた presign は `X-Amz-Expires` が残っていても 403）。session 長は min(元 access token の exp 残り, `DurationSeconds`, `sts.maxSessionLength`) で決まる。`DurationSeconds` の上限 43200s (12h) は SeaweedFS 内の固定値のため設定では超えられない
+- 実際に効くのは多くの場合「access token の exp 残り」の方である。Keycloak は access token の exp を SSO session の終了時刻で頭打ちにするため、client の lifespan を 12h にしても realm の SSO session max（10h）を超える token は発行されない。exp の起点はログイン時刻なので、発行できる presign の寿命はログインからの経過とともに縮む（ログイン直後で約 10 時間、9 時間経過後なら約 1 時間）。発行時に token を取り直しても同じ天井に当たる
+- したがって UI が提示する有効期限は「15分 / 1時間 / 最長」であり、「最長」は上限を要求したうえで session 残りに切り詰められた実効値を表示する
+- STS session は SeaweedFS 側で発行後 revoke できない（AWS 仕様どおり）。credential 漏洩・presign 誤配布時の暴露は自然失効まで続く（仕様上の最大は 12 時間、実際には上記の天井まで）
 
 ## SP による非対話利用（identity 委譲）
 
@@ -107,7 +108,7 @@ CORS:
 - issuer: staging = `https://idp-staging.ddbj.nig.ac.jp/realms/master`、production = `https://idp.ddbj.nig.ac.jp/realms/master`
 - client dedicated scope の protocol mapper: audience mapper（access token の `aud` に client id を入れる。SeaweedFS OIDC provider の検証用）
 - admin 判定用の claim / mapper は作らない（admin 運用は root credentials 経由のスクリプト。「認証・認可」参照）
-- access token lifespan: client レベルの override で 43200s (12h) に設定する（realm default は 60s。STS session と presign の実効上限がこの値で決まる）。長時間の作業は SPA の credentials provider が silent renew と STS 再取得で継続する。ただし realm 側の SSO session max（10h）と idle timeout（30 分）は client override では伸ばせない Keycloak 仕様のため、SPA 上での連続作業の実効上限はこの realm 側の値まで（発行済みの presign は STS session として独立して動くので、この realm 制約に縛られない）
+- access token lifespan: client レベルの override で 43200s (12h) に設定する（realm default は 60s）。ただし実際に発行される token の exp は realm の SSO session max（10h、ログイン時刻起点）で頭打ちになるため、この override が効くのはその範囲内だけである。SSO session max と idle timeout（30 分）は client override では伸ばせない Keycloak 仕様なので、SPA 上での連続作業も presign の寿命もこの realm 側の値が上限になる。長時間の作業は SPA の credentials provider が silent renew と STS 再取得で継続する（発行済みの presign は STS session として独立して動くので、発行後に SSO session が切れても失効しない）
 - realm 全体の設定・既存 client には手を入れない（master realm は全 DDBJ サービスの共有資産）
 
 ## SPA の配信
@@ -132,6 +133,8 @@ reference SPA の静的ビルド（`build/client`）は vite の preview server 
 - upload: AWS SDK lib-storage の multipart upload。credentials provider が token の silent renew -> STS 再取得を行い、1 時間を超える upload でも credentials を切らさない
 - upload の中断と再開（resume）: エラーで中断した upload はアップロード済みの part をサーバに残し（`leavePartsOnError`）、続きから再開できる。明示的なキャンセルだけが part を破棄する（`AbortMultipartUpload`）。再開経路は自前実装（lib-storage は resume 非対応）: `ListParts` で完了済み part を得て、ファイルサイズから決定論的に再導出した part 割りに対して残りの part を `UploadPart` し、`CompleteMultipartUpload` で仕上げる。同一セッション内の失敗は進捗 Toast の「再開」から（File はメモリ上にある）、リロード後は一覧画面の「再開待ちのアップロード」（`ListMultipartUploads`。SeaweedFS は開始時刻を返さないため、直近の活動は part の LastModified から導出する）でファイルを選び直して再開する
 - resume の同一ファイル検証: 完了済み part の ETag（SeaweedFS では part 内容の MD5）とローカルファイルの該当 range の MD5 を照合してから完成させる。照合は残り part のアップロードと並行に走り、不一致なら中断して part を残す（サイズが同じでも内容が変わったファイルによるオブジェクト破損を防ぐ）。放置された part は運用の日次掃除が回収する（[operations.md](./operations.md)）
+- 複数ファイル / ディレクトリの download は zip をブラウザ内で組み立てる（サーバ側に zip を作る経路は無い）。各オブジェクトの GetObject 応答をそのまま zip stream へ流すので、byte がバックエンドを経由しない原則は保たれる。圧縮はせず格納のみ（対象の多くが既に圧縮済みで、再圧縮に CPU を使う利得が無い）
+- zip の書き出し先は大きさで決める。2 GB までは Blob を作って通常の download として渡す。File System Access API を使うとブラウザが「サイトにファイルの編集を許可するか」を確認するため、日常的な大きさの取得でその確認を出さないための切り分けである。2 GB を超えるものは同 API でユーザーが選んだファイルへ直接ストリームし（メモリに載るのは処理中のチャンクだけ）、API を持たないブラウザでは発行前に拒否して S3 client（CLI）へ誘導する
 - 「期限つき」レンズ（session 中に発行した presigned URL の一覧）は sessionStorage に発行履歴（bucket / key / url / method / expiresAt）を保持して実現する。S3 側に presign の痕跡は残らないため、これ以外の列挙手段は無い。ページ再読み込みで履歴は消える
 - TTL 有効時は各ファイルの有効期限を一覧に表示する
 - design system: db-portal（BSI）の design system を使う。色は BSI 紫（`#6F4392`）

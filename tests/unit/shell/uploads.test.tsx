@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest"
 
 import { oidcProviderProps } from "~/lib/auth"
 import { ConfigProvider } from "~/lib/config"
+import { LangProvider } from "~/lib/i18n"
 import { createQueryClient } from "~/lib/query"
 import { UploadsProvider, useTransfers } from "~/shell/uploads"
 
@@ -37,7 +38,9 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <ConfigProvider value={testConfig}>
     <AuthProvider {...testAuthProps}>
       <QueryClientProvider client={createQueryClient()}>
-        <UploadsProvider>{children}</UploadsProvider>
+        <LangProvider initialLang="ja">
+          <UploadsProvider>{children}</UploadsProvider>
+        </LangProvider>
       </QueryClientProvider>
     </AuthProvider>
   </ConfigProvider>
