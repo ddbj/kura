@@ -9,9 +9,9 @@ type Tone = "info" | "warn" | "ok" | "red"
 type Props = {
   tone: Tone
   children: ReactNode
-  // Left icon override. Defaults per tone (see `iconFor`); use this when the
-  // default doesn't fit the meaning (e.g. over-quota is a red banner but the
-  // "trash" default reads as delete).
+  // Left icon override. Defaults per tone (see `iconFor`); use this when a
+  // more specific glyph carries the meaning better (e.g. "trash" on a delete
+  // confirmation, "up" on the over-quota bar).
   icon?: IconName
   // Right-side action(s), e.g. a retry button. Rendered before the dismiss
   // button when both are present.
@@ -26,11 +26,13 @@ type DismissProps =
   | { onDismiss: () => void; dismissAriaLabel: string }
   | { onDismiss?: undefined; dismissAriaLabel?: undefined }
 
+// Matches the tone semantics of the stylesheet: ochre marks something
+// time-limited, red marks a failure or a destructive outcome.
 const iconFor: Record<Tone, IconName> = {
-  info: "globe",
+  info: "info",
   warn: "clock",
-  ok: "globe",
-  red: "trash",
+  ok: "check",
+  red: "alert",
 }
 
 const cls: Record<Tone, string> = {

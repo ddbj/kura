@@ -12,6 +12,15 @@ const DELETE_BATCH = 1000
 const isFolderKeepMarker = (key: string): boolean =>
   key === ".keep" || key.endsWith("/.keep")
 
+export type TtlSweepResult = {
+  deleted: number
+  // Objects that were past the TTL but could not be deleted. Reported rather
+  // than swallowed: a bucket whose expired objects keep failing to delete has
+  // to reach the retry backoff, otherwise the TTL guarantee quietly lapses
+  // until the next full interval.
+  failed: number
+}
+
 // Deletes objects past the file TTL. Creation time is
 // the S3 LastModified, the same basis as the SPA expiry column.
 export const sweepBucketTtl = async (
@@ -19,7 +28,7 @@ export const sweepBucketTtl = async (
   bucket: string,
   ttlDays: number,
   now: Date,
-): Promise<number> => {
+): Promise<TtlSweepResult> => {
   const expired: string[] = []
   for await (const page of paginateListObjectsV2({ client: s3 }, { Bucket: bucket })) {
     for (const object of page.Contents ?? []) {
@@ -35,6 +44,7 @@ export const sweepBucketTtl = async (
   }
 
   let deleted = 0
+  let failed = 0
   for (let i = 0; i < expired.length; i += DELETE_BATCH) {
     const batch = expired.slice(i, i + DELETE_BATCH)
     let res
@@ -49,14 +59,16 @@ export const sweepBucketTtl = async (
       // Keeps prior batches' counts intact instead of losing them to a
       // thrown rejection; this batch's objects are treated as not deleted.
       console.error(`kura-ops: ttl delete batch failed: ${bucket}: ${String(err)}`)
+      failed += batch.length
       continue
     }
-    const failed = res.Errors ?? []
-    for (const error of failed) {
+    const errors = res.Errors ?? []
+    for (const error of errors) {
       console.error(`kura-ops: ttl delete failed: ${bucket}/${error.Key ?? "?"}: ${error.Message ?? "?"}`)
     }
-    deleted += batch.length - failed.length
+    failed += errors.length
+    deleted += batch.length - errors.length
   }
 
-  return deleted
+  return { deleted, failed }
 }

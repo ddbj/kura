@@ -7,12 +7,26 @@ export const prefixToSegments = (prefix: string): string[] =>
 export const segmentsToPrefix = (segments: string[]): string =>
   segments.length === 0 ? "" : `${segments.join("/")}/`
 
-export const parentPrefix = (prefix: string): string =>
-  segmentsToPrefix(prefixToSegments(prefix).slice(0, -1))
-
 export const entryName = (key: string): string => key.slice(key.lastIndexOf("/") + 1)
 
+// The directory part of an object key, "" at the bucket root. The other half
+// of entryName: `keyParent(k) + entryName(k) === k`.
+export const keyParent = (key: string): string => {
+  const slash = key.lastIndexOf("/")
+
+  return slash === -1 ? "" : key.slice(0, slash + 1)
+}
+
 export const dirName = (dirPrefix: string): string => entryName(dirPrefix.slice(0, -1))
+
+// Splits a file name into the part a suffix goes after and its extension. A
+// leading dot is part of the stem (".bashrc" has no extension), so a dotfile
+// does not turn into an extension-only name when something is appended.
+export const splitExtension = (name: string): { stem: string; ext: string } => {
+  const dot = name.lastIndexOf(".")
+
+  return dot <= 0 ? { stem: name, ext: "" } : { stem: name.slice(0, dot), ext: name.slice(dot) }
+}
 
 // "." / ".." segments survive percent-encoding as dot segments and would be
 // rewritten by browser/proxy path normalization; a segment ending in a dot

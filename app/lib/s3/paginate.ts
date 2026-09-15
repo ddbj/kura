@@ -18,3 +18,8 @@ export const collectAllPages = async <TPage, TItem, TMarker>(
     marker = next
   }
 }
+
+// S3 reports the next page through a marker that is absent on the last page,
+// but SeaweedFS also returns it as an empty string. Both mean "stop".
+export const nextMarker = (value: string | undefined): string | undefined =>
+  value === undefined || value === "" ? undefined : value

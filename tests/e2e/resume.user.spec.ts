@@ -78,7 +78,7 @@ test.describe("RESUME", () => {
 
       // context1 の sessionStorage snapshot を close 直前に取る (OIDC token
       // が silent renew で更新されている可能性があるため、fixture 経由の元
-      // snapshot ではなく実状態を注入する。scenarios v3)。
+      // snapshot ではなく実状態を注入する)。
       const sessionSnapshot = await page.evaluate(() => {
         const out: Record<string, string> = {}
         for (let i = 0; i < sessionStorage.length; i++) {
@@ -171,7 +171,7 @@ test.describe("RESUME", () => {
     // 事前準備: SDK で 32 MiB, 4 parts の pending upload を作り parts 1-2
     // だけ upload 済み (verifyCompletedParts が ETag mismatch を検知するため
     // 最低 1 part 必要)。stallUploadPart 経由だと SDK retry の関係で
-    // completed parts が決まらないので直接 SDK 経路を使う (scenarios v3)。
+    // completed parts が決まらないので直接 SDK 経路を使う。
     const name = uniqueName("mismatch01", "bin")
     const key = `${scopePrefix()}${name}`
     const { buffer } = await preparePendingUpload(page, {

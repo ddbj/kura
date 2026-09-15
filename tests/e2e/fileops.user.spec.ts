@@ -222,7 +222,7 @@ test.describe("FILEOPS", () => {
   test("S-FILEOPS-09: new folder (empty folder)", async ({ page }) => {
     const folder = uniqueFolder("fo09")
     await page.goto(scopeBrowseUrl())
-    await page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" }).click()
+    await page.locator(".pathbar .actions").getByRole("button", { name: "新規フォルダ" }).click()
     const modal = page.getByRole("dialog", { name: "新しいフォルダ" })
     await modal.getByLabel("フォルダ名").fill(folder)
     await modal.getByRole("button", { name: "作成" }).click()
@@ -287,7 +287,7 @@ test.describe("FILEOPS", () => {
     await renameModal.getByRole("button", { name: "キャンセル" }).click()
 
     // new folder 側
-    await page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" }).click()
+    await page.locator(".pathbar .actions").getByRole("button", { name: "新規フォルダ" }).click()
     const newFolderModal = page.getByRole("dialog", { name: "新しいフォルダ" })
     await newFolderModal.getByLabel("フォルダ名").fill("foo/bar")
     await newFolderModal.getByRole("button", { name: "作成" }).click()
@@ -315,8 +315,8 @@ test.describe("FILEOPS", () => {
     await expect(srcRow).toHaveCSS("opacity", "0.4")
     await expect(srcRow).toHaveCSS("cursor", "not-allowed")
     await expect(srcRow).toBeDisabled()
-    // 参照使用 (unused-var 抑止): child 名は前提の一部
-    expect(child).toBeTruthy()
+    // descendant は picker の一覧そのものに出てこない (src に入れないため)。
+    await expect(exactPickerItem(picker, child)).toHaveCount(0)
   })
 
   test("E-FILEOPS-05: 空 name で submit → 拒否", async ({ page }) => {
@@ -335,7 +335,7 @@ test.describe("FILEOPS", () => {
     await renameModal.getByRole("button", { name: "キャンセル" }).click()
 
     // new folder 空
-    await page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" }).click()
+    await page.locator(".pathbar .actions").getByRole("button", { name: "新規フォルダ" }).click()
     const newFolderModal = page.getByRole("dialog", { name: "新しいフォルダ" })
     await newFolderModal.getByRole("button", { name: "作成" }).click()
     await expect(newFolderModal.locator(".ferr")).toHaveText("フォルダ名を入力してください")

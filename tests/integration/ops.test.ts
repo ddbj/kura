@@ -32,12 +32,17 @@ const runOpsDaily = (nowIso: string, extraEnv: Record<string, string> = {}) =>
     },
   })
 
+// The value the long-running ops container was actually started with. The
+// cleanup test below runs against this rather than the code default, so the
+// two cannot drift apart unnoticed.
+const deployedMultipartMaxAgeDays = (): string =>
+  execFileSync("docker", ["exec", "kura-test-ops-1", "printenv", "KURA_MULTIPART_MAX_AGE_DAYS"], {
+    encoding: "utf8",
+  }).trim()
+
 describe("ops service env passthrough", () => {
   it("forwards the operator-tunable retention env var into the ops container", () => {
-    const printenv = (name: string) =>
-      execFileSync("docker", ["exec", "kura-test-ops-1", "printenv", name], { encoding: "utf8" }).trim()
-
-    expect(printenv("KURA_MULTIPART_MAX_AGE_DAYS")).toBe("3")
+    expect(deployedMultipartMaxAgeDays()).toBe("3")
   })
 })
 
@@ -67,6 +72,20 @@ describe("file TTL sweep", () => {
     runOpsDaily(daysFromNow(31))
     const swept = await s3.send(new ListObjectsV2Command({ Bucket: username }))
     expect(swept.Contents ?? []).toHaveLength(0)
+  })
+
+  // The marker is the only thing keeping an empty folder listable, and it is
+  // created once and never touched again — so its own age must not delete it.
+  it("keeps empty-folder markers regardless of their age", async () => {
+    const { username, s3 } = await setupUser()
+    await putText(s3, username, "empty/.keep", "")
+    await putText(s3, username, ".keep", "")
+    await putText(s3, username, "empty/data.txt", "d")
+
+    runOpsDaily(daysFromNow(31))
+
+    const remaining = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    expect((remaining.Contents ?? []).map((o) => o.Key).sort()).toEqual([".keep", "empty/.keep"])
   })
 
   it("leaves everything alone when the TTL is disabled", async () => {
@@ -102,13 +121,18 @@ describe("stale multipart cleanup", () => {
       return (res.Uploads ?? []).map((u) => u.Key).sort()
     }
 
-    // Within the resume window (7 days) nothing is touched.
-    runOpsDaily(daysFromNow(6), { KURA_FILE_TTL_DAYS: "" })
+    // Driven by the value the deployed ops container actually has, so the two
+    // halves of this file describe one configuration rather than two.
+    const maxAgeDays = Number(deployedMultipartMaxAgeDays())
+    const opsEnv = { KURA_FILE_TTL_DAYS: "", KURA_MULTIPART_MAX_AGE_DAYS: String(maxAgeDays) }
+
+    // Exactly at the boundary the upload is still within its resume window.
+    runOpsDaily(daysFromNow(maxAgeDays - 1), opsEnv)
     expect(await listKeys()).toEqual(["empty.bin", "stale.bin"])
 
     // Past the window the idle upload goes; the part-less one cannot be dated
     // (SeaweedFS reports no Initiated) and holds no bytes, so it stays.
-    runOpsDaily(daysFromNow(8), { KURA_FILE_TTL_DAYS: "" })
+    runOpsDaily(daysFromNow(maxAgeDays + 1), opsEnv)
     expect(await listKeys()).toEqual(["empty.bin"])
   })
 })

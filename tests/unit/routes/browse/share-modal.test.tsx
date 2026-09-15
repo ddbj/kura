@@ -146,8 +146,8 @@ describe("ShareModal", () => {
     expect(within(modal).getByRole("button", { name: "閉じる" })).toBeInTheDocument()
   })
 
-  // The dialog is one of the screens that used to be Japanese-only; keep an
-  // end-to-end check that switching the language actually swaps the copy.
+  // Checks end to end that switching the language swaps this dialog's copy,
+  // not just the shell around it.
   test("renders English copy when the language is en", async () => {
     stsOk()
     render(<Wrapper lang="en"><ShareModal open onClose={() => undefined} targets={TARGETS} /></Wrapper>)

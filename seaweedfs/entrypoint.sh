@@ -12,21 +12,27 @@ set -euo pipefail
 : "${KURA_ROOT_SECRET_KEY:?}"
 : "${KURA_FILER_JWT_KEY:?}"
 
-# A non-positive value is indistinguishable from quota-disabled on
-# s3.bucket.list (see quota_reconcile below), so reject it at startup rather
-# than let it silently defeat quota enforcement.
-if [ -n "${KURA_QUOTA_DEFAULT_MB:-}" ]; then
-  case "$KURA_QUOTA_DEFAULT_MB" in
+# Both of these drive the reconcile loop below, which runs under `set -e`: a
+# value that `sleep` or `[ -lt ]` rejects would kill the loop for the lifetime
+# of the container, silently and without failing any healthcheck. A
+# non-positive quota is separately unusable because it is indistinguishable
+# from quota-disabled on s3.bucket.list (see quota_reconcile). Refuse to start
+# instead.
+require_positive_int() {
+  case "$2" in
     *[!0-9]* | '')
-      echo "kura: KURA_QUOTA_DEFAULT_MB must be a positive integer, got '${KURA_QUOTA_DEFAULT_MB}'" >&2
+      echo "kura: $1 must be a positive integer, got '$2'" >&2
       exit 1
       ;;
   esac
-  if [ "$KURA_QUOTA_DEFAULT_MB" -eq 0 ]; then
-    echo "kura: KURA_QUOTA_DEFAULT_MB must be a positive integer, got '0'" >&2
+  if [ "$2" -eq 0 ]; then
+    echo "kura: $1 must be a positive integer, got '0'" >&2
     exit 1
   fi
-fi
+}
+
+[ -z "${KURA_QUOTA_DEFAULT_MB:-}" ] || require_positive_int KURA_QUOTA_DEFAULT_MB "$KURA_QUOTA_DEFAULT_MB"
+[ -z "${KURA_OPS_INTERVAL_SECONDS:-}" ] || require_positive_int KURA_OPS_INTERVAL_SECONDS "$KURA_OPS_INTERVAL_SECONDS"
 
 # Secrets can contain any byte including " and \; embedding them raw into the
 # generated JSON/TOML would break parsing. This escapes them per the JSON

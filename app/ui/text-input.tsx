@@ -17,7 +17,7 @@ type Props = {
   type?: "text" | "search"
 }
 
-// Handoff .finput: monospaced text input used inside modals / forms.
+// .finput: monospaced text input used inside modals / forms.
 export const TextInput = ({
   ref,
   id,

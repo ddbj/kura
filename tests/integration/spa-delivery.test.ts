@@ -74,6 +74,11 @@ describe("SPA delivery", () => {
     "/assets/%2e%2e%2f%2e%2e%2fpackage.json",
   ])("does not serve %s from outside the build directory", async (path) => {
     const res = await get(path)
+    // The status matters as much as the body: answering an /assets/ request
+    // with 200 text/html is the MIME-error failure the asset 404 exists to
+    // prevent, even when the traversal itself resolved to nothing.
+    expect(res.status).toBe(404)
+    expect(String(res.headers["content-type"])).toContain("text/plain")
     expect(res.body).not.toContain("\"dependencies\"")
   })
 

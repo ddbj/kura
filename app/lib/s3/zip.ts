@@ -132,14 +132,14 @@ export const saveZipStream = async (
 
   const blob = await new Response(stream).blob()
   const url = URL.createObjectURL(blob)
-  try {
-    const anchor = document.createElement("a")
-    anchor.href = url
-    anchor.download = suggestedName
-    anchor.click()
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = suggestedName
+  anchor.click()
+  // Revoking in the same task as the click can cancel a download the browser
+  // has not started reading yet. Hand the blob back on the next task instead —
+  // leaving it alive would pin the whole zip in memory.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 // ユーザーが保存ダイアログを閉じた場合。失敗として扱わない。

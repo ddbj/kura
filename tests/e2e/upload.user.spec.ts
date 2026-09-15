@@ -152,7 +152,7 @@ test.describe("UPLOAD", () => {
 
       await deletePromise
       // cancel() は abort 完了後に removeOne(id) を呼び row を upcard から削除する
-      // (scenarios v3 で明記)。detail text "キャンセル済み" は setTransfers filter に
+      // detail text "キャンセル済み" は setTransfers filter に
       // 到達する前に消えるため UI 上には残らない。
       await expect(row).toHaveCount(0, { timeout: 15_000 })
 

@@ -126,6 +126,9 @@ describe("IAM policy boundary", () => {
     for (const path of ["/", `/${username}`, `/${username}?list-type=2`, `/${username}/anon.txt`]) {
       const res = await fetch(`${endpoint}${path}`)
       expect(res.status, `unsigned GET ${path}`).toBe(403)
+      // A 403 from anywhere but the authorizer (a proxy, a misroute) would
+      // pass a bare status check while proving nothing about the boundary.
+      expect(await res.text(), `unsigned GET ${path}`).toContain("AccessDenied")
     }
   })
 

@@ -1,9 +1,9 @@
 import type { ListObjectsV2CommandOutput, S3Client } from "@aws-sdk/client-s3"
-import { CopyObjectCommand, CreateBucketCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadBucketCommand, ListObjectsV2Command } from "@aws-sdk/client-s3"
+import { CopyObjectCommand, CreateBucketCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 import { encodeFilenameStrict, encodeStrictKey, entryName } from "./keys"
-import { collectAllPages } from "./paginate"
+import { collectAllPages, nextMarker } from "./paginate"
 
 export type FileEntry = {
   key: string
@@ -14,10 +14,9 @@ export type FileEntry = {
   lastModified: Date
 }
 
-export type DirectoryPage = {
+export type Directory = {
   dirs: string[]
   files: FileEntry[]
-  nextToken?: string
 }
 
 const hasHttpStatus = (err: unknown, status: number): boolean =>
@@ -25,6 +24,20 @@ const hasHttpStatus = (err: unknown, status: number): boolean =>
   (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode === status
 
 const isNotFound = (err: unknown): boolean => hasHttpStatus(err, 404)
+
+// Whether a key is already taken. A 403 counts as "no": the IAM policy answers
+// HeadObject on someone else's key that way, and either answer means the
+// caller cannot use it.
+export const objectExists = async (s3: S3Client, bucket: string, key: string): Promise<boolean> => {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+
+    return true
+  } catch (err) {
+    if (isNotFound(err) || hasHttpStatus(err, 403)) return false
+    throw err
+  }
+}
 
 // CreateBucket on an existing bucket returns 409 (BucketAlreadyExists, even
 // for the owner), so existence is checked with HeadBucket first. Two tabs
@@ -45,29 +58,36 @@ export const ensureOwnBucket = async (s3: S3Client, bucket: string): Promise<voi
   }
 }
 
+// One directory level, fully enumerated. A page caps out at 1000 entries, so
+// stopping at the first one would silently hide the rest of a large folder
+// from the listing while the usage total (which walks every page) still counts
+// them.
 export const listDirectory = async (
   s3: S3Client,
   bucket: string,
   prefix: string,
-  continuationToken?: string,
-): Promise<DirectoryPage> => {
-  const res = await s3.send(new ListObjectsV2Command({
-    Bucket: bucket,
-    Prefix: prefix,
-    Delimiter: "/",
-    ...(continuationToken === undefined ? {} : { ContinuationToken: continuationToken }),
-  }))
-  const dirs = (res.CommonPrefixes ?? []).flatMap((p) => (p.Prefix === undefined ? [] : [p.Prefix]))
-  const files = (res.Contents ?? []).flatMap((o) =>
-    o.Key === undefined || o.Key === prefix
-      ? []
-      : [{ key: o.Key, size: o.Size, lastModified: o.LastModified ?? new Date(0) }])
+): Promise<Directory> => {
+  const pages = await collectAllPages<ListObjectsV2CommandOutput, ListObjectsV2CommandOutput, string>(
+    (marker) => s3.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      Delimiter: "/",
+      ...(marker === undefined ? {} : { ContinuationToken: marker }),
+    })),
+    (page) => [page],
+    (page) => nextMarker(page.NextContinuationToken),
+  )
+  const dirs = pages.flatMap((page) =>
+    (page.CommonPrefixes ?? []).flatMap((p) => (p.Prefix === undefined ? [] : [p.Prefix])))
+  // The prefix itself comes back as a zero-byte entry when the directory was
+  // materialized in the filer; it is the folder, not a file in it.
+  const files = pages.flatMap((page) =>
+    (page.Contents ?? []).flatMap((o) =>
+      o.Key === undefined || o.Key === prefix
+        ? []
+        : [{ key: o.Key, size: o.Size, lastModified: o.LastModified ?? new Date(0) }]))
 
-  return {
-    dirs,
-    files,
-    ...(res.NextContinuationToken === undefined ? {} : { nextToken: res.NextContinuationToken }),
-  }
+  return { dirs, files }
 }
 
 export const deleteObject = async (s3: S3Client, bucket: string, key: string): Promise<void> => {
@@ -116,10 +136,9 @@ export type DeleteObjectsResult = {
 // S3 caps DeleteObjects at 1000 keys per request; chunk transparently.
 const DELETE_CHUNK = 1000
 
-// A failure of the DeleteObjects request itself (network / 5xx) previously
-// aborted with any prior chunks' successes dropped on the floor. Aggregate
-// per chunk instead, so the caller sees exactly which keys landed and which
-// ones still need retry.
+// Results are aggregated per chunk so that a chunk-level failure (network /
+// 5xx) does not discard the preceding chunks' successes: the caller needs to
+// know exactly which keys landed and which ones still need a retry.
 export const deleteObjects = async (
   s3: S3Client,
   bucket: string,
@@ -180,11 +199,7 @@ export const listAllUnderPrefix = async (
     })),
     (page) => (page.Contents ?? []).flatMap((o) =>
       o.Key === undefined ? [] : [{ key: o.Key, size: o.Size, lastModified: o.LastModified }]),
-    (page) => {
-      const next = page.NextContinuationToken
-
-      return next !== undefined && next !== "" ? next : undefined
-    },
+    (page) => nextMarker(page.NextContinuationToken),
   )
 
 // The bytes flow browser <- SeaweedFS directly; the SPA only mints the URL.

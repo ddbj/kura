@@ -8,7 +8,7 @@ type Props = {
   className?: string
 }
 
-// Handoff .cbx pattern: a bordered square that turns brand-filled when checked,
+// .cbx: a bordered square that turns brand-filled when checked,
 // rendered as a real <button role=checkbox> for accessibility.
 export const Checkbox = ({ checked, onChange, ariaLabel, className }: Props) => (
   <button

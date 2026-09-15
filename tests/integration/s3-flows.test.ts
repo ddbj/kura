@@ -13,7 +13,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { describe, expect, it } from "vitest"
 
-import { assumeRole, putText, s3ClientFor, setupUser, signToken } from "./_helpers"
+import { assumeRole, eventually, putText, s3ClientFor, setupUser, signToken } from "./_helpers"
 
 describe("multipart upload", () => {
   it("uploads in parts and downloads the identical bytes", async () => {
@@ -211,6 +211,31 @@ describe("presigned URLs with temporary credentials", () => {
     )
     expect(await got.Body!.transformToString()).toBe("via presign")
   })
+
+  // The signature's own X-Amz-Expires is not the real limit: the STS session
+  // behind it is. A link handed out before the session ends must stop working
+  // when the session does, or "short-lived" would be unenforceable.
+  it("stops honouring a presigned URL once the STS session behind it expires", async () => {
+    const { username, s3 } = await setupUser()
+    await putText(s3, username, "short.txt", "short-lived")
+
+    // The session is capped by the access token's remaining life, so a
+    // short-lived token is how a short session gets requested at all.
+    const shortLivedSession = await assumeRole(await signToken({ username, lifetimeSeconds: 10 }))
+    const url = await getSignedUrl(
+      s3ClientFor(shortLivedSession),
+      new GetObjectCommand({ Bucket: username, Key: "short.txt" }),
+      // Far beyond the session: the session has to be what cuts it off.
+      { expiresIn: 3600 },
+    )
+
+    expect((await fetch(url)).status).toBe(200)
+
+    await eventually(async () => {
+      const res = await fetch(url)
+      expect(res.status).toBe(403)
+    }, 60_000, 2_000)
+  }, 120_000)
 
   it("rejects the same request without the signature", async () => {
     const { username, s3 } = await setupUser()

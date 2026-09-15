@@ -37,8 +37,8 @@ type Props = {
 
 // Shared shape behind rename / copy / new-folder / folder-rename modals: a
 // TextInput seeded on open, Enter submits, error rendered below, footer holds
-// cancel + primary. Reset is keyed on open transitions only so a parent
-// that re-renders during typing does not clobber user input (H-C).
+// cancel + primary. Reset is keyed on open transitions only so a parent that
+// re-renders during typing does not clobber user input.
 export const NameEntryModal = ({
   open,
   onClose,
@@ -129,7 +129,7 @@ export const NameEntryModal = ({
           }
         }}
       />
-      {error !== undefined ? <p className="ferr" style={{ marginTop: 8 }}>{error}</p> : null}
+      {error !== undefined ? <p className="ferr" role="alert" style={{ marginTop: 8 }}>{error}</p> : null}
       {footerSlot}
       <div className="mfoot">
         <Button onClick={onClose} disabled={busy}>{cancelLabel}</Button>

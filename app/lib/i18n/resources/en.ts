@@ -17,11 +17,6 @@ export const en: Resources = {
     login: "Sign in with DDBJ account",
     logout: "Sign out",
   },
-  switchLang: {
-    label: "Switch language",
-    toJa: "JA",
-    toEn: "EN",
-  },
   auth: {
     loginRequired: "Sign in with your DDBJ account to use kura.",
     processingCallback: "Signing in…",
@@ -29,7 +24,6 @@ export const en: Resources = {
     backToTop: "Back to top",
   },
   bucket: {
-    preparing: "Preparing your space…",
     unsupportedUsernameTitle: "kura is not available for this username",
     unsupportedUsernameBody:
       "The username {{username}} does not meet the S3 bucket naming rules (lowercase letters, digits, . and - only, 3-63 characters, starting and ending with a letter or digit), so a kura space cannot be created.",
@@ -43,7 +37,7 @@ export const en: Resources = {
     hoursMinutes: "{{hours}} h {{minutes}} min",
   },
   browse: {
-    newFolder: "＋ New folder",
+    newFolder: "New folder",
     upload: "Upload",
     chooseFile: "Choose files",
     chooseFolder: "Choose a folder",
@@ -71,6 +65,7 @@ export const en: Resources = {
     showAll: "Show all",
     openFolder: "Open",
     openUrl: "Open URL",
+    toggleUrl: "Show the timed link for {{name}}",
     timedTag: "Timed",
     menuCopyLink: "Copy link",
     menuDownload: "Download",
@@ -132,11 +127,9 @@ export const en: Resources = {
     colProgress: "Progress",
     colDetail: "Details",
     colActions: "Actions",
-    stateRunning: "Uploading",
     stateQueued: "Queued",
     stateFailed: "Failed",
     stateConflict: "Conflict",
-    statePaused: "Paused",
     stateDone: "Done",
     detailMismatch: "Contents do not match",
     detailCancelled: "Cancelled",

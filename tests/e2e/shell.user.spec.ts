@@ -53,7 +53,7 @@ test.describe("SHELL", () => {
 
     // 初期は JA (project の locale: ja-JP + 未設定の localStorage)
     await expect(page.locator("html")).toHaveAttribute("lang", "ja")
-    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" })).toBeVisible()
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "新規フォルダ" })).toBeVisible()
 
     await page.locator(".lang").getByRole("button", { name: "EN" }).click()
     await expect(page.locator("html")).toHaveAttribute("lang", "en")
@@ -64,12 +64,12 @@ test.describe("SHELL", () => {
     await page.keyboard.press("Escape")
 
     // shell だけでなく browse 画面の操作・列見出しも切り替わる
-    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "＋ New folder" })).toBeVisible()
+    await expect(page.locator(".pathbar .actions").getByRole("button", { name: "New folder" })).toBeVisible()
     await expect(page.locator(".pathbar .actions").getByRole("button", { name: /Upload/ })).toBeVisible()
     await expect(page.locator(".thead").getByRole("button", { name: "Name" })).toBeVisible()
     await expect(page.getByPlaceholder("Filter by file name")).toBeVisible()
     // negative: ja の literal が残っていない
-    await expect(page.getByRole("button", { name: "＋ 新規フォルダ" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "新規フォルダ" })).toHaveCount(0)
 
     // localStorage 永続化
     const stored = await page.evaluate(() => localStorage.getItem("kura.lang"))

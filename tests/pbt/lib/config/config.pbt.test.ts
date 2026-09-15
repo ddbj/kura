@@ -10,6 +10,7 @@ const base = {
 }
 
 const parseTtl = (value: string) => AppConfigSchema.safeParse({ ...base, fileTtlDays: value })
+const parseQuota = (value: string) => AppConfigSchema.safeParse({ ...base, quotaBytes: value })
 
 describe("AppConfigSchema.fileTtlDays properties", () => {
   test.prop([fc.integer({ min: 1, max: 1_000_000 })])(
@@ -24,6 +25,23 @@ describe("AppConfigSchema.fileTtlDays properties", () => {
   // 受理集合は「空文字 (= TTL 無効)」と「先頭 0 なしの 10 進正整数」だけ
   test.prop([fc.string()])("fileTtlDays_anyString_acceptedIffEmptyOrPositiveInt", (value) => {
     const result = parseTtl(value)
+    expect(result.success).toBe(value === "" || /^[1-9][0-9]*$/.test(value))
+  })
+})
+
+describe("AppConfigSchema.quotaBytes properties", () => {
+  test.prop([fc.integer({ min: 1, max: 1_000_000_000 })])(
+    "quotaBytes_positiveIntegerString_convertsMegabytesToBytes",
+    (mb) => {
+      const result = parseQuota(String(mb))
+      expect(result.success).toBe(true)
+      expect(result.data?.quotaBytes).toBe(mb * 1024 ** 2)
+    },
+  )
+
+  // 受理集合は「空文字 (= deployment の既定)」と「先頭 0 なしの 10 進正整数」だけ
+  test.prop([fc.string()])("quotaBytes_anyString_acceptedIffEmptyOrPositiveInt", (value) => {
+    const result = parseQuota(value)
     expect(result.success).toBe(value === "" || /^[1-9][0-9]*$/.test(value))
   })
 })

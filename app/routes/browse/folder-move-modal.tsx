@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { useT } from "~/lib/i18n"
-import { Button, Icon, Modal } from "~/ui"
+import { Button, Callout, Icon, Modal } from "~/ui"
 
 import { FolderPicker } from "./folder-picker"
 
@@ -87,11 +87,8 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
             <Button kind="po" size="sm" onClick={() => setPickerOpen(true)}>{t("modal.moveChoose")}</Button>
           </div>
         </div>
-        <div className="banner ochre">
-          <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
-          <div>{t("modal.folderMoveNote")}</div>
-        </div>
-        {error !== undefined ? <p className="ferr">{error}</p> : null}
+        <Callout tone="info">{t("modal.folderMoveNote")}</Callout>
+        {error !== undefined ? <p className="ferr" role="alert">{error}</p> : null}
         <div className="mfoot">
           <Button onClick={onClose}>{t("common.cancel")}</Button>
           <Button kind="pri" onClick={submit}>{t("modal.moveSubmit")}</Button>

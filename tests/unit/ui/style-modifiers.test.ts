@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest"
 
 // `cn("base", { mod: cond })` の mod は base と組み合わせて使う前提の修飾子名。
 // 同じ名前で単独のクラスが CSS にあると、詳細度が同じで後勝ちになり、base 側の
-// 指定（背景・padding・角丸など）を丸ごと奪う。実際に .finput と banner 用の
-// .err でこれが起きたので、組み合わせが起こりえないことを検査で固定する。
+// 指定（背景・padding・角丸など）を丸ごと奪う。その組み合わせが起こりえない
+// ことを検査で固定する。
 const sources = import.meta.glob("/app/**/*.tsx", {
   query: "?raw",
   import: "default",

@@ -36,10 +36,11 @@ const assetNotFound = (): Plugin => ({
       } catch {
         return next()
       }
-      // ".." falls through to vite's own static handler, which is confined to
-      // outDir; this middleware never resolves such a path itself.
-      if (!pathname.startsWith("/assets/") || pathname.includes("..")) return next()
-      if (existsSync(join(outDir, pathname.slice(1)))) return next()
+      if (!pathname.startsWith("/assets/")) return next()
+      // A ".." inside an asset path is never a real asset name. Answering 404
+      // without resolving it keeps this middleware out of path arithmetic and
+      // still avoids the SPA fallback replying to an asset request with HTML.
+      if (!pathname.includes("..") && existsSync(join(outDir, pathname.slice(1)))) return next()
       res.statusCode = 404
       res.setHeader("Content-Type", "text/plain")
       res.end("Not Found\n")

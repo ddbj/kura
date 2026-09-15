@@ -106,7 +106,6 @@ describe("listDirectory", () => {
       { key: "docs/読みもの & メモ.txt", size: 42, lastModified: new Date("2026-07-01T10:00:00.000Z") },
       { key: "docs/big.bin", size: 5_000_000_000, lastModified: new Date("2026-07-02T00:00:00.000Z") },
     ])
-    expect(page.nextToken).toBeUndefined()
   })
 
   test("listDirectory_excludesPrefixMarkerItself", async () => {
@@ -126,29 +125,60 @@ describe("listDirectory", () => {
     expect(page.files.map((f) => f.key)).toEqual(["docs/a.txt"])
   })
 
-  test("listDirectory_truncated_returnsNextToken", async () => {
+  // A page tops out at 1000 entries. Stopping at the first one would drop the
+  // rest of a large folder from the listing without any visible error.
+  test("listDirectory_truncated_mergesEveryPage", async () => {
+    const seenTokens: (string | null)[] = []
     server.use(
-      http.get(`${ENDPOINT}/${BUCKET}`, () =>
-        HttpResponse.xml(listObjectsV2Xml({
+      http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
+        const token = new URL(request.url).searchParams.get("continuation-token")
+        seenTokens.push(token)
+        if (token === null) {
+          return HttpResponse.xml(listObjectsV2Xml({
+            bucket: BUCKET,
+            prefix: "",
+            objects: [{ key: "a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }],
+            commonPrefixes: ["one/"],
+            nextContinuationToken: "token-2",
+          }))
+        }
+
+        return HttpResponse.xml(listObjectsV2Xml({
+          bucket: BUCKET,
+          prefix: "",
+          objects: [{ key: "b.txt", size: 2, lastModified: "2026-07-02T10:00:00.000Z" }],
+          commonPrefixes: ["two/"],
+        }))
+      }),
+    )
+
+    const listing = await listDirectory(client(), BUCKET, "")
+    expect(seenTokens).toEqual([null, "token-2"])
+    expect(listing.files.map((f) => f.key)).toEqual(["a.txt", "b.txt"])
+    expect(listing.dirs).toEqual(["one/", "two/"])
+  })
+
+  // SeaweedFS has been observed answering IsTruncated=true with no marker.
+  // Re-issuing the same request would spin forever, so the walk must stop.
+  test("listDirectory_truncatedWithoutToken_stopsInsteadOfLooping", async () => {
+    let calls = 0
+    server.use(
+      http.get(`${ENDPOINT}/${BUCKET}`, () => {
+        calls += 1
+
+        return HttpResponse.xml(listObjectsV2Xml({
           bucket: BUCKET,
           prefix: "",
           objects: [{ key: "a.txt", size: 1, lastModified: "2026-07-01T10:00:00.000Z" }],
           commonPrefixes: [],
-          nextContinuationToken: "token-123",
-        }))),
-    )
-    const page = await listDirectory(client(), BUCKET, "")
-    expect(page.nextToken).toBe("token-123")
-  })
-
-  test("listDirectory_continuationTokenIsSent", async () => {
-    server.use(
-      http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
-        expect(new URL(request.url).searchParams.get("continuation-token")).toBe("token-123")
-        return HttpResponse.xml(listObjectsV2Xml({ bucket: BUCKET, prefix: "", objects: [], commonPrefixes: [] }))
+          truncatedNoToken: true,
+        }))
       }),
     )
-    await listDirectory(client(), BUCKET, "", "token-123")
+
+    const listing = await listDirectory(client(), BUCKET, "")
+    expect(calls).toBe(1)
+    expect(listing.files.map((f) => f.key)).toEqual(["a.txt"])
   })
 
   test("listDirectory_serverError_propagates", async () => {
@@ -279,8 +309,8 @@ describe("deleteObjects", () => {
   })
 
   test("deleteObjects_chunkFailure_keepsPriorChunkSuccesses", async () => {
-    // A DeleteObjects request failing (network / 4xx) previously threw and
-    // dropped every prior chunk's successes. Aggregate per chunk instead:
+    // A DeleteObjects request failing (network / 4xx) must not drop the
+    // successes of the chunks before it:
     // the caller sees the first chunk as deleted and the second chunk's keys
     // as failed with the response message, so a retry only needs to cover
     // the failed subset. (Use 400 to sidestep the SDK's 5xx retry, so this

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useAuth } from "react-oidc-context"
 
 import { useConfig } from "~/lib/config"
@@ -6,7 +6,7 @@ import { formatBytes, formatDuration } from "~/lib/format"
 import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
 import { accessTokenForDuration, freshAccessToken, presignShareUrl } from "~/lib/s3"
 import { addSessionPresigned } from "~/lib/session-presigned"
-import { Button, Icon, LinkBar, Modal, Segmented, Tag } from "~/ui"
+import { Button, Callout, LinkBar, Modal, Segmented, Tag } from "~/ui"
 
 type Target = {
   bucket: string
@@ -46,16 +46,20 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
   const [sessionRemainingS, setSessionRemainingS] = useState<number | undefined>(undefined)
   const [busyBatch, setBusyBatch] = useState(false)
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({})
+  const [wasOpen, setWasOpen] = useState(false)
 
   const rowKey = (t: Target): string => `${t.bucket}/${t.key}`
 
-  useEffect(() => {
+  // 「閉→開」の遷移でだけリセットする。発行そのものが silent renew を起こしうる
+  // ので、auth.user の変化に反応させると発行済みのリンク一覧がその場で消える。
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) {
       setRowStates({})
       setBusyBatch(false)
       setSessionRemainingS(typeof auth.user?.expires_in === "number" ? auth.user.expires_in : undefined)
     }
-  }, [open, auth.user])
+  }
 
   const requestedSeconds = ttl === "max" ? MAX_PRESIGN_SECONDS : ttl * 60
   // 認証セッションの残りが要求より短ければ、そちらが実際の寿命になる。
@@ -161,8 +165,8 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
         })}
       </div>
 
-      <div className="sharemode on">
-        {!anyIssued ? (
+      {!anyIssued
+        ? (
           <>
             <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 12px" }}>
               <span className="lbl" style={{ color: "var(--inkMid)" }}>{t("share.ttlLabel")}</span>
@@ -177,13 +181,12 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
                 ]}
               />
             </div>
-            <div className="banner ochre">
-              <Icon name="clock" size={15} style={{ color: "var(--warnFg)", flex: "none" }} />
-              <div>{t(ttl === "max" ? "share.noticeMax" : "share.notice", { duration: formatDuration(effectiveSeconds / 60, t) })}</div>
-            </div>
+            <Callout tone="warn">
+              {t(ttl === "max" ? "share.noticeMax" : "share.notice", { duration: formatDuration(effectiveSeconds / 60, t) })}
+            </Callout>
           </>
-        ) : null}
-      </div>
+        )
+        : null}
 
       {anyIssued ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
@@ -194,7 +197,7 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
               return (
                 <div key={rowKey(target)}>
                   <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--inkSoft)", marginBottom: 4 }}>{target.name}</div>
-                  <p className="err" style={{ margin: 0 }}>{t("share.failedPrefix", { message: state.message })}</p>
+                  <p className="err" role="alert" style={{ margin: 0 }}>{t("share.failedPrefix", { message: state.message })}</p>
                 </div>
               )
             }

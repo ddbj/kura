@@ -112,8 +112,8 @@ describe("listBucketStats", () => {
   })
 
   test("listBucketStats_truncatedWithoutNextToken_stopsInsteadOfLooping", async () => {
-    // A server that returns IsTruncated=true with no NextContinuationToken
-    // used to trap the naive loop into resending the same request forever.
+    // A server answering IsTruncated=true with no NextContinuationToken must
+    // not make the walk resend the same request forever.
     // Treat "no next marker" as end-of-list and count only what was returned.
     let calls = 0
     server.use(

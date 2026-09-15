@@ -16,6 +16,7 @@ export const testConfig: AppConfig = {
   oidcClientId: "kura-test",
   s3Endpoint: "http://localhost:28333",
   fileTtlDays: null,
+  quotaBytes: 1024 ** 4,
 }
 
 type Routes = Parameters<typeof createRoutesStub>[0]

@@ -1,5 +1,5 @@
 import { useT } from "~/lib/i18n"
-import { Button, Icon, Modal } from "~/ui"
+import { Button, Callout, Modal } from "~/ui"
 
 type Props = {
   open: boolean
@@ -23,10 +23,7 @@ export const FolderDeleteModal = ({ open, onClose, folderName, onConfirm }: Prop
       <div className="mh">
         <h2 className="mtitle" id="folder-delete-title">{t("modal.folderDeleteTitle")}</h2>
       </div>
-      <div className="banner red">
-        <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />
-        <div>{t("modal.folderDeleteBody", { name: folderName })}</div>
-      </div>
+      <Callout tone="red" icon="trash">{t("modal.folderDeleteBody", { name: folderName })}</Callout>
       <div className="mfoot">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         <Button kind="dangerbox" onClick={submit}>{t("common.delete")}</Button>

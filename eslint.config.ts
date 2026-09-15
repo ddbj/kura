@@ -7,22 +7,27 @@ import simpleImportSort from "eslint-plugin-simple-import-sort"
 import globals from "globals"
 import tseslint from "typescript-eslint"
 
+// 色は app/styles/kura.css の :root で定義した CSS 変数に集約する。生の hex を
+// 書くと、そこだけ design system の外に出て一括で変えられなくなる。
 const HEX_LITERAL_RULE = {
   selector: "Literal[value=/^#[0-9A-Fa-f]{3,8}$/]",
-  message: "生 hex 禁止。app/styles/tailwind.css の @theme token を utility class (例: bg-brand) 経由で参照する。token が無い色は @theme に追加してから使う。",
+  message: "生 hex 禁止。app/styles/kura.css の :root で定義した CSS 変数 (var(--brand) 等) を使う。無い色は :root に追加してから使う。",
 }
 
 const ARBITRARY_CLASSNAME_RULE = {
   selector: "JSXAttribute[name.name='className'] Literal[value=/\\[(#[0-9A-Fa-f]{3,8}|-?\\d+(\\.\\d+)?(px|rem|em|%))\\]/]",
-  message: "Tailwind arbitrary value 禁止。@theme token を utility class 経由で参照する。token が無い値は @theme に追加してから使う。",
+  message: "className に生の値を埋め込まない。app/styles/kura.css のクラスか CSS 変数を使う。",
 }
 
+// 素の要素を直接使わせない。~/ui の primitive を通すことで、focus / aria /
+// 見た目の約束が 1 箇所に集まる。対応する primitive が無い要素は、まず
+// ~/ui に作ってから使う。
 const FORBIDDEN_ELEMENT_RULES = [
   ["button", "生 <button> 禁止。~/ui の <Button> / <IconButton> を使う。"],
   ["a", "生 <a> 禁止。~/ui の <TextLink> / <ExternalLink> または react-router の <Link> を使う。"],
-  ["input", "生 <input> 禁止。~/ui の <TextInput> / <FmtRadio> / <FmtCheck> 等の primitive を使う。"],
-  ["select", "生 <select> 禁止。~/ui の <Select> を使う。"],
-  ["textarea", "生 <textarea> 禁止。~/ui の <TextArea> を使う。"],
+  ["input", "生 <input> 禁止。~/ui の <TextInput> / <Checkbox> / <SearchInput> / <HiddenFileInput> を使う。"],
+  ["select", "生 <select> 禁止。~/ui に primitive を作ってから使う。"],
+  ["textarea", "生 <textarea> 禁止。~/ui に primitive を作ってから使う。"],
 ].map(([element, message]) => ({
   selector: `JSXOpeningElement[name.name='${element}']`,
   message,
@@ -54,9 +59,10 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // Deliberate prop -> state sync effects (Combobox / Select / SearchBox /
-      // DateFacet) are a supported pattern; this compiler-oriented rule is
-      // advisory, unlike the correctness rules kept above.
+      // Prop -> state sync in an effect is deliberate in a few places (the
+      // folder picker resetting to its initial prefix, the browse page
+      // re-showing a notice when its error changes). This rule is a compiler
+      // hint, not a correctness rule like the ones kept above.
       "react-hooks/set-state-in-effect": "off",
       "func-style": ["error", "expression"],
       "prefer-arrow-callback": "error",

@@ -10,7 +10,6 @@ import { formatBytes, formatDuration } from "~/lib/format"
 import { formatListDateTime, useLang, useT } from "~/lib/i18n"
 import {
   abortPendingUpload,
-  DEFAULT_QUOTA_BYTES,
   dirName,
   ensureOwnBucket,
   entryName,
@@ -32,7 +31,7 @@ import {
   sessionPresignedVersion,
   subscribeSessionPresigned,
 } from "~/lib/session-presigned"
-import { Header, RequireAuth, useTransfers } from "~/shell"
+import { AUTO_DISMISS_MS, Header, RequireAuth, useTransfers } from "~/shell"
 import {
   Button,
   Callout,
@@ -94,9 +93,9 @@ type SortKey = "name" | "size" | "updated"
 type SortDir = "asc" | "desc"
 type Lens = "all" | "timed"
 
-// One shared ticker at page level drives every relative-time cell,
-// instead of each row starting its own setInterval. Nulls until first mount so
-// server rendering (should we ever wire it up) doesn't diverge from the client.
+// One shared ticker at page level drives every relative-time cell, instead of
+// each row starting its own setInterval. Null until the first mount so a cell
+// never renders a timestamp before the clock exists.
 const NowContext = createContext<number | null>(null)
 
 const NowProvider = ({ children }: { children: React.ReactNode }) => {
@@ -243,7 +242,16 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const [folderDeleteTarget, setFolderDeleteTarget] = useState<{ prefix: string; name: string } | null>(null)
   const [folderRenameTarget, setFolderRenameTarget] = useState<{ prefix: string; name: string } | null>(null)
   const [folderMoveTarget, setFolderMoveTarget] = useState<{ prefix: string; name: string } | null>(null)
+  // One-shot results of actions that have no progress of their own (a copied
+  // link, a discarded upload). Anything with progress belongs in the transfers
+  // tray instead. Successes clear themselves; failures wait to be read.
   const [flash, setFlash] = useState<{ tone: "red" | "ok" | "warn"; message: string } | null>(null)
+  useEffect(() => {
+    if (flash === null || flash.tone === "red") return
+    const timer = setTimeout(() => setFlash(null), AUTO_DISMISS_MS)
+
+    return () => clearTimeout(timer)
+  }, [flash])
 
   // ページ全体で出す恒久的な notice (bucket-init / quota / list) の dismiss 状態。
   // Callout の × でユーザーが閉じたら true に。エラーが更新されたら false に戻して
@@ -322,7 +330,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
 
   const used = usage.data?.totalBytes ?? 0
   const folderStats = usage.data?.folders
-  const total = DEFAULT_QUOTA_BYTES
+  const total = config.quotaBytes
   const overQuota = used >= total
   const usagePct = Math.min(100, (used / total) * 100)
   useEffect(() => {
@@ -385,13 +393,10 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
     await transfersApi.enqueueZipDownload(bucket, entries, `${currentFolderName}.zip`)
   }
 
+  // Progress and failures both land in the transfers tray; nothing to report
+  // here.
   const downloadFolder = async (dirPrefix: string, folderName: string) => {
-    try {
-      await transfersApi.enqueueFolderZipDownload(bucket, dirPrefix, `${folderName}.zip`)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setFlash({ tone: "red", message: t("notice.downloadFailed", { message }) })
-    }
+    await transfersApi.enqueueFolderZipDownload(bucket, dirPrefix, `${folderName}.zip`)
   }
 
   const toggleSelection = (key: string) => {
@@ -667,18 +672,21 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           })}
         </div>
         <div className="actions">
-          <Button size="sm" onClick={() => setNewFolderOpen(true)}>{t("browse.newFolder")}</Button>
+          <Button size="sm" onClick={() => setNewFolderOpen(true)}>
+            <Icon name="folder" size={14} />
+            {t("browse.newFolder")}
+          </Button>
           <div style={{ position: "relative" }}>
             <Button
               kind="pri"
               size="sm"
-              aria-disabled={overQuota ? "true" : undefined}
+              disabled={overQuota}
+              aria-haspopup="menu"
+              aria-expanded={uploadMenuOpen === "header"}
               onClick={(event) => {
                 event.stopPropagation()
-                if (overQuota) return
                 setUploadMenuOpen((v) => v === "header" ? null : "header")
               }}
-              style={overQuota ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
             >
               <Icon name="up" size={14} />
               {t("browse.upload")}
@@ -824,7 +832,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
         </div>
 
         <div
-          className={cn("cardbody", { dragging: isDragging && !overQuota })}
+          className="cardbody"
           onDragEnter={onDragEnter}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
@@ -863,6 +871,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                           kind="pri"
                           size="sm"
                           disabled={overQuota}
+                          aria-haspopup="menu"
+                          aria-expanded={uploadMenuOpen === "empty"}
                           onClick={(event) => {
                             event.stopPropagation()
                             setUploadMenuOpen((v) => v === "empty" ? null : "empty")
@@ -930,6 +940,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                               icon="more"
                               ariaLabel={t("browse.rowActions", { name })}
                               active={isFolderMenuOpen}
+                              aria-haspopup="menu"
+                              aria-expanded={isFolderMenuOpen}
                               onClick={(event) => {
                                 event.stopPropagation()
                                 setOpenFolderMenu(isFolderMenuOpen ? null : dirPrefix)
@@ -963,7 +975,6 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                     {rows.map((file) => {
                       const key = file.key
                       const name = entryName(key)
-                      if (name === ".keep") return null
                       const presigned = presignedByKey.get(key)
                       const isSelected = selection.has(key)
                       const isMenuOpen = openRowMenu === key
@@ -981,7 +992,6 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                           <div
                             className={rowClass}
                             onClick={canExpand ? (event) => onRowActivate(event, key) : undefined}
-                            aria-expanded={canExpand ? isExpanded : undefined}
                           >
                             <div className="c-sel">
                               <Checkbox checked={isSelected} onChange={() => toggleSelection(key)} ariaLabel={t("browse.selectRow", { name })} />
@@ -992,7 +1002,15 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                               {canExpand ? (
                                 <>
                                   <span className="opencue" aria-hidden="true">{t("browse.openUrl")}</span>
-                                  <Icon name="caret" size={12} className="row-chev" />
+                                  <Button
+                                    unstyled
+                                    className="row-chev"
+                                    aria-expanded={isExpanded}
+                                    aria-label={t("browse.toggleUrl", { name })}
+                                    onClick={() => toggleExpanded(key)}
+                                  >
+                                    <Icon name="caret" size={12} />
+                                  </Button>
                                 </>
                               ) : null}
                             </div>
@@ -1018,6 +1036,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
                                 icon="more"
                                 ariaLabel={t("browse.rowActions", { name })}
                                 active={isMenuOpen}
+                                aria-haspopup="menu"
+                                aria-expanded={isMenuOpen}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   setOpenRowMenu(isMenuOpen ? null : key)

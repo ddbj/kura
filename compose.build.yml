@@ -1,13 +1,15 @@
 # SPA のビルドを pin した node image で行うための compose（compose.yml とは
 # 合成せず単体で使う。ビルドは stack の一部ではなく compose up の前段の作業）:
-#   npm run build:container
+#   npm run build:container                          # env.dev でビルド
+#   KURA_ENV_FILE=env.production npm run build:container
 #
 # ビルド成果物 build/client は web サービスが bind mount して配信するため、
 # ホストのファイルシステム上に残す必要がある。よって image に焼き込まず、
 # repo を bind mount して container 内で npm ci && npm run build を走らせる。
 #
-# デプロイ固有の設定は VITE_KURA_* として bundle に焼き込まれるので、環境ごとに
-# その環境の env でビルドする。
+# デプロイ固有の設定は bundle に焼き込まれるので、環境ごとにその環境の env で
+# ビルドする。ここで渡すのは KURA_* のうちビルドが使うものだけで、VITE_ 接頭辞
+# への変換は vite.config.ts が行う。secret は渡さない。
 #
 # node は moving tag ではなく patch version まで pin する。node:24 のような
 # moving tag は npm の minor 差で optional dependency の解決が変わり、同じ
@@ -24,10 +26,11 @@ services:
       # 非 root uid で走るので HOME と npm cache を書ける場所に向ける
       HOME: /tmp
       npm_config_cache: /tmp/.npm
-      VITE_KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
-      VITE_KURA_OIDC_CLIENT_ID: ${KURA_OIDC_CLIENT_ID}
-      VITE_KURA_S3_ENDPOINT: ${KURA_S3_ENDPOINT}
-      VITE_KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
+      KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
+      KURA_OIDC_CLIENT_ID: ${KURA_OIDC_CLIENT_ID}
+      KURA_S3_ENDPOINT: ${KURA_S3_ENDPOINT}
+      KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
+      KURA_QUOTA_DEFAULT_MB: ${KURA_QUOTA_DEFAULT_MB:-}
     volumes:
       - .:/app
     command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run build"]

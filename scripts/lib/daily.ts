@@ -41,7 +41,15 @@ export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise
   for (const bucket of buckets) {
     try {
       if (ttlDays !== null) {
-        ttlDeleted += await sweepBucketTtl(s3, bucket, ttlDays, now)
+        const sweep = await sweepBucketTtl(s3, bucket, ttlDays, now)
+        ttlDeleted += sweep.deleted
+        // A delete that the server refused is a failure of this pass even
+        // though nothing was thrown, so it has to reach the retry backoff.
+        if (sweep.failed > 0) {
+          failedBuckets.push(bucket)
+          console.error(`kura-ops: bucket ${bucket}: ${sweep.failed} expired object(s) could not be deleted`)
+          continue
+        }
       }
       uploadsAborted += await cleanupBucketUploads(s3, bucket, multipartMaxAgeDays, now)
     } catch (err) {

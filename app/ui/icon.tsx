@@ -15,6 +15,8 @@ export type IconName =
   | "more"
   | "trash"
   | "clock"
+  | "alert"
+  | "info"
   | "x"
 
 type IconProps = {
@@ -89,6 +91,16 @@ export const IconSprite = () => (
     <symbol id="i-clock" viewBox="0 0 16 16">
       <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" />
       <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </symbol>
+    <symbol id="i-alert" viewBox="0 0 16 16">
+      <path d="M8 2.2 1.6 13.4h12.8z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M8 6.3v3.1" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="8" cy="11.4" r=".85" fill="currentColor" />
+    </symbol>
+    <symbol id="i-info" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 7.2v4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="8" cy="4.8" r=".85" fill="currentColor" />
     </symbol>
     <symbol id="i-x" viewBox="0 0 16 16">
       <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

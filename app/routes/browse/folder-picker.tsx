@@ -19,11 +19,10 @@ type Props = {
   onSelect: (prefix: string) => void
 }
 
-// Navigate-into picker (Google Drive style): a single click enters a folder,
-// the breadcrumb reflects the current location, and the primary button
-// commits the current location as the destination — matching how people
-// already navigate the browse page. The tree with disclosure carets earlier
-// left the "select vs open" distinction ambiguous.
+// Navigate-into picker: a single click enters a folder, the breadcrumb
+// reflects the current location, and the primary button commits that location
+// as the destination — the same motion as navigating the browse page, so
+// "select" and "open" never have to be told apart.
 export const FolderPicker = ({
   open,
   onClose,
@@ -94,7 +93,7 @@ export const FolderPicker = ({
       />
 
       {isCurrentDisabled
-        ? <p className="ferr" style={{ marginTop: 10 }}>{t("modal.pickerCannotMove")}</p>
+        ? <p className="ferr" role="alert" style={{ marginTop: 10 }}>{t("modal.pickerCannotMove")}</p>
         : null}
 
       <div className="mfoot">
@@ -134,7 +133,7 @@ const PickerList = ({ q, disabledPrefix, onEnter }: PickerListProps) => {
   }
 
   return (
-    <div className="picker-list" role="list">
+    <div className="picker-list">
       {dirs.map((d) => {
         const name = dirName(d)
         const isDisabled = disabledPrefix !== undefined && disabledPrefix !== ""
@@ -144,7 +143,6 @@ const PickerList = ({ q, disabledPrefix, onEnter }: PickerListProps) => {
           <Button
             key={d}
             unstyled
-            role="listitem"
             className="picker-item"
             disabled={isDisabled}
             onClick={() => onEnter(d)}

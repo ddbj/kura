@@ -39,23 +39,36 @@ const listAllUploads = async (s3: S3Client, bucket: string): Promise<MultipartUp
   }
 }
 
+// `gone` means the upload finished or was aborted between the snapshot that
+// listed it and this call — an ordinary race with the owner, not an error.
+// Distinguishing it from "has no datable parts" keeps a user completing their
+// own upload from failing the whole bucket's pass.
+type PartActivity =
+  | { gone: true }
+  | { gone: false; lastActivity: Date | undefined }
+
 const latestPartActivity = async (
   s3: S3Client,
   bucket: string,
   key: string,
   uploadId: string,
-): Promise<Date | undefined> => {
+): Promise<PartActivity> => {
   let lastActivity: Date | undefined
-  for await (const parts of paginateListParts({ client: s3 }, { Bucket: bucket, Key: key, UploadId: uploadId })) {
-    for (const part of parts.Parts ?? []) {
-      if (part.LastModified !== undefined
-        && (lastActivity === undefined || part.LastModified > lastActivity)) {
-        lastActivity = part.LastModified
+  try {
+    for await (const parts of paginateListParts({ client: s3 }, { Bucket: bucket, Key: key, UploadId: uploadId })) {
+      for (const part of parts.Parts ?? []) {
+        if (part.LastModified !== undefined
+          && (lastActivity === undefined || part.LastModified > lastActivity)) {
+          lastActivity = part.LastModified
+        }
       }
     }
+  } catch (err) {
+    if (isNoSuchUpload(err)) return { gone: true }
+    throw err
   }
 
-  return lastActivity
+  return { gone: false, lastActivity }
 }
 
 // Aborts multipart uploads whose last part activity is older than maxAgeDays,
@@ -74,7 +87,11 @@ export const cleanupBucketUploads = async (
     if (upload.Key === undefined || upload.UploadId === undefined) {
       continue
     }
-    const lastActivity = await latestPartActivity(s3, bucket, upload.Key, upload.UploadId)
+    const activity = await latestPartActivity(s3, bucket, upload.Key, upload.UploadId)
+    if (activity.gone) {
+      continue
+    }
+    const lastActivity = activity.lastActivity
     if (lastActivity === undefined || !isOlderThanDays(lastActivity, maxAgeDays, now)) {
       continue
     }
@@ -83,7 +100,10 @@ export const cleanupBucketUploads = async (
     // abort below; re-checking right before sending it narrows (does not
     // fully close) that window.
     const recheck = await latestPartActivity(s3, bucket, upload.Key, upload.UploadId)
-    if (recheck !== undefined && recheck.getTime() > lastActivity.getTime()) {
+    if (recheck.gone) {
+      continue
+    }
+    if (recheck.lastActivity !== undefined && recheck.lastActivity.getTime() > lastActivity.getTime()) {
       continue
     }
 

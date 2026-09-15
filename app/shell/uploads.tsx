@@ -1,4 +1,3 @@
-import { HeadObjectCommand, type S3Client } from "@aws-sdk/client-s3"
 import { useQueryClient } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
@@ -6,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { formatBytes } from "~/lib/format"
 import { useT } from "~/lib/i18n"
 import type { RunningUpload, UploadProgress } from "~/lib/s3"
-import { copyObject, deleteEmptyDirectory, deleteObjects, isSaveCancelled, isZipTooLargeForMemory, listAllUnderPrefix, makeZipStream, MEMORY_ZIP_LIMIT_BYTES, predictZipSize, renameObject, ResumeMismatchError, resumeUpload, saveZipStream, startUpload, zipEntriesForPrefix,type ZipEntry } from "~/lib/s3"
+import { copyObject, deleteEmptyDirectory, deleteObjects, entryName, isSaveCancelled, isZipTooLargeForMemory, keyParent, listAllUnderPrefix, makeZipStream, MEMORY_ZIP_LIMIT_BYTES, objectExists, predictZipSize, renameObject, ResumeMismatchError, resumeUpload, saveZipStream, splitExtension, startUpload, zipEntriesForPrefix, type ZipEntry } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
 import { dropSessionPresigned, dropSessionPresignedUnder } from "~/lib/session-presigned"
 
@@ -14,7 +13,6 @@ export type TransferState =
   | "checking"
   | "queued"
   | "uploading"
-  | "paused"
   | "conflict"
   | "failed"
   | "done"
@@ -60,7 +58,6 @@ export type BatchOutcome<T> = { ok: T[]; failed: { key: string; message: string 
 
 type TransfersApi = {
   transfers: readonly Transfer[]
-  activeKeys: ReadonlySet<string>
   enqueue: (bucket: string, prefix: string, files: File[]) => void
   overwrite: (id: string) => void
   saveAs: (id: string) => void
@@ -68,11 +65,11 @@ type TransfersApi = {
   cancel: (id: string) => void
   retry: (id: string) => void
   cancelAll: () => void
-  // Removes every row that isn't actively running (done / failed / conflict /
-  // paused). Wired to the upcard's close button, which only appears when
-  // there is no in-flight work.
+  // Removes every row that isn't actively running (done / failed / conflict).
+  // Wired to the upcard's close button, which only appears when there is no
+  // in-flight work.
   dismissAll: () => void
-  // Removes only "done" rows and leaves failed / conflict / paused untouched.
+  // Removes only "done" rows and leaves failed / conflict untouched.
   // The upcard drives this on a timer once every transfer has settled so the
   // batch stays visible long enough to read but doesn't linger indefinitely.
   dismissDone: () => void
@@ -101,33 +98,14 @@ export const useTransfers = (): TransfersApi => {
   return api
 }
 
-const objectExists = async (s3: S3Client, bucket: string, key: string): Promise<boolean> => {
-  try {
-    await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-
-    return true
-  } catch (err) {
-    const status = typeof err === "object" && err !== null && "$metadata" in err
-      ? (err as { $metadata: { httpStatusCode?: number } }).$metadata.httpStatusCode
-      : undefined
-    if (status === 404 || status === 403) return false
-    throw err
-  }
-}
-
+// "Save as" destination for a conflicting upload: the same name with a
+// timestamp before the extension.
 const renameKey = (key: string): string => {
-  const slash = key.lastIndexOf("/")
-  const dir = slash === -1 ? "" : key.slice(0, slash + 1)
-  const name = slash === -1 ? key : key.slice(slash + 1)
-  const dot = name.lastIndexOf(".")
-  const stem = dot <= 0 ? name : name.slice(0, dot)
-  const ext = dot <= 0 ? "" : name.slice(dot)
+  const { stem, ext } = splitExtension(entryName(key))
   const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15)
 
-  return `${dir}${stem}-${stamp}${ext}`
+  return `${keyParent(key)}${stem}-${stamp}${ext}`
 }
-
-const entryName = (key: string): string => key.slice(key.lastIndexOf("/") + 1)
 
 // Runs uploads sequentially by default to keep the "queued" state honest and
 // avoid saturating the network. lib-storage itself parallelizes parts inside a
@@ -139,14 +117,15 @@ const MAX_CONCURRENT = 1
 // per-request latency on a many-file folder.
 const FOLDER_ITEM_CONCURRENCY = 5
 
-// Kept intentionally: individual "done" rows are never removed one-by-one any
-// more — the upcard waits until every transfer has settled (no uploading /
-// queued / checking left) and then dismisses all "done" rows together after
-// this delay. Failed / conflict / paused rows stay put because they require
-// a decision. The upcard also pauses this timer while the pointer is over
-// the card or a control inside it has focus (Material / NN Group pattern),
-// so a user reading a completed batch is never surprised by rows vanishing.
-export const DONE_DISMISS_MS = 8000
+// How long a settled success stays on screen before it clears itself. Shared
+// by the transfers tray and the page-level flash so the UI has one rhythm.
+// The tray waits until every transfer has settled (no uploading / queued /
+// checking left), then dismisses all "done" rows together after this delay;
+// failed / conflict rows stay put because they require a decision. The tray's
+// timer also pauses while the pointer is over the card or a control inside it
+// has focus (Material / NN Group pattern), so a user reading a completed batch
+// is never surprised by rows vanishing.
+export const AUTO_DISMISS_MS = 8000
 
 type Running = { id: string; abort: () => Promise<void> }
 
@@ -201,18 +180,6 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     transfersRef.current = transfers
   }, [transfers])
 
-  const activeKeys = useMemo(() => {
-    const set = new Set<string>()
-    for (const t of transfers) {
-      if (t.kind !== "upload") continue
-      if (t.state === "uploading" || t.state === "queued" || t.state === "paused" || t.state === "checking") {
-        set.add(`${t.bucket}/${t.key}`)
-      }
-    }
-
-    return set
-  }, [transfers])
-
   const activeCount = useMemo(() =>
     transfers.filter((t) => t.state === "uploading" || t.state === "queued" || t.state === "checking").length
   , [transfers])
@@ -243,6 +210,15 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     const next = current.find((t) => t.state === "queued" && t.kind === "upload")
     if (next !== undefined) runTransferRef.current(next.id, next.key)
   }, [])
+
+  // Every finished transfer hands the slot to the next queued one. Deferred to
+  // a macrotask because React commits on the scheduler, not a microtask: read
+  // transfersRef any earlier and the just-settled transfer still looks active.
+  // Promoting inside a setTransfers updater is not an option either — that
+  // would be a nested setState.
+  const schedulePromotion = useCallback((): void => {
+    setTimeout(() => promoteQueuedInto(transfersRef.current), 0)
+  }, [promoteQueuedInto])
 
   const runTransfer = useCallback((id: string, key: string): void => {
     const file = filesRef.current.get(id)
@@ -318,13 +294,9 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       .finally(() => {
         runningMap.current.delete(id)
         runningCountRef.current -= 1
-        // Defer to a macrotask so React has committed the state update we
-        // just enqueued (failed / done) and the transfers effect has synced
-        // transfersRef.current. Promotion inside the setTransfers updater
-        // would be a nested setState — banned by React.
-        setTimeout(() => promoteQueuedInto(transfersRef.current), 0)
+        schedulePromotion()
       })
-  }, [s3, queryClient, updateOne, removeOne, promoteQueuedInto])
+  }, [s3, queryClient, updateOne, removeOne, schedulePromotion])
 
   useEffect(() => {
     runTransferRef.current = runTransfer
@@ -458,12 +430,9 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       .finally(() => {
         runningMap.current.delete(id)
         runningCountRef.current -= 1
-        // Defer promotion to after the failed-state commit lands. React
-        // updaters must be pure and shouldn't kick more transfers; a microtask
-        // reads the just-committed transfersRef.
-        queueMicrotask(() => promoteQueuedInto(transfersRef.current))
+        schedulePromotion()
       })
-  }, [s3, queryClient, updateOne, removeOne, promoteQueuedInto])
+  }, [s3, queryClient, updateOne, removeOne, schedulePromotion])
 
   const retry = useCallback((id: string): void => {
     const t = transfersRef.current.find((x) => x.id === id)
@@ -509,7 +478,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
   const dismissAll = useCallback((): void => {
     // Wired to the upcard close button, which the UI only shows when nothing
     // is uploading / queued / checking. Every remaining row is a settled state
-    // (done / failed / conflict / paused) that the user has acknowledged.
+    // (done / failed / conflict) that the user has acknowledged.
     setTransfers((prev) => {
       const kept: Transfer[] = []
       for (const t of prev) {
@@ -526,8 +495,8 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
 
   const dismissDone = useCallback((): void => {
     // Driven by the upcard once every transfer has settled AND the pointer
-    // isn't over the card. Keeps failed / conflict / paused visible so the
-    // user still has to act on them.
+    // isn't over the card. Keeps failed / conflict visible so the user still
+    // has to act on them.
     setTransfers((prev) => {
       const kept: Transfer[] = []
       for (const t of prev) {
@@ -594,8 +563,9 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       .finally(() => {
         runningMap.current.delete(id)
         runningCountRef.current -= 1
+        schedulePromotion()
       })
-  }, [s3, queryClient, updateOne, removeOne])
+  }, [s3, queryClient, updateOne, removeOne, schedulePromotion])
 
   const finishOperation = useCallback((id: string, error?: string) => {
     if (error === undefined) {
@@ -867,14 +837,35 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     prefix: string,
     zipName: string,
   ): Promise<void> => {
-    const listed = await listAllUnderPrefix(s3, bucket, prefix)
+    let listed
+    try {
+      listed = await listAllUnderPrefix(s3, bucket, prefix)
+    } catch (err) {
+      // Reported as a failed tray row rather than thrown: from the user's side
+      // this is the same action whose later failures all land in the tray, and
+      // splitting one operation across two surfaces reads as two problems.
+      const id = nextId("download")
+      setTransfers((prev) => [...prev, {
+        id,
+        kind: "download",
+        bucket,
+        key: zipName,
+        name: zipName,
+        size: 0,
+        state: "failed",
+        loaded: 0,
+        total: 0,
+        error: err instanceof Error ? err.message : String(err),
+      }])
+
+      return
+    }
 
     await enqueueZipDownload(bucket, zipEntriesForPrefix(prefix, listed), zipName)
   }, [s3, enqueueZipDownload])
 
   const api = useMemo<TransfersApi>(() => ({
     transfers,
-    activeKeys,
     enqueue,
     overwrite,
     saveAs,
@@ -893,7 +884,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     enqueueFolderMove,
     enqueueZipDownload,
     enqueueFolderZipDownload,
-  }), [transfers, activeKeys, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, dismissDone, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove, enqueueZipDownload, enqueueFolderZipDownload])
+  }), [transfers, enqueue, overwrite, saveAs, skip, cancel, retry, cancelAll, dismissAll, dismissDone, resumePending, enqueueDelete, enqueueRename, enqueueMove, enqueueCopy, enqueueFolderDelete, enqueueFolderMove, enqueueZipDownload, enqueueFolderZipDownload])
 
   return <TransfersContext.Provider value={api}>{children}</TransfersContext.Provider>
 }

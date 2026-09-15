@@ -1,7 +1,7 @@
 import type { ListObjectsV2CommandOutput, S3Client } from "@aws-sdk/client-s3"
 import { ListObjectsV2Command } from "@aws-sdk/client-s3"
 
-import { collectAllPages } from "./paginate"
+import { collectAllPages, nextMarker } from "./paginate"
 
 export type BucketObjectStat = {
   key: string
@@ -44,10 +44,10 @@ export const foldBucketStats = (objects: readonly BucketObjectStat[]): BucketSta
   return { totalBytes, folders }
 }
 
-// SeaweedFS supports server-side per-bucket quotas (`s3.bucket.quota`), but
-// there is no S3 API to READ the currently-used bytes from the client. The
-// browse view therefore tallies bytes by walking ListObjectsV2. Cached for
-// several minutes via TanStack Query on the caller side.
+// SeaweedFS enforces per-bucket quotas server-side, but S3 exposes neither the
+// used bytes nor the configured limit to a client, so the browse view tallies
+// bytes by walking ListObjectsV2. Cached for several minutes via TanStack
+// Query on the caller side.
 export const listBucketStats = async (s3: S3Client, bucket: string): Promise<BucketStats> => {
   const objects = await collectAllPages<ListObjectsV2CommandOutput, BucketObjectStat, string>(
     (marker) => s3.send(new ListObjectsV2Command({
@@ -59,16 +59,8 @@ export const listBucketStats = async (s3: S3Client, bucket: string): Promise<Buc
       size: o.Size ?? 0,
       lastModifiedMs: o.LastModified?.getTime() ?? 0,
     })),
-    (page) => {
-      const next = page.NextContinuationToken
-
-      return next !== undefined && next !== "" ? next : undefined
-    },
+    (page) => nextMarker(page.NextContinuationToken),
   )
 
   return foldBucketStats(objects)
 }
-
-// Reference quota until the deployment exposes an authoritative value. Matches
-// the specified default of 1 TB per user.
-export const DEFAULT_QUOTA_BYTES = 1024 ** 4

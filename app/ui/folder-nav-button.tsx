@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 
-// Row-name button — behaves like a link (navigates on click) but has the
-// handoff .nm styling instead of a link's underline.
+// Row-name button — behaves like a link (navigates on click) but uses .nm
+// styling instead of a link's underline.
 type Props = {
   to: string
   onNavigate: (to: string) => void

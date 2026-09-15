@@ -14,7 +14,7 @@ type Props<T extends string | number> = {
   ariaLabel?: string
 }
 
-// Handoff .seg: chip-style segmented buttons (share-modal TTL selector).
+// .seg: chip-style segmented buttons (share-modal TTL selector).
 export const Segmented = <T extends string | number>({ value, options, onChange, ariaLabel }: Props<T>) => (
   <div className="seg" role="tablist" aria-label={ariaLabel}>
     {options.map((opt) => (

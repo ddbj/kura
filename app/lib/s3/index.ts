@@ -1,12 +1,12 @@
 export { isUsableBucketName } from "./bucket-name"
 export { createS3Client } from "./client"
 export { createStsCredentialsProvider, type GetToken } from "./credentials"
-export { dirName, entryName, keyToUrlPath, parentPrefix, prefixToSegments, prefixToUrlPath, segmentsToPrefix, splatToPrefix } from "./keys"
+export { dirName, entryName, keyParent, keyToUrlPath, prefixToSegments, prefixToUrlPath, segmentsToPrefix, splatToPrefix,splitExtension } from "./keys"
 export { abortPendingUpload, listPendingUploads, listUploadedParts, type PendingUpload, type UploadedPart } from "./multipart"
-export { copyObject, deleteEmptyDirectory, deleteObject, deleteObjects, type DeleteObjectsResult, type DirectoryPage, ensureOwnBucket, type FileEntry, listAllUnderPrefix,
-  listDirectory, type PrefixEntry, presignDownloadUrl, renameObject } from "./objects"
+export { copyObject, deleteEmptyDirectory, deleteObject, deleteObjects, type DeleteObjectsResult, type Directory, ensureOwnBucket, type FileEntry, listAllUnderPrefix,
+  listDirectory, objectExists, type PrefixEntry, presignDownloadUrl, renameObject } from "./objects"
 export { type PresignedShare, type PresignMethod, presignShareUrl } from "./presign"
-export { type BucketStats, DEFAULT_QUOTA_BYTES, foldBucketStats, type FolderStat, listBucketStats } from "./quota"
+export { type BucketStats, foldBucketStats, type FolderStat, listBucketStats } from "./quota"
 export { planResume, type PlanResumeResult, type ResumePlan, resumeUpload } from "./resume"
 export { assumeRoleWithToken, type StsCredentials, USER_ROLE_ARN } from "./sts"
 export { computePartSize, type RunningUpload, startUpload, type UploadProgress } from "./upload"

@@ -1,7 +1,7 @@
 import { fc, test } from "@fast-check/vitest"
 import { describe, expect } from "vitest"
 
-import { parentPrefix, prefixToSegments, prefixToUrlPath, segmentsToPrefix, splatToPrefix } from "~/lib/s3/keys"
+import { entryName, keyParent, prefixToSegments, prefixToUrlPath, segmentsToPrefix, splatToPrefix } from "~/lib/s3/keys"
 
 // S3 key の segment: "/" を含まない非空文字列 (unicode / percent / 記号 / "." ".." 含む)。
 const segment = fc.oneof(
@@ -24,8 +24,12 @@ describe("prefix <-> segments", () => {
     expect(prefix === "" || prefix.endsWith("/")).toBe(true)
   })
 
-  test.prop([segments, segment])("parentPrefix_dropsExactlyLastSegment", (segs, last) => {
-    expect(parentPrefix(segmentsToPrefix([...segs, last]))).toBe(segmentsToPrefix(segs))
+  // keyParent と entryName は 1 つの key をちょうど 2 つに割る。
+  test.prop([segments, segment])("keyParent_andEntryName_partitionTheKey", (segs, last) => {
+    const key = `${segmentsToPrefix(segs)}${last}`
+    expect(keyParent(key)).toBe(segmentsToPrefix(segs))
+    expect(entryName(key)).toBe(last)
+    expect(`${keyParent(key)}${entryName(key)}`).toBe(key)
   })
 })
 

@@ -13,11 +13,16 @@ const validEnv = {
   VITE_KURA_OIDC_CLIENT_ID: validConfig.oidcClientId,
   VITE_KURA_S3_ENDPOINT: validConfig.s3Endpoint,
   VITE_KURA_FILE_TTL_DAYS: "",
+  VITE_KURA_QUOTA_DEFAULT_MB: "",
 }
+
+const DEFAULT_QUOTA_BYTES = 1024 ** 4
+
+const parsed = { ...validConfig, fileTtlDays: null, quotaBytes: DEFAULT_QUOTA_BYTES }
 
 describe("AppConfigSchema", () => {
   test("AppConfigSchema_validConfig_parses", () => {
-    expect(AppConfigSchema.parse(validConfig)).toEqual({ ...validConfig, fileTtlDays: null })
+    expect(AppConfigSchema.parse(validConfig)).toEqual(parsed)
   })
 
   test("AppConfigSchema_fileTtlDaysEmpty_normalizesToNull", () => {
@@ -32,6 +37,26 @@ describe("AppConfigSchema", () => {
     "AppConfigSchema_fileTtlDaysInvalid_%s_rejects",
     (value) => {
       expect(() => AppConfigSchema.parse({ ...validConfig, fileTtlDays: value })).toThrow()
+    },
+  )
+
+  // The deployment default is expressed in MB; the UI needs bytes.
+  test("AppConfigSchema_quotaEmpty_fallsBackToOneTerabyte", () => {
+    expect(AppConfigSchema.parse({ ...validConfig, quotaBytes: "" }).quotaBytes).toBe(DEFAULT_QUOTA_BYTES)
+  })
+
+  test("AppConfigSchema_quotaAbsent_fallsBackToOneTerabyte", () => {
+    expect(AppConfigSchema.parse(validConfig).quotaBytes).toBe(DEFAULT_QUOTA_BYTES)
+  })
+
+  test("AppConfigSchema_quotaMegabytes_convertsToBytes", () => {
+    expect(AppConfigSchema.parse({ ...validConfig, quotaBytes: "512" }).quotaBytes).toBe(512 * 1024 ** 2)
+  })
+
+  test.each(["0", "-1", "abc", "1.5", " 10", "10 ", "0１", "1e3"])(
+    "AppConfigSchema_quotaInvalid_%s_rejects",
+    (value) => {
+      expect(() => AppConfigSchema.parse({ ...validConfig, quotaBytes: value })).toThrow()
     },
   )
 
@@ -57,7 +82,7 @@ describe("AppConfigSchema", () => {
 
 describe("readConfig", () => {
   test("readConfig_validEnv_returnsParsedConfig", () => {
-    expect(readConfig(validEnv)).toEqual({ ...validConfig, fileTtlDays: null })
+    expect(readConfig(validEnv)).toEqual(parsed)
   })
 
   test("readConfig_ttlSet_parsesToInt", () => {
@@ -78,5 +103,15 @@ describe("readConfig", () => {
   test("readConfig_ttlAbsent_isNull", () => {
     const { VITE_KURA_FILE_TTL_DAYS: _, ...rest } = validEnv
     expect(readConfig(rest).fileTtlDays).toBeNull()
+  })
+
+  test("readConfig_quotaSet_convertsMegabytesToBytes", () => {
+    expect(readConfig({ ...validEnv, VITE_KURA_QUOTA_DEFAULT_MB: "2048" }).quotaBytes).toBe(2048 * 1024 ** 2)
+  })
+
+  // A deployment that sets nothing gets the same 1 TB the reconciler applies.
+  test("readConfig_quotaAbsent_isOneTerabyte", () => {
+    const { VITE_KURA_QUOTA_DEFAULT_MB: _, ...rest } = validEnv
+    expect(readConfig(rest).quotaBytes).toBe(DEFAULT_QUOTA_BYTES)
   })
 })

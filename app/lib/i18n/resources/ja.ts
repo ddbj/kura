@@ -17,11 +17,6 @@ export type Resources = {
     login: string
     logout: string
   }
-  switchLang: {
-    label: string
-    toJa: string
-    toEn: string
-  }
   auth: {
     loginRequired: string
     processingCallback: string
@@ -29,7 +24,6 @@ export type Resources = {
     backToTop: string
   }
   bucket: {
-    preparing: string
     unsupportedUsernameTitle: string
     unsupportedUsernameBody: string
   }
@@ -68,6 +62,7 @@ export type Resources = {
     showAll: string
     openFolder: string
     openUrl: string
+    toggleUrl: string
     timedTag: string
     menuCopyLink: string
     menuDownload: string
@@ -128,11 +123,9 @@ export type Resources = {
     colProgress: string
     colDetail: string
     colActions: string
-    stateRunning: string
     stateQueued: string
     stateFailed: string
     stateConflict: string
-    statePaused: string
     stateDone: string
     detailMismatch: string
     detailCancelled: string
@@ -224,11 +217,6 @@ export const ja: Resources = {
     login: "DDBJ アカウントでログイン",
     logout: "ログアウト",
   },
-  switchLang: {
-    label: "言語切替",
-    toJa: "JA",
-    toEn: "EN",
-  },
   auth: {
     loginRequired: "kura を利用するには DDBJ アカウントでログインしてください。",
     processingCallback: "ログイン処理中…",
@@ -236,7 +224,6 @@ export const ja: Resources = {
     backToTop: "トップへ戻る",
   },
   bucket: {
-    preparing: "領域を準備中…",
     unsupportedUsernameTitle: "このユーザー名では kura を利用できません",
     unsupportedUsernameBody:
       "ユーザー名 {{username}} は S3 バケット命名規則 (小文字英数と . - のみ、3-63 文字、先頭末尾は英数字) に適合しないため、kura の領域を作成できません。",
@@ -248,7 +235,7 @@ export const ja: Resources = {
     hoursMinutes: "{{hours}} 時間 {{minutes}} 分",
   },
   browse: {
-    newFolder: "＋ 新規フォルダ",
+    newFolder: "新規フォルダ",
     upload: "アップロード",
     chooseFile: "ファイルを選択",
     chooseFolder: "フォルダを選択",
@@ -276,6 +263,7 @@ export const ja: Resources = {
     showAll: "すべて表示",
     openFolder: "開く",
     openUrl: "URL を開く",
+    toggleUrl: "{{name}} の期限つきリンクを表示",
     timedTag: "期限つき",
     menuCopyLink: "リンクをコピー",
     menuDownload: "ダウンロード",
@@ -337,11 +325,9 @@ export const ja: Resources = {
     colProgress: "進捗",
     colDetail: "詳細",
     colActions: "操作",
-    stateRunning: "アップロード中",
     stateQueued: "待機中",
     stateFailed: "失敗",
     stateConflict: "衝突",
-    statePaused: "一時停止",
     stateDone: "完了",
     detailMismatch: "内容が一致しません",
     detailCancelled: "キャンセル済み",

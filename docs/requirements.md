@@ -21,7 +21,7 @@ kura のファイルに触れるのは、本人と、本人が明示的に権限
 - 認証は DDBJ account（Keycloak）の OIDC による。kura 独自のアカウントは持たない
 - DDBJ account を持つユーザーは誰でも利用できる
 - ユーザーの識別子は DDBJ account の username（`preferred_username` claim）
-- 管理者（admin）向けの UI は設けない。全 bucket に対する運用操作は kura の root credentials で走るスクリプト（quota 変更・掃除）で行う（詳細は [operations.md](./operations.md)）
+- admin は全ユーザーの領域に対して操作できる。手段は CLI（aws cli 等の S3 client）と、root credentials で走る運用スクリプト（quota 変更・掃除）の 2 つで、**admin 向けの UI は提供しない**。admin として扱う DDBJ account は deployment 設定で列挙する（詳細は [architecture.md](./architecture.md) の「認証・認可」と [operations.md](./operations.md)）
 
 ## ファイル領域
 
@@ -39,17 +39,14 @@ kura のファイルに触れるのは、本人と、本人が明示的に権限
 ## download・一覧・削除
 
 - 認証されたユーザーは自分のファイルを一覧・download・削除できる
-- 複数のファイルやディレクトリは zip にまとめて download できる。zip はブラウザ内で組み立てるため、
-  ファイルの中身はブラウザとストレージの間で直接やり取りされる（詳細は [architecture.md](./architecture.md) の「frontend」）
-- 合計 2 GB までは通常の download として受け取れる。それを超えるものは保存先をブラウザに指定してもらう必要があり
-  （zip 全体をメモリに載せずに済ませるため）、その機能を持たないブラウザでは受け付けない。
-  大容量のまとめ取得は S3 client（CLI）で行う
+- 複数のファイルやディレクトリは zip にまとめて download できる。zip はブラウザ内で組み立てるため、ファイルの中身はブラウザとストレージの間で直接やり取りされる
+- 合計 2 GB までは通常の download として受け取れる。それを超えるものは保存先をブラウザに指定してもらう必要があり（zip 全体をメモリに載せずに済ませるため）、その機能を持たないブラウザでは受け付けない。大容量のまとめ取得は S3 client（CLI）で行う
 - 削除は即時の完全消去である。ゴミ箱・復旧猶予は設けない
 
 ## presigned URL
 
 - ユーザーは自分のファイルに対して presigned URL（GET / PUT）を発行できる。認証を持たない相手にファイルを渡す・受け取るための、短期の受け渡し専用の手段である
-- 有効期間の上限は、発行した時点の認証セッションの残り時間である。SeaweedFS の STS が持つ 12 時間の固定上限と、DDBJ account の SSO session（10 時間、ログイン時刻起点）のうち短い方が効くため、実際には 10 時間を超えず、ログインからの経過とともに縮む。どちらも kura 側の設定では変えられない（[architecture.md](./architecture.md) の「presign」を参照）
+- 有効期間の上限は、発行した時点の認証セッションの残り時間である。実際には 10 時間を超えず、ログインからの経過とともに縮む。この上限は SeaweedFS と DDBJ account の仕様で決まっていて kura 側の設定では変えられない（[architecture.md](./architecture.md) の「presign」を参照）
 - presigned URL の生成は client 側で完結する署名計算であり、kura に発行 API は無い。一時 credentials を持つ者は誰でも発行できるため、kura 側でこれを禁止する手段は存在しない。UI が発行操作を提供するのは、S3 client でできることの reference としてである
 - 12 時間を超える共有の手段は kura では提供しない
 
@@ -63,6 +60,7 @@ kura のファイルに触れるのは、本人と、本人が明示的に権限
 
 - 各ユーザーの領域には容量上限（quota）がある。default は 1 TB で、root credentials で走る運用スクリプトがユーザー単位に変更できる
 - quota を超過すると新規の upload がエラーで拒否される（超過の判定は約 1 分周期で行われる）。download と削除は引き続き行え、削除で quota 内に戻せば upload は自動的に再開できる（ストレージの再整理を待つため反映には遅延がありうる。[operations.md](./operations.md) を参照）
+- UI は使用量と上限をメーターで表示する。ただし上限として出せるのは deployment の default 値であり、ユーザー単位に変更した quota は表示に反映されない（S3 API に quota 設定値を読む手段が無いため。[architecture.md](./architecture.md) の「quota と TTL の実現」）
 
 ## 全ファイル TTL
 

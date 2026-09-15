@@ -1,5 +1,5 @@
 export { flattenKeys } from "./flatten-keys"
-export { formatDate, formatDateLocalized, formatDateTimeLocalized, formatListDateTime } from "./format-date"
+export { formatDateTimeLocalized, formatListDateTime } from "./format-date"
 export { createI18nInstance } from "./instance"
 export { isLang, type Lang, LANG_STORAGE_KEY, resolveInitialLang, resolveLangFromBrowser } from "./lang"
 export { LangProvider } from "./lang-context"

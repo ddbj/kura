@@ -17,7 +17,7 @@ import { test } from "./fixtures"
 test.describe("BROWSE", () => {
   test.beforeAll(async ({ browser }, testInfo) => {
     void testInfo
-    // Playwright fixture 制約 (v2-adversarial A-16): beforeAll では page fixture が
+    // Playwright fixture 制約: beforeAll では page fixture が
     // 受け取れないので、自前で context + addInitScript で SPA sessionStorage を復元
     const { readFileSync } = await import("node:fs")
     const session = readFileSync("tests/e2e/.auth/user.session.json", "utf8")
@@ -48,7 +48,7 @@ test.describe("BROWSE", () => {
     const folder = uniqueFolder("browse02")
     await page.goto(scopeBrowseUrl())
 
-    await page.getByRole("button", { name: "＋ 新規フォルダ" }).click()
+    await page.getByRole("button", { name: "新規フォルダ" }).click()
     const modal = page.getByRole("dialog", { name: "新しいフォルダ" })
     await expect(modal).toBeVisible()
     await modal.getByLabel("フォルダ名").fill(folder)

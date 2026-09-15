@@ -2,7 +2,7 @@ name: kura
 
 services:
   seaweedfs:
-    image: docker.io/chrislusf/seaweedfs:4.37
+    image: docker.io/chrislusf/seaweedfs:4.44
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/kura/entrypoint.sh"]
     command:
@@ -13,8 +13,8 @@ services:
       # runs out of volume slots as buckets accumulate, so let it auto-scale
       # with free disk instead
       - -volume.max=0
-      # SeaweedFS 4.37 rejects master.volumeSizeLimitMB >= 30000 at startup,
-      # so KURA_VOLUME_SIZE_LIMIT_MB must be < 30000.
+      # master が起動時に弾く上限は 30720 (= 30 GiB、4-byte offset ビルドの
+      # VolumeSizeLimitGB)。KURA_VOLUME_SIZE_LIMIT_MB はこれ以下にする。
       - -master.volumeSizeLimitMB=${KURA_VOLUME_SIZE_LIMIT_MB}
       - -volume.port=8082
       - -filer
@@ -56,11 +56,14 @@ services:
       timeout: 2s
       retries: 60
 
-  # reference SPA の静的配信。ビルド済みの
-  # build/client を vite の preview server が配る。kura の機能には関与しないので
-  # SeaweedFS には一切触らない。
+  # web と ops はどちらも scripts/*.ts を node の type stripping で直接実行する。
+  # その挙動は node の minor に依存するので、image は moving tag ではなく
+  # ビルドに使うのと同じ patch version に pin する。
+  #
+  # reference SPA の静的配信。ビルド済みの build/client を vite の preview
+  # server が配る。kura の機能には関与しないので SeaweedFS には一切触らない。
   web:
-    image: docker.io/library/node:24-alpine
+    image: docker.io/library/node:24.13.0-alpine
     restart: unless-stopped
     working_dir: /kura
     command: ["node", "/kura/scripts/serve-spa.ts"]
@@ -83,9 +86,8 @@ services:
       retries: 30
 
   # 日次の運用タスク: file TTL 削除・放置 multipart 掃除。
-  # node は TS を直接実行できる
   ops:
-    image: docker.io/library/node:24-alpine
+    image: docker.io/library/node:24.13.0-alpine
     restart: unless-stopped
     command: ["node", "/kura/scripts/ops-loop.ts"]
     environment:
@@ -93,6 +95,8 @@ services:
       KURA_S3_ENDPOINT: http://seaweedfs:8333
       KURA_ROOT_ACCESS_KEY: ${KURA_ROOT_ACCESS_KEY}
       KURA_ROOT_SECRET_KEY: ${KURA_ROOT_SECRET_KEY}
+      # 空の意味が 2 つで逆なので注意: TTL は空 = 無効、multipart の猶予は
+      # 空 = スクリプト側の既定 (7 日)。掃除を止める設定は無い。
       KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
       KURA_MULTIPART_MAX_AGE_DAYS: ${KURA_MULTIPART_MAX_AGE_DAYS:-}
       KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}

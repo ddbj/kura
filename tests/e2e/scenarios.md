@@ -72,11 +72,10 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 - 全 test は `E2E_USERNAME` の 1 bucket を共有する。並列は禁止 (`fullyParallel: false, workers: 1`)。
 - **命名は必ず runId scope の下**に置く:
   - `uniqueName(label)` → `e2e/${runId}/${label}-${hex8}.${ext}` (16 hex chars ≈ 128 bit)
-  - `uniquePrefix(label)` → `e2e/${runId}/${label}-${hex8}/`
 - **3 段構え cleanup**:
   1. `beforeAll` (per spec file): 自 runId scope (`e2e/${runId}/`) を全掃除。過去 run のゴミがあれば retry 保険で除去。他 runId scope には触らない。
   2. `beforeEach`: 自 runId scope 直下の未 setup object を掃除 (`retries > 0` 時の残置対策)。
-  3. `afterEach`: test scope の掃除 (`uniquePrefix(label)` を bulk delete + pending multipart abort)。
+  3. `afterEach`: test scope の掃除 (bulk delete + pending multipart abort + client 側の設定クリア)。
 - **他 runId のゴミの一斉掃除** は `npm run test:e2e:clean` (`scripts/e2e-cleanup.ts` として提供、手動実行専用) で行う。
 - `resetE2eScope(page)` は S3 SDK 直叩きで実装 (§5 参照)。UI 経由の bulk delete は使わない (Modal を開くと副作用がある + 遅い)。
 - `localStorage["kura.lang"]` と `sessionStorage["kura.presigned"]` は test の副作用として carry over しやすいので、`afterEach` で必ず削除する (§5 helper `clearClientPrefs(page)`)。
@@ -125,7 +124,7 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 | Login button (未認証画面) | `page.getByRole("button", { name: "DDBJ アカウントでログイン" })` |
 | Breadcrumb (中間 crumb) | `page.locator(".pathbar .crumb").getByRole("link", { name })` |
 | Breadcrumb (末尾 `.cur`) | `page.locator(".pathbar .crumb .cur")` |
-| New folder button | `page.locator(".pathbar .actions").getByRole("button", { name: "＋ 新規フォルダ" })` |
+| New folder button | `page.locator(".pathbar .actions").getByRole("button", { name: "新規フォルダ" })` |
 | Upload dropdown (pathbar) | `page.locator(".pathbar .actions").getByRole("button", { name: /アップロード/ })` |
 | Empty-state upload primary | `page.locator(".emptyzone .ez-actions").getByRole("button", { name: "アップロード" })` |
 | Upload menu items | `page.locator(".uploadmenu").getByRole("menuitem", { name })` (`ファイルを選択` / `フォルダを選択`) |
@@ -172,7 +171,6 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
 - 環境 / 命名
   - `requireEnv(name)`, `e2eUsername()`, `e2ePassword()`, `runId()` (globalSetup が確定した値を module load 時に取得)
   - `uniqueName(label, ext?)` → `e2e/${runId}/${label}-${hex}.${ext ?? "txt"}` (key path 相対)
-  - `uniquePrefix(label)` → `e2e/${runId}/${label}-${hex}/`
   - `uniqueFolder(label)` → `e2e-${label}-${hex}` (folder name のみ、path なし)
 - Selector
   - `getRow(page, filename)` / `getFolderRow(page, foldername)`
@@ -187,7 +185,7 @@ Playwright の `storageState()` は **cookie + localStorage のみ** を保存�
   - `uploadFileFromPath(page, sourcePath)` (大 file 用)
   - `uploadFolderFromDir(page, dirPath)`
   - `expectUploadDone(page, name, { timeout = 30_000 } = {})` → `.upcard .urow` 該当行の `.tag.ok` `完了` を待つ
-  - `expectUploadRowAutoDismissed(page, name)` → 該当 `.urow` が **15s 以内に** 消えることを assertion (`DONE_DISMISS_MS = 8000` の all-settled 検出 + hover pause + scheduler tick を吸収)
+  - `expectUploadRowAutoDismissed(page, name)` → 該当 `.urow` が **15s 以内に** 消えることを assertion (`AUTO_DISMISS_MS = 8000` の all-settled 検出 + hover pause + scheduler tick を吸収)
 - Isolation / cleanup
   - `s3ClientForE2e(page)` → `page.evaluate` で sessionStorage の `oidc.user:*` から access token を取り、`STSClient({ endpoint: KURA_E2E_S3_ENDPOINT, region: "us-east-1" })` で `AssumeRoleWithWebIdentityCommand` を叩き、返された credentials で `S3Client({ endpoint: KURA_E2E_S3_ENDPOINT, region: "us-east-1", forcePathStyle: true, credentials })` を返す。SeaweedFS の STS は S3 と同じ endpoint / host / port (dev では `http://localhost:28333`)。参照実装は `app/lib/s3/credentials.ts:createStsCredentialsProvider`。
   - `resetE2eScope(page)`:
@@ -414,14 +412,14 @@ projects:
 
 - **ペルソナ**: P-USER
 - **手順**:
-  1. `/` を開く (初期は JA、`＋ 新規フォルダ` が可視)
+  1. `/` を開く (初期は JA、`新規フォルダ` が可視)
   2. `.lang` の `EN` button クリック
   3. `.hdr .user` を開いて UserMenu 表示
 - **期待**:
   - `document.documentElement.lang === "en"`
   - UserMenu の menuitem text が `Sign out`
-  - browse 画面の `.pathbar .actions` が `＋ New folder` / `Upload`、列見出しが `Name`、検索の placeholder が `Filter by file name`
-  - **negative assertion**: `＋ 新規フォルダ` が 0 件
+  - browse 画面の `.pathbar .actions` が `New folder` / `Upload`、列見出しが `Name`、検索の placeholder が `Filter by file name`
+  - **negative assertion**: `新規フォルダ` が 0 件
   - `localStorage["kura.lang"] === "en"`
 - **備考**: UI 文言は全画面 i18n resources 経由という不変条件の E2E 側の担保 (ソース側は unit の localized-ui テスト)。`afterEach` で `clearClientPrefs` を呼び他 test に carry over させない。
 
@@ -456,7 +454,7 @@ projects:
 - **ペルソナ**: P-USER
 - **手順**:
   1. `/` を開く
-  2. `＋ 新規フォルダ` クリック → modal (`role=dialog`, name `新しいフォルダ`)
+  2. `新規フォルダ` クリック → modal (`role=dialog`, name `新しいフォルダ`)
   3. `getByLabel("フォルダ名")` に `uniqueFolder("browse-02")` を入力
   4. modal 内 `getByRole("button", { name: "作成" })` を押す
 - **期待**:
@@ -592,7 +590,7 @@ projects:
   - upload row の state tag `.tag.run` `アップロード中` → `.tag.ok` `完了`
   - 一覧に file row が 1 行増え、size 一致
   - `expectUploadRowAutoDismissed(page, name)` (15s 以内に `.upcard .urow` が該当行を持たなくなる)
-- **備考**: HiddenFileInput は 3 系統並存するため、helper が scope 分離した input に setInputFiles する。auto-dismiss は upcard 全体が settle した後 8s（`DONE_DISMISS_MS`）で done 行をまとめて掃くため、helper 側では 15s 上限で観測する。
+- **備考**: HiddenFileInput は 3 系統並存するため、helper が scope 分離した input に setInputFiles する。auto-dismiss は upcard 全体が settle した後 8s（`AUTO_DISMISS_MS`）で done 行をまとめて掃くため、helper 側では 15s 上限で観測する。
 
 ### S-UPLOAD-02: `.emptyzone` の primary button で upload
 
@@ -764,7 +762,7 @@ projects:
   - `planResume` は size のみ検査するため通過 (成功 flash `再開を開始しました` が出る) → resumePending → runResume が呼ばれ resumeUpload 内の `verifyCompletedParts` が ETag mismatch を検知して `ResumeMismatchError` を投げる
   - 結果、`.upcard .urow` の state=failed、detail text `内容が一致しません` (`upload-card.tsx:86` の `t.error === "content mismatch"` 分岐)
   - CompleteMultipartUpload は飛ばない
-- **備考**: scenarios v2 では `[role="alert"]` 経由の flash `再開できません` を期待していたが、planResume は size mismatch のときだけ flash を出す。content mismatch は resumeUpload 内の verify が発火する経路で、UI 上は transfer row の failed state で見える (integration `verify-mismatch.test.ts` が MD5 照合の byte-level を担保、E2E は UI 層のみ)。
+- **備考**: flash `再開できません` が出るのは planResume が size mismatch を見つけたときだけ。content mismatch は resumeUpload 内の verify が発火する経路で、UI 上は transfer row の failed state として見える。MD5 照合そのものは unit `lib/s3/verify.test.ts` と integration `upload-resume.test.ts` が担保し、E2E は UI 層だけを見る。
 
 ### E-RESUME-02: pending upload を「破棄」で消せる
 
@@ -993,7 +991,7 @@ ShareModal は presigned URL 発行専用で、row の `.pubbtn` (`リンクを�
 
 - **ペルソナ**: P-USER
 - **手順**:
-  1. `＋ 新規フォルダ` → modal `新しいフォルダ`
+  1. `新規フォルダ` → modal `新しいフォルダ`
   2. `getByLabel("フォルダ名")` に `emptydir-${hex}` → `作成`
 - **期待**:
   - folder row 1 行増える
@@ -1182,5 +1180,5 @@ export default defineConfig({
 ### 7.5 実行タイミング
 
 - 想定所要時間: 全 test で ~15-25 分 (Silent renew test は long-running で 60-90 秒)
-- 手動実行前提。CI 対応 (secret 受け渡し、compose 起動、artifact upload) は別 PR で判断
+- 手動実行前提。CI からの実行は対象外
 - 失敗時 trace / html report はホスト cwd の `playwright-report/` に残る

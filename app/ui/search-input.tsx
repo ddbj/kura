@@ -7,7 +7,7 @@ type Props = {
   ariaLabel?: string
 }
 
-// Handoff .search: rounded box with a lens icon that turns brand-colored when
+// .search: rounded box with a lens icon that turns brand-colored when
 // the input is non-empty.
 export const SearchInput = ({ value, onChange, placeholder, ariaLabel }: Props) => (
   <div className="search">

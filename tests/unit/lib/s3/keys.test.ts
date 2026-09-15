@@ -5,8 +5,8 @@ import {
   encodeFilenameStrict,
   encodeStrictKey,
   entryName,
+  keyParent,
   keyToUrlPath,
-  parentPrefix,
   prefixToSegments,
   prefixToUrlPath,
   segmentsToPrefix,
@@ -35,17 +35,20 @@ describe("prefixToSegments / segmentsToPrefix", () => {
   })
 })
 
-describe("parentPrefix", () => {
-  test("parentPrefix_root_staysAtRoot", () => {
-    expect(parentPrefix("")).toBe("")
+describe("keyParent", () => {
+  test("keyParent_rootLevelKey_isEmpty", () => {
+    expect(keyParent("a.txt")).toBe("")
   })
 
-  test("parentPrefix_singleSegment_returnsRoot", () => {
-    expect(parentPrefix("docs/")).toBe("")
+  test("keyParent_nestedKey_keepsTheTrailingSlash", () => {
+    expect(keyParent("a/b/c.txt")).toBe("a/b/")
   })
 
-  test("parentPrefix_nested_dropsLast", () => {
-    expect(parentPrefix("a/b/c/")).toBe("a/b/")
+  // A key ending in "/" is a directory entry: it is all parent and no name, so
+  // splitting it leaves the key untouched.
+  test("keyParent_directoryKey_isTheWholeKey", () => {
+    expect(keyParent("a/b/")).toBe("a/b/")
+    expect(entryName("a/b/")).toBe("")
   })
 })
 

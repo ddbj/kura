@@ -1,5 +1,5 @@
 import { useT } from "~/lib/i18n"
-import { Button, Icon, Modal } from "~/ui"
+import { Button, Callout, Modal } from "~/ui"
 
 type Target = {
   bucket: string
@@ -35,10 +35,7 @@ export const DeleteModal = ({ open, onClose, targets, onConfirm }: Props) => {
       <div className="mh">
         <h2 className="mtitle" id="delete-title">{t("modal.deleteTitle")}</h2>
       </div>
-      <div className="banner red">
-        <Icon name="trash" size={15} style={{ color: "var(--red)", flex: "none" }} />
-        <div>{headline}</div>
-      </div>
+      <Callout tone="red" icon="trash">{headline}</Callout>
       <div className="mfoot">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         <Button kind="dangerbox" onClick={submit}>{t("common.delete")}</Button>

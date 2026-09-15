@@ -128,6 +128,12 @@ describe("isZipTooLargeForMemory", () => {
 })
 
 describe("saveZipStream", () => {
+  // Blob ダウンロードは次の task で object URL を revoke する。次のテストが
+  // URL のモックを差し替える前に、その task を流しておく。
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+
   const spyOnBlobDownload = (): string[] => {
     const downloads: string[] = []
     Object.assign(URL, { createObjectURL: vi.fn(() => "blob:zip"), revokeObjectURL: vi.fn() })
@@ -190,7 +196,10 @@ describe("saveZipStream", () => {
     await saveZipStream(streamOf("zip-bytes"), "bundle.zip", 1024)
 
     expect(downloads).toEqual(["bundle.zip"])
-    // object URL を放置するとメモリに残り続ける
-    expect(URL.revokeObjectURL).toHaveBeenCalledOnce()
+    // click と同じ task で revoke するとダウンロードが始まる前に blob が
+    // 消えうるので、次の task に回している。放置するとメモリに残り続ける。
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:zip")
   })
 })

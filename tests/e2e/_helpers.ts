@@ -51,8 +51,6 @@ const hex8 = (): string => randomBytes(8).toString("hex")
 export const uniqueName = (label: string, ext = "txt"): string =>
   `e2e-${label}-${hex8()}.${ext}`
 
-export const uniquePrefix = (label: string): string => `e2e-${label}-${hex8()}/`
-
 // A folder name string (no separators) suitable for NewFolderModal input.
 export const uniqueFolder = (label: string): string => `e2e-${label}-${hex8()}`
 
@@ -102,10 +100,12 @@ export const openUploadMenu = async (page: Page): Promise<Locator> => {
 
 // Non-interactive click that toggles presignpanel expansion. The
 // `.c-size` cell is a `<div>` (non-interactive) so onRowActivate fires.
+// Clicking a non-interactive part of the row toggles the panel; the disclosure
+// state lives on the chevron, which is the control keyboard users get.
 export const expandRow = async (page: Page, filename: string): Promise<void> => {
   const row = getRow(page, filename)
   await row.locator(".c-size").click()
-  await expect(row).toHaveAttribute("aria-expanded", "true")
+  await expect(row.locator(".row-chev")).toHaveAttribute("aria-expanded", "true")
 }
 
 // `.presignpanel` is a sibling of `.row.sel` (both children of the row's
@@ -187,7 +187,7 @@ export const expectUploadDone = async (
 }
 
 // The upcard waits for every transfer to settle and then, after
-// DONE_DISMISS_MS (8s) with the pointer off the card, sweeps all "done" rows
+// AUTO_DISMISS_MS (8s) with the pointer off the card, sweeps all "done" rows
 // in one shot. Timeout is generous enough to cover that fixed wait plus
 // scheduler jitter, and the helper never places the cursor inside .upcard so
 // the hover-pause never trips.
@@ -285,10 +285,12 @@ export const resetE2eScope = async (page: Page): Promise<void> => {
       }))
     }
 
-    if (keys.length === 0 && (mp.Uploads ?? []).length === 0) return
+    if (keys.length === 0 && (mp.Uploads ?? []).length === 0) break
     await new Promise((r) => setTimeout(r, 1_000))
   }
 
+  // Runs on every path, not only when the retries ran out: client-side
+  // preferences are part of the scope this resets.
   await clearClientPrefs(page)
 }
 

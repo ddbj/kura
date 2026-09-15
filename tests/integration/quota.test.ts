@@ -25,19 +25,34 @@ const REQUIRED_ENV = [
 
 // The invalid-value path exits before touching anything SeaweedFS-specific,
 // so a bare shell image is enough to exercise the real entrypoint.sh.
-const runEntrypoint = (quota: string) =>
+const runEntrypoint = (env: Record<string, string>) =>
   execFileSync("docker", [
     "run", "--rm",
     ...REQUIRED_ENV.flatMap((kv) => ["-e", kv]),
-    "-e", `KURA_QUOTA_DEFAULT_MB=${quota}`,
+    ...Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
     "-v", `${join(repoRoot, "seaweedfs", "entrypoint.sh")}:/kura-entrypoint.sh:ro`,
     "alpine:3", "sh", "/kura-entrypoint.sh",
   ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
 
-describe("quota env startup validation", () => {
-  it.each(["0", "-1", "abc"])("KURA_QUOTA_DEFAULT_MB=%s fails startup", (quota) => {
-    expect(() => runEntrypoint(quota)).toThrowError(/KURA_QUOTA_DEFAULT_MB must be a positive integer/)
-  })
+// Both values feed a `set -e` loop inside the container: a value that sleep or
+// [ -lt ] rejects would stop the reconciler for the container's lifetime
+// without failing any healthcheck, so the entrypoint must refuse to start.
+describe("ops env startup validation", () => {
+  it.each(["0", "-1", "abc", "1.5", " 10", "10 "])(
+    "KURA_QUOTA_DEFAULT_MB=%s fails startup",
+    (quota) => {
+      expect(() => runEntrypoint({ KURA_QUOTA_DEFAULT_MB: quota }))
+        .toThrowError(/KURA_QUOTA_DEFAULT_MB must be a positive integer/)
+    },
+  )
+
+  it.each(["0", "-1", "abc", "1.5", "86400 "])(
+    "KURA_OPS_INTERVAL_SECONDS=%s fails startup",
+    (interval) => {
+      expect(() => runEntrypoint({ KURA_OPS_INTERVAL_SECONDS: interval }))
+        .toThrowError(/KURA_OPS_INTERVAL_SECONDS must be a positive integer/)
+    },
+  )
 })
 
 describe("bucket quota", () => {

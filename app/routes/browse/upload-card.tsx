@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 
 import { formatBytes } from "~/lib/format"
 import { type TFn, useT } from "~/lib/i18n"
-import { DONE_DISMISS_MS, type OperationKind, type Transfer } from "~/shell"
+import { AUTO_DISMISS_MS, type OperationKind, type Transfer } from "~/shell"
 import { Button, Icon, type IconName, Tag } from "~/ui"
 
 // Card-header icon. Only two kinds have an unambiguous representative icon
@@ -117,7 +117,6 @@ const stateTag = (transfer: Transfer, t: TFn) => {
   if (transfer.state === "queued") return <Tag tone="neutral">{t("transfers.stateQueued")}</Tag>
   if (transfer.state === "failed") return <Tag tone="fail">{t("transfers.stateFailed")}</Tag>
   if (transfer.state === "conflict") return <Tag tone="warn">{t("transfers.stateConflict")}</Tag>
-  if (transfer.state === "paused") return <Tag tone="neutral">{t("transfers.statePaused")}</Tag>
 
   return <Tag tone="ok">{t("transfers.stateDone")}</Tag>
 }
@@ -135,7 +134,7 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
   const canDismiss = active === 0 && done > 0 && !hovered && !focusedInside
   useEffect(() => {
     if (!canDismiss) return
-    const timer = setTimeout(onDismissDone, DONE_DISMISS_MS)
+    const timer = setTimeout(onDismissDone, AUTO_DISMISS_MS)
 
     return () => clearTimeout(timer)
   }, [canDismiss, onDismissDone])
@@ -157,7 +156,7 @@ export const UploadCard = ({ transfers, onCancelAll, onCancel, onRetry, onOverwr
     >
       <div className="uph">
         {icon !== null ? <Icon name={icon} size={15} style={{ color: "var(--brand)" }} /> : null}
-        {t("transfers.header", { label, active, done })}
+        <span role="status" aria-live="polite">{t("transfers.header", { label, active, done })}</span>
         <span className="sp">
           {active > 0
             ? <Button kind="do" size="sm" onClick={onCancelAll}>{t("transfers.cancelAll")}</Button>
