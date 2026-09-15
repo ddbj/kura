@@ -152,6 +152,7 @@ endpoint_url = https://kura-s3.ddbj.nig.ac.jp
 - **100 GB クラスのファイルも既定の設定で通る。** aws cli は part 数の上限に合わせて part サイズを自動で調整する。転送を速くしたい場合は `s3.multipart_chunksize` を大きくする
 - **長い転送はセッションの残り時間に注意する。** 一時 credentials はログインから最大 10 時間で失効し、失効すると転送は途中で止まる。aws cli には再開の機能が無いので、失効した場合は credentials を取り直して同じコマンドを再実行する（未完了の part は kura 側の日次処理が回収する）。ブラウザ UI からの upload は失効を自動で回避し、中断からの再開にも対応している
 - presigned URL の寿命は `--expires-in` の値と、一時 credentials の残り時間の小さい方になる
+- **ファイルを消しても、その親フォルダの entry が残ることがある。** `aws s3 rm` は object を消すだけなので、`aws s3 ls` には 0 byte の行として、UI には空のフォルダとして残る。消すには末尾にスラッシュを付けた key を削除する（`aws s3api delete-object --bucket <username> --key 'dir/'`）
 
 ### エラーの読み方
 
