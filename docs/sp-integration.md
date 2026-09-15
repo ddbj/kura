@@ -57,15 +57,41 @@ UI は「kura の使い方の reference 実装」であり、ブラウザから 
 
 ### 1. access token を得る
 
-kura 自身の Keycloak client（`kura`）はブラウザ用に設定してあり、CLI 単体で token を取る導線は持っていない。次のどちらかで得る。
+kura の Keycloak client は device flow（RFC 8628）に対応している。ブラウザを持たないホスト（計算ノード、ssh 先、コンテナの中）でもこれで取れる。client は PKCE を強制するので、device authorization request にも `code_challenge` を付ける。
 
-- **UI から取り出す**（手元で確認したいとき）。UI にログインし、ブラウザの開発者ツールのコンソールで次を実行する。得られる token は本人の資格情報そのものなので、他人と共有しない。
+```sh
+export ISSUER=https://idp.ddbj.nig.ac.jp/realms/master
 
-  ```js
-  JSON.parse(sessionStorage["oidc.user:https://idp.ddbj.nig.ac.jp/realms/master:kura"]).access_token
-  ```
+VERIFIER=$(openssl rand -base64 60 | tr -d '\n=+/' | cut -c1-64)
+CHALLENGE=$(printf %s "$VERIFIER" | openssl dgst -binary -sha256 | openssl base64 | tr -d '\n=' | tr '+/' '-_')
 
-- **SP 自身の Keycloak client から得る**（SP の実装として使うとき）。この場合は client に audience mapper が要る（「SP がユーザーに代わって使う」を参照）。
+RESP=$(curl -s -X POST "$ISSUER/protocol/openid-connect/auth/device" \
+  -d client_id=kura -d scope=openid \
+  -d code_challenge="$CHALLENGE" -d code_challenge_method=S256)
+
+echo "$RESP" | python3 -m json.tool
+```
+
+応答の `verification_uri_complete` を任意の端末のブラウザで開き、DDBJ account でログインして承認する（有効時間は 10 分）。承認したら token を受け取る。
+
+```sh
+DEVICE_CODE=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["device_code"])')
+
+export ACCESS_TOKEN=$(curl -s -X POST "$ISSUER/protocol/openid-connect/token" \
+  -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+  -d client_id=kura -d device_code="$DEVICE_CODE" -d code_verifier="$VERIFIER" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+```
+
+承認前に token を要求すると `authorization_pending` が返る。5 秒以上あけて再試行する。長時間のジョブで token を取り直し続けたい場合は、`scope` に `offline_access` を足して応答の `refresh_token` を保管する（使い方は「ユーザーからの委譲」と同じ）。
+
+UI にログイン済みなら、ブラウザの開発者ツールのコンソールから取り出すこともできる。一時的な確認向けで、token は本人の資格情報そのものなので他人と共有しない。
+
+```js
+JSON.parse(sessionStorage["oidc.user:https://idp.ddbj.nig.ac.jp/realms/master:kura"]).access_token
+```
+
+SP の実装として使う場合は、SP 自身の Keycloak client から得る（「SP がユーザーに代わって使う」を参照）。その場合は client に audience mapper が要る。
 
 token の中身は次で確認できる。`aud` に `kura`（または SP の client 経由なら `kura` を含む配列）、`preferred_username` に username が入っていれば kura で使える。
 

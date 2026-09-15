@@ -12,7 +12,7 @@
 
 ## 1. Keycloak client を用意する
 
-配備先の realm に kura 用の client を作る。public client、Authorization Code + PKCE（S256）、redirect URI は UI origin の `/*`、web origins は UI origin。dedicated scope に audience mapper を置き、access token lifespan を client レベルで 43200s に override する（根拠は [architecture.md](./architecture.md) の「Keycloak client」）。realm 全体の設定と既存 client には触らない。
+配備先の realm に kura 用の client を作る。public client、Authorization Code + PKCE（S256）、redirect URI は UI origin の `/*`、web origins は UI origin。dedicated scope に audience mapper を置き、access token lifespan を client レベルで 43200s に override し、CLI からの利用のために device flow（OAuth 2.0 Device Authorization Grant）を有効にする（根拠は [architecture.md](./architecture.md) の「Keycloak client」）。realm 全体の設定と既存 client には触らない。
 
 ## 2. env と secret を用意する
 

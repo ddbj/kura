@@ -99,7 +99,7 @@ CORS には SeaweedFS だけが応答する。preflight OPTIONS は SeaweedFS �
 
 ## Keycloak client
 
-kura は realm 上に専用の public client を 1 つ持ち、Authorization Code + PKCE で認証する。client の dedicated scope には audience mapper だけを置く（access token の `aud` に client id を入れる。SeaweedFS の OIDC provider が検証に使う）。admin 用の claim や mapper は作らない。admin の判定は kura 側の trust policy が `sub` で行うためである。
+kura は realm 上に専用の public client を 1 つ持ち、Authorization Code + PKCE で認証する。ブラウザを持たないホストから CLI で使うために device flow（RFC 8628）も有効にする。client の PKCE 強制は device authorization request にも適用されるので、この経路でも `code_challenge` が要る。client の dedicated scope には audience mapper だけを置く（access token の `aud` に client id を入れる。SeaweedFS の OIDC provider が検証に使う）。admin 用の claim や mapper は作らない。admin の判定は kura 側の trust policy が `sub` で行うためである。
 
 access token の lifespan は client レベルの override で 43200 秒にする（realm の default は 60 秒）。ただし実際に発行される token の `exp` は realm の SSO session max で頭打ちになるので、この override が効くのはその範囲内だけである（「presigned URL の寿命」参照）。SSO session max と idle timeout は client override では伸ばせない Keycloak の仕様であり、SPA 上での連続作業の上限も presign の寿命も realm 側の値で決まる。長時間の作業は SPA の credentials provider が silent renew と STS 再取得で継続する。発行済みの presign は STS session として独立して動くので、発行後に SSO session が切れても失効しない。
 
