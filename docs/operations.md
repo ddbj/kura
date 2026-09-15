@@ -18,7 +18,7 @@ compose の 3 サービスで完結する。
 
 ## 環境と env
 
-dev / staging / production の違いは env ファイルだけで、compose も image も同じものを使う。環境ごとに変わるのは issuer と client id、外向きの URL、データディレクトリ、TTL、quota の既定値、そして secret である。env の一覧と各値の意味は `env.dev` / `env.production` にコメント付きで並んでいるので、ここでは繰り返さない。
+dev / production の違いは env ファイルだけで、compose も image も同じものを使う。環境ごとに変わるのは issuer と client id、外向きの URL、データディレクトリ、TTL、quota の既定値、そして secret である。env の一覧と各値の意味は `env.dev` / `env.production` にコメント付きで並んでいるので、ここでは繰り返さない。
 
 運用上、次の 3 点だけ知っておけばよい。
 

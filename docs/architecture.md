@@ -93,9 +93,9 @@ S3 API には bucket の quota 設定値を読む手段が無い。そのため 
 
 この 2 つは別の subdomain に分ける。Host は SigV4 の署名対象なので、外向きの S3 endpoint と presign 生成時に使う endpoint は一致していなければならない。SPA と S3 API を同一 origin に同居させると、この一致を保つために path ベースの分岐が要り、署名の対象が環境ごとに変わる。
 
-CORS には SeaweedFS だけが応答する。preflight OPTIONS は SeaweedFS が単独で完結させる（auth 不要、200）。許可 origin は起動 flag（env `KURA_S3_ALLOWED_ORIGINS`）で渡し、そこから全 bucket 共通の fallback CORS config が生成される。この config は `AllowedHeaders: ["*"]` を持ち、SeaweedFS はこれを「preflight の `Access-Control-Request-Headers` を verbatim で echo する」意味で扱う。おかげで AWS SDK が付ける header 群（`amz-sdk-*` / `x-amz-*` / 将来追加される checksum バリアント等）を gateway 側で列挙する必要が無い。
+CORS には SeaweedFS だけが応答する。preflight OPTIONS は SeaweedFS が単独で完結させる（auth 不要、200）。許可 origin は起動 flag（env `KURA_S3_ALLOWED_ORIGINS`）で渡し、そこから全 bucket 共通の fallback CORS config が生成される。この値は全環境で `*` にする。kura は cookie も ambient credential も使わず、認可は SigV4 署名（= 一時 credentials を持っていること）だけで決まるので、origin は認可の境界にならない。列挙しても防げるものが無い一方、ユーザーが権限を委譲した SP の origin が増えるたびに設定変更とコンテナ再作成が要る。この config は `AllowedHeaders: ["*"]` を持ち、SeaweedFS はこれを「preflight の `Access-Control-Request-Headers` を verbatim で echo する」意味で扱う。おかげで AWS SDK が付ける header 群（`amz-sdk-*` / `x-amz-*` / 将来追加される checksum バリアント等）を gateway 側で列挙する必要が無い。
 
-この形を保つために、一般ユーザーには `s3:PutBucketCors` / `s3:DeleteBucketCors` を Deny して per-bucket CORS による fallback の無効化を防ぎ、gateway と SPA 配信 server は `Access-Control-*` を付けず preflight も短絡させない。結果として dev / staging / production で CORS の応答経路が単一化される。
+この形を保つために、一般ユーザーには `s3:PutBucketCors` / `s3:DeleteBucketCors` を Deny して per-bucket CORS による fallback の無効化を防ぎ、gateway と SPA 配信 server は `Access-Control-*` を付けず preflight も短絡させない。結果として全環境で CORS の応答経路が単一化される。
 
 ## Keycloak client
 

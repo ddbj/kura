@@ -74,6 +74,7 @@ npm run lint
 | [docs/architecture.md](./docs/architecture.md) | 設計。構成、認証と認可、presign の寿命、quota と TTL、SPA の位置づけ、SeaweedFS 由来の制約 |
 | [docs/operations.md](./docs/operations.md) | 運用。env と secret、日次運用タスク、quota、TTL、admin 操作、監査ログ、監視 |
 | [docs/deployment.md](./docs/deployment.md) | 配備手順。新しい環境に置くとき上から実行する |
+| [docs/sp-integration.md](./docs/sp-integration.md) | SP 向け利用ガイド。公開中の kura の接続先、S3 client（aws cli）からの利用、委譲のための Keycloak client 設定 |
 | [tests/README.md](./tests/README.md) | テストの層と走らせ方 |
 
 ## License

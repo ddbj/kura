@@ -19,7 +19,7 @@
 `env.production` を配備先の値に合わせる。少なくとも次を確認する。
 
 - `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_OIDC_JWKS_URI`: 手順 1 の client
-- `KURA_S3_ENDPOINT` / `KURA_ALLOWED_HOSTS` / `KURA_S3_ALLOWED_ORIGINS`: 外向きの FQDN。`KURA_S3_ALLOWED_ORIGINS` は SPA の origin を明示する（`*` はテスト専用）
+- `KURA_S3_ENDPOINT` / `KURA_ALLOWED_HOSTS`: 外向きの FQDN。`KURA_S3_ALLOWED_ORIGINS` は全環境で `*`（origin は認可の境界ではない。[architecture.md](./architecture.md) の「ネットワーク境界」）
 - `KURA_BIND_ADDR`: gateway が別ホストから来るなら `0.0.0.0`。default の `127.0.0.1` では届かない
 - `KURA_SEAWEEDFS_DATA_DIR`: 手順 3 のディレクトリ
 - `KURA_VOLUME_SIZE_LIMIT_MB`: 30720（= 30 GiB）以下。これを超える値は master が起動時に弾く
