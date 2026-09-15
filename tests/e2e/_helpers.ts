@@ -1,4 +1,4 @@
-// Shared E2E helpers (scenarios.md §5.1). Every helper is per-test scoped so
+// Shared E2E helpers. Every helper is per-test scoped so
 // specs stay independent. Do not stash state on module scope beyond the
 // once-per-run values read from process.env at load time.
 import { randomBytes } from "node:crypto"
@@ -70,7 +70,7 @@ export const getFolderRow = (page: Page, folder: string): Locator =>
   page.locator(".row.sel").filter({ hasText: folder }).filter({ has: page.locator(".nm.folder") })
 
 // A `.card`-scoped bulk bar (avoids the collision with pending-uploads card
-// header which also uses className "bulkbar", scenarios.md §4 note).
+// header which also uses className "bulkbar").
 export const getBulkBar = (page: Page): Locator =>
   page.locator('.card:not(:has([data-testid="pending-uploads"])) .bulkbar')
 
@@ -254,8 +254,8 @@ export const s3ClientForE2e = async (page: Page): Promise<S3Client> => {
 
 // Deletes every object under the current run's scope prefix; also drains any
 // pending multipart uploads (leftover from a crashed run) and polls until the
-// list settles at zero to absorb the eventual-consistency window described in
-// scenarios.md §3.3. No-op when KURA_E2E_KEEP_UPLOADS === "1".
+// list settles at zero to absorb the eventual-consistency window.
+// No-op when KURA_E2E_KEEP_UPLOADS === "1".
 export const resetE2eScope = async (page: Page): Promise<void> => {
   if (process.env["KURA_E2E_KEEP_UPLOADS"] === "1") return
   const s3 = await s3ClientForE2e(page)

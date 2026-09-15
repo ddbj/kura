@@ -1,7 +1,7 @@
 // Custom fixture for the chromium-user project only. Reads the sessionStorage
 // snapshot captured by auth.setup.ts and re-injects it into every context via
 // addInitScript. anon specs (config.spec.ts, auth.spec.ts) import test from
-// @playwright/test directly and skip this fixture (scenarios.md §5.2).
+// @playwright/test directly and skip this fixture.
 import { readFileSync } from "node:fs"
 
 import { test as base } from "@playwright/test"

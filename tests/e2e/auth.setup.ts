@@ -1,7 +1,7 @@
 // Runs once per Playwright run (setup project). Drives the staging Keycloak
 // login form and persists both cookie + localStorage (via storageState) AND a
 // separate sessionStorage snapshot: react-oidc-context keeps the OIDC user in
-// sessionStorage, which storageState does not capture (scenarios.md §3.2).
+// sessionStorage, which storageState does not capture.
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
