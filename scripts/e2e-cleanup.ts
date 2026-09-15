@@ -5,20 +5,24 @@
 // Usage:
 //   node --experimental-strip-types scripts/e2e-cleanup.ts
 //
-// Deletes any object whose key is either under `e2e/` (runId-scoped) or has a
-// leaf name starting with `e2e-` at any depth. Aborts any pending multipart
-// upload under the same scope. Prints counts to stdout.
+// An E2E artifact is anything under `e2e/` (the runId-scoped tree), anything
+// under a top-level `e2e-*` folder (a folder a test created at the bucket
+// root), or any file whose leaf name starts with `e2e-`. This CLI deletes
+// those objects, aborts their pending multipart uploads, and removes the filer
+// directory entries they leave behind. Prints counts to stdout.
 
 import { readFileSync } from "node:fs"
 
 import {
   AbortMultipartUploadCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   ListMultipartUploadsCommand,
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3"
 
+import { collectAllPages, nextMarker } from "../app/lib/s3/paginate.ts"
 import { SEAWEEDFS_S3_CLIENT_OPTIONS } from "../app/lib/s3/seaweedfs-compat.ts"
 
 const readEnvFile = (path: string): Record<string, string> => {
@@ -72,7 +76,7 @@ const listAllUnder = async (prefix: string): Promise<string[]> => {
     for (const c of res.Contents ?? []) {
       if (c.Key) keys.push(c.Key)
     }
-    ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined
+    ContinuationToken = nextMarker(res.NextContinuationToken)
   } while (ContinuationToken)
 
   return keys
@@ -92,19 +96,18 @@ const deleteBatch = async (keys: string[]): Promise<number> => {
   return deleted
 }
 
-const abortPendingUnder = async (prefix: string): Promise<number> => {
+const abortPendingMatching = async (match: (key: string) => boolean): Promise<number> => {
   let aborted = 0
   let KeyMarker: string | undefined
   let UploadIdMarker: string | undefined
   for (;;) {
     const res = await s3.send(new ListMultipartUploadsCommand({
       Bucket: bucket,
-      Prefix: prefix,
       KeyMarker,
       UploadIdMarker,
     }))
     for (const u of res.Uploads ?? []) {
-      if (!u.Key || !u.UploadId) continue
+      if (!u.Key || !u.UploadId || !match(u.Key)) continue
       await s3.send(new AbortMultipartUploadCommand({
         Bucket: bucket,
         Key: u.Key,
@@ -121,15 +124,55 @@ const abortPendingUnder = async (prefix: string): Promise<number> => {
   return aborted
 }
 
-const scopedKeys = await listAllUnder("e2e/")
-const rootKeys = (await listAllUnder("")).filter((k) => {
-  const leaf = k.slice(k.lastIndexOf("/") + 1)
+// SeaweedFS keeps a filer directory entry after every child object is gone, so
+// an emptied folder still comes back in CommonPrefixes and the SPA keeps
+// rendering a row for it. DeleteObject on the slash-terminated key removes the
+// directory itself — the same call the SPA makes after folder delete / move.
+const listChildDirectories = async (prefix: string): Promise<string[]> =>
+  collectAllPages(
+    (token: string | undefined) => s3.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      Delimiter: "/",
+      ContinuationToken: token,
+    })),
+    (page) => (page.CommonPrefixes ?? []).map((p) => p.Prefix).filter((p) => p !== undefined),
+    (page) => nextMarker(page.NextContinuationToken),
+  )
 
-  return leaf.startsWith("e2e-")
-})
-const allKeys = [...new Set([...scopedKeys, ...rootKeys])]
+// Depth first: a directory only disappears once its children are gone. A
+// directory that still holds objects is left alone — the caller only ever
+// points this at E2E scopes, but a stray non-E2E file must not be orphaned.
+const removeEmptyDirectories = async (prefix: string): Promise<number> => {
+  let removed = 0
+  for (const child of await listChildDirectories(prefix)) {
+    removed += await removeEmptyDirectories(child)
+  }
+  if ((await listAllUnder(prefix)).length > 0) return removed
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: prefix }))
 
-const deletedCount = await deleteBatch(allKeys)
-const scopedAborts = await abortPendingUnder("e2e/")
+  return removed + 1
+}
 
-console.log(`e2e-cleanup: bucket=${bucket} deleted=${deletedCount} aborted=${scopedAborts}`)
+const isE2eDirectory = (prefix: string): boolean => prefix === "e2e/" || prefix.startsWith("e2e-")
+const leafName = (key: string): string => key.slice(key.lastIndexOf("/") + 1)
+
+// A `.keep` marker inside `e2e-something/` matches neither the `e2e/` tree nor
+// the `e2e-` leaf rule, so scope by the top-level folder as well — otherwise
+// the folder survives with its marker and keeps showing up in the SPA.
+const scopes = ["e2e/", ...(await listChildDirectories("")).filter(isE2eDirectory)]
+const isE2eKey = (key: string): boolean =>
+  scopes.some((scope) => key.startsWith(scope)) || leafName(key).startsWith("e2e-")
+
+const deletedCount = await deleteBatch((await listAllUnder("")).filter(isE2eKey))
+const abortedCount = await abortPendingMatching(isE2eKey)
+
+// Re-list after the deletes so only directories that still exist are visited.
+let removedDirs = 0
+for (const dir of (await listChildDirectories("")).filter(isE2eDirectory)) {
+  removedDirs += await removeEmptyDirectories(dir)
+}
+
+console.log(
+  `e2e-cleanup: bucket=${bucket} deleted=${deletedCount} aborted=${abortedCount} directories=${removedDirs}`,
+)

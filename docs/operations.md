@@ -104,7 +104,7 @@ kura のファイル操作はすべて S3 API として前段の gateway を通�
 
 path に含まれる bucket 名が username なので、操作は対象ユーザーに帰属させられる。admin が他ユーザーの bucket を操作した場合も、bucket 所有者に帰属して見える点だけ注意する。
 
-保持期間は 3 年で、gateway 側の access log の運用として担保を依頼する。閲覧手段は当面ホスト上での直接参照で、閲覧 UI は持たない。記録の内容が足りない場合は、SeaweedFS の audit log 機構（`-s3.auditLogConfig`、fluentd 形式）による構造化 event の取得を追加する。
+保持期間は gateway 側の access log の運用に従う。kura は独自の保持期間を規定せず、log の保存にも rotate にも関与しない。閲覧手段は当面ホスト上での直接参照で、閲覧 UI は持たない。記録の内容が足りない場合は、SeaweedFS の audit log 機構（`-s3.auditLogConfig`、fluentd 形式）による構造化 event の取得を追加する。
 
 ## 監視とバックアップ
 

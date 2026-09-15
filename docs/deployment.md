@@ -81,7 +81,7 @@ podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
    ```
 
    200 が返り、`Access-Control-Allow-Headers` に要求した header がそのまま並び、`Access-Control-Allow-Origin` が SPA origin と一致すること
-4. gateway の access log に upload / download / delete が client IP 付きで記録されること。kura の監査はこの log だけが情報源なので、保持期間（3 年）が gateway 側の運用で担保されることを管理者と確認する（[operations.md](./operations.md) の「監査ログ」）
+4. gateway の access log に upload / download / delete が client IP 付きで記録されること。kura の監査はこの log だけが情報源なので、記録されていることを管理者と確認する（[operations.md](./operations.md) の「監査ログ」）
 
 ## 7. 配備先での実測
 

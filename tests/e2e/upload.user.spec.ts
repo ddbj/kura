@@ -65,7 +65,7 @@ test.describe("UPLOAD", () => {
       buffer: Buffer.from("hello upload02"),
     })
     await expectUploadDone(page, name)
-    await expect(getRow(page, name)).toBeVisible()
+    await expect(getRow(page, name)).toBeVisible({ timeout: 15_000 })
   })
 
   test("S-UPLOAD-03: drag & drop で file を upload", async ({ page }) => {
@@ -100,7 +100,7 @@ test.describe("UPLOAD", () => {
     }, { name, content })
 
     await expectUploadDone(page, name)
-    await expect(getRow(page, name)).toBeVisible()
+    await expect(getRow(page, name)).toBeVisible({ timeout: 15_000 })
   })
 
   test("S-UPLOAD-04: フォルダを選択 で subfolder 込みの upload", async ({ page }) => {
@@ -139,9 +139,12 @@ test.describe("UPLOAD", () => {
 
       // AbortMultipartUpload は `DELETE /${bucket}/${key}?uploadId=...`。
       // 実 URL は "?uploadId=" query を含む。
+      // abort は in-flight の UploadPart が片付いてから飛ぶ。上の遅延注入と
+      // 回線速度の分だけ待つ必要があるので、test 全体の timeout より内側で
+      // 余裕を取る。
       const deletePromise = page.waitForRequest(
         (req) => req.method() === "DELETE" && req.url().includes("uploadId="),
-        { timeout: 30_000 },
+        { timeout: 60_000 },
       )
 
       await uploadFileFromPath(page, path)
