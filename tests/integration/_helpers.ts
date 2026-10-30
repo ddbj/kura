@@ -42,11 +42,16 @@ export interface AwsCreds {
   sessionToken?: string
 }
 
+export interface StsCreds extends AwsCreds {
+  sessionToken: string
+  expiration: Date
+}
+
 export const assumeRole = async (
   token: string,
   roleArn: string = USER_ROLE_ARN,
   durationSeconds = 3600,
-): Promise<AwsCreds> => {
+): Promise<StsCreds> => {
   const sts = new STSClient({ endpoint: inject("s3Endpoint"), region: "us-east-1" })
   const res = await sts.send(
     new AssumeRoleWithWebIdentityCommand({
@@ -62,6 +67,7 @@ export const assumeRole = async (
     accessKeyId: c.AccessKeyId!,
     secretAccessKey: c.SecretAccessKey!,
     sessionToken: c.SessionToken!,
+    expiration: c.Expiration!,
   }
 }
 

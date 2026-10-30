@@ -85,9 +85,9 @@ describe("bucket quota", () => {
 
       return status
     })
-    // The filer rejects read-only writes with 507, which the S3 layer
-    // surfaces as a generic 500 InternalError.
-    expect(overQuotaStatus).toBe(500)
+    // A 403 rather than a 5xx: SDKs retry 5xx, which would only delay the
+    // error the user has to see.
+    expect(overQuotaStatus).toBe(403)
 
     // Reads and deletes must keep working while read-only.
     const got = await s3.send(new GetObjectCommand({ Bucket: username, Key: "fill.bin" }))

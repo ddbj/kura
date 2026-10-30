@@ -10,16 +10,29 @@ export type StsCredentials = {
   expiration: Date
 }
 
-// SeaweedFS serves STS on the same endpoint as S3. The session is capped by
-// min(token exp remaining, DurationSeconds, sts.maxSessionLength).
-// 43200s (12h) matches sts.maxSessionLength.
-export const assumeRoleWithToken = async (endpoint: string, token: string): Promise<StsCredentials> => {
+// The range SeaweedFS's STS accepts for DurationSeconds; the upper end is
+// sts.maxSessionLength.
+const MIN_SESSION_SECONDS = 900
+const MAX_SESSION_SECONDS = 43_200
+
+// SeaweedFS serves STS on the same endpoint as S3. The session lasts
+// durationSeconds, or sts.tokenDuration (1h) when omitted, regardless of how
+// long the access token itself has left.
+export const assumeRoleWithToken = async (
+  endpoint: string,
+  token: string,
+  durationSeconds?: number,
+): Promise<StsCredentials> => {
+  if (durationSeconds !== undefined
+    && !(Number.isInteger(durationSeconds) && durationSeconds >= MIN_SESSION_SECONDS && durationSeconds <= MAX_SESSION_SECONDS)) {
+    throw new RangeError(`STS session length must be ${MIN_SESSION_SECONDS}..${MAX_SESSION_SECONDS} seconds: ${durationSeconds}`)
+  }
   const sts = new STSClient({ endpoint, region: "us-east-1" })
   const res = await sts.send(new AssumeRoleWithWebIdentityCommand({
     RoleArn: USER_ROLE_ARN,
     RoleSessionName: `kura-spa-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
     WebIdentityToken: token,
-    DurationSeconds: 43200,
+    ...(durationSeconds === undefined ? {} : { DurationSeconds: durationSeconds }),
   }))
   const c = res.Credentials
   if (!c?.AccessKeyId || !c.SecretAccessKey || !c.SessionToken || !c.Expiration) {

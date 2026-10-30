@@ -144,9 +144,8 @@ export type Resources = {
     ttlLabel: string
     ttl15: string
     ttl60: string
-    ttlMax: string
+    ttl720: string
     notice: string
-    noticeMax: string
     issue: string
     issuing: string
     retryFailed: string
@@ -346,9 +345,8 @@ export const ja: Resources = {
     ttlLabel: "有効期限",
     ttl15: "15分",
     ttl60: "1時間",
-    ttlMax: "最長",
+    ttl720: "12時間",
     notice: "リンクは約{{duration}}後に切れます。発行したあとに延長や取り消しはできません。",
-    noticeMax: "「最長」はいまの認証セッションの残り時間です。リンクは約{{duration}}後に切れます。発行したあとに延長や取り消しはできません。",
     issue: "リンクを発行",
     issuing: "処理中…",
     retryFailed: "失敗した{{n}}件を再試行",

@@ -117,6 +117,42 @@ describe("assumeRoleWithToken", () => {
     expect(suffix).toMatch(/^[0-9a-f]{16}$/)
   })
 
+  const captureStsBody = () => {
+    const bodies: URLSearchParams[] = []
+    server.use(http.post(`${ENDPOINT}/`, async ({ request }) => {
+      bodies.push(new URLSearchParams(await request.text()))
+      return HttpResponse.xml(stsResponseXml({
+        accessKeyId: "AKIATEST",
+        secretAccessKey: "secret",
+        sessionToken: "session-token",
+        expiration: fullExpiration,
+      }))
+    }))
+    return bodies
+  }
+
+  // Without DurationSeconds the session takes the STS default (1h), so the
+  // credentials stop working soon after the sign-in session cannot renew.
+  test("assumeRoleWithToken_noDuration_omitsDurationSeconds", async () => {
+    const bodies = captureStsBody()
+    await assumeRoleWithToken(ENDPOINT, "jwt")
+    expect(bodies[0]?.has("DurationSeconds")).toBe(false)
+  })
+
+  test.each([900, 3600, 43_200])("assumeRoleWithToken_duration%i_sendsDurationSeconds", async (seconds) => {
+    const bodies = captureStsBody()
+    await assumeRoleWithToken(ENDPOINT, "jwt", seconds)
+    expect(bodies[0]?.get("DurationSeconds")).toBe(String(seconds))
+  })
+
+  // STS accepts 900..43200. Anything else would come back as a 400 after a
+  // round trip, so it is refused before the request.
+  test.each([0, 899, 43_201, 1800.5, Number.NaN])("assumeRoleWithToken_duration%s_throwsBeforeRequest", async (seconds) => {
+    const bodies = captureStsBody()
+    await expect(assumeRoleWithToken(ENDPOINT, "jwt", seconds)).rejects.toThrow(RangeError)
+    expect(bodies).toHaveLength(0)
+  })
+
   test("assumeRoleWithToken_emptyAccessKeyId_throws", async () => {
     // An empty string bypasses the "undefined" check but is equally unusable
     // as a credential; the pre-flight refuses it.

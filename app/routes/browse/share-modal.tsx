@@ -4,7 +4,7 @@ import { useAuth } from "react-oidc-context"
 import { useConfig } from "~/lib/config"
 import { formatBytes, formatDuration } from "~/lib/format"
 import { formatDateTimeLocalized, useLang, useT } from "~/lib/i18n"
-import { accessTokenForDuration, freshAccessToken, presignShareUrl } from "~/lib/s3"
+import { freshAccessToken, presignShareUrl } from "~/lib/s3"
 import { addSessionPresigned } from "~/lib/session-presigned"
 import { Button, Callout, LinkBar, Modal, Segmented, Tag } from "~/ui"
 
@@ -21,11 +21,8 @@ type Props = {
   targets: Target[]
 }
 
-// SeaweedFS の STS が持つ DurationSeconds の固定上限。"max" はこれを要求し、
-// 実際の寿命は access token の残り寿命まで STS 側で切り詰められる。
-const MAX_PRESIGN_SECONDS = 43_200
-
-type Ttl = 15 | 60 | "max"
+// 分。上限の 12 時間は STS session の上限（sts.maxSessionLength）と同じ。
+type Ttl = 15 | 60 | 720
 
 type RowState =
   | { phase: "idle" }
@@ -41,9 +38,7 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
   const auth = useAuth()
   const t = useT()
   const lang = useLang()
-  const [ttl, setTtl] = useState<Ttl>("max")
-  // モーダルを開いた時点のセッション残り。表示だけに使うので開くたびに固定する。
-  const [sessionRemainingS, setSessionRemainingS] = useState<number | undefined>(undefined)
+  const [ttl, setTtl] = useState<Ttl>(720)
   const [busyBatch, setBusyBatch] = useState(false)
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({})
   const [wasOpen, setWasOpen] = useState(false)
@@ -57,30 +52,19 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
     if (open) {
       setRowStates({})
       setBusyBatch(false)
-      setSessionRemainingS(typeof auth.user?.expires_in === "number" ? auth.user.expires_in : undefined)
     }
   }
 
-  const requestedSeconds = ttl === "max" ? MAX_PRESIGN_SECONDS : ttl * 60
-  // 認証セッションの残りが要求より短ければ、そちらが実際の寿命になる。
-  const effectiveSeconds = sessionRemainingS === undefined
-    ? requestedSeconds
-    : Math.min(requestedSeconds, sessionRemainingS)
+  const expiresInSeconds = ttl * 60
 
   const runOne = async (target: Target): Promise<RowState> => {
-    const expiresIn = requestedSeconds
-    // "max" はセッションの残りをそのまま使う。満たしようのない長さを要求して
-    // 無駄な renew を走らせない。
-    const token = ttl === "max"
-      ? await freshAccessToken(auth)
-      : await accessTokenForDuration(auth, expiresIn)
     const presigned = await presignShareUrl({
       endpoint: config.s3Endpoint,
-      token,
+      token: await freshAccessToken(auth),
       bucket: target.bucket,
       key: target.key,
       method: "GET",
-      expiresInSeconds: expiresIn,
+      expiresInSeconds,
     })
     addSessionPresigned({
       bucket: target.bucket,
@@ -177,12 +161,12 @@ export const ShareModal = ({ open, onClose, targets }: Props) => {
                 options={[
                   { value: 15, label: t("share.ttl15") },
                   { value: 60, label: t("share.ttl60") },
-                  { value: "max", label: t("share.ttlMax") },
+                  { value: 720, label: t("share.ttl720") },
                 ]}
               />
             </div>
             <Callout tone="warn">
-              {t(ttl === "max" ? "share.noticeMax" : "share.notice", { duration: formatDuration(effectiveSeconds / 60, t) })}
+              {t("share.notice", { duration: formatDuration(ttl, t) })}
             </Callout>
           </>
         )

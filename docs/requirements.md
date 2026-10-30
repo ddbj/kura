@@ -48,11 +48,9 @@ UI は使用量と上限をメーターで表示する。ただし上限とし�
 
 ユーザーは自分のファイルに対して presigned URL（GET / PUT）を発行できる。認証を持たない相手にファイルを渡す・受け取るための、短期の受け渡し専用の手段である。
 
-有効期間の上限は、発行した時点の認証セッションの残り時間である。実際には 10 時間を超えず、ログインからの経過とともに縮む。この上限は SeaweedFS と DDBJ account の仕様で決まっていて、kura 側の設定では変えられない（[architecture.md](./architecture.md) の「presigned URL の寿命」）。
+有効期間の上限は 12 時間である。ログインからの経過時間には関係せず、発行したあとにログアウトしても、URL は期限まで使える。発行した URL を期限の前に無効にする手段は無い（[architecture.md](./architecture.md) の「presigned URL と一時 credentials の寿命」）。
 
 presigned URL の生成は client 側で完結する署名計算であり、kura に発行 API は無い。一時 credentials を持つ者は誰でも発行できるため、kura 側でこれを禁止する手段は存在しない。UI が発行操作を提供するのは、S3 client でできることの reference としてである。
-
-12 時間を超える共有の手段は kura では提供しない。
 
 ## SP による非対話利用
 

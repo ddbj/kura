@@ -11,9 +11,9 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
-import { describe, expect, it } from "vitest"
+import { describe, expect, inject, it } from "vitest"
 
-import { assumeRole, eventually, putText, s3ClientFor, setupUser, signToken } from "./_helpers"
+import { assumeRole, eventually, putText, s3ClientFor, setupUser, signToken, uniqueUser } from "./_helpers"
 
 describe("multipart upload", () => {
   it("uploads in parts and downloads the identical bytes", async () => {
@@ -120,7 +120,7 @@ describe("multipart upload inventory", () => {
     s3.send(new CreateMultipartUploadCommand({ Bucket: bucket, Key: key }))
       .then((res) => res.UploadId!)
 
-  it("lists in-flight uploads filtered by prefix, without Initiated", async () => {
+  it("lists in-flight uploads filtered by prefix", async () => {
     const { username, s3 } = await setupUser()
     await begin(s3, username, "a/one.bin")
     await begin(s3, username, "a/two.bin")
@@ -132,9 +132,7 @@ describe("multipart upload inventory", () => {
     ])
     for (const upload of all.Uploads!) {
       expect(upload.UploadId).toBeTruthy()
-      // SeaweedFS does not report when an upload started, so the UI cannot
-      // rely on Initiated (it derives recency from part LastModified instead).
-      expect(upload.Initiated).toBeUndefined()
+      expect(upload.Initiated).toBeInstanceOf(Date)
     }
 
     const scoped = await s3.send(
@@ -212,30 +210,68 @@ describe("presigned URLs with temporary credentials", () => {
     expect(await got.Body!.transformToString()).toBe("via presign")
   })
 
-  // The signature's own X-Amz-Expires is not the real limit: the STS session
-  // behind it is. A link handed out before the session ends must stop working
-  // when the session does, or "short-lived" would be unenforceable.
-  it("stops honouring a presigned URL once the STS session behind it expires", async () => {
+  it("stops honouring a presigned URL once its X-Amz-Expires has passed", async () => {
     const { username, s3 } = await setupUser()
     await putText(s3, username, "short.txt", "short-lived")
 
-    // The session is capped by the access token's remaining life, so a
-    // short-lived token is how a short session gets requested at all.
-    const shortLivedSession = await assumeRole(await signToken({ username, lifetimeSeconds: 10 }))
     const url = await getSignedUrl(
-      s3ClientFor(shortLivedSession),
+      s3,
       new GetObjectCommand({ Bucket: username, Key: "short.txt" }),
-      // Far beyond the session: the session has to be what cuts it off.
-      { expiresIn: 3600 },
+      { expiresIn: 2 },
     )
 
     expect((await fetch(url)).status).toBe(200)
-
     await eventually(async () => {
-      const res = await fetch(url)
-      expect(res.status).toBe(403)
-    }, 60_000, 2_000)
-  }, 120_000)
+      expect((await fetch(url)).status).toBe(403)
+    }, 30_000, 1_000)
+  })
+
+  // The SPA presigns with a session of the requested length (up to 12h) taken
+  // from a 5-minute access token, so the session must not end with the token.
+  it("sizes the STS session by DurationSeconds, not by the access token's remaining life", async () => {
+    const username = uniqueUser()
+    const token = await signToken({ username, lifetimeSeconds: 60 })
+
+    const { expiration } = await assumeRole(token, undefined, 43_200)
+
+    expect(expiration.getTime() - Date.now()).toBeGreaterThan(43_200_000 - 120_000)
+  })
+
+  // The presigned URL carries the session token in X-Amz-Security-Token. If
+  // the session's secret key could be derived from it, the URL's holder could
+  // sign any request the issuer can make, writes and deletes included, until
+  // the session ends.
+  it("does not let the holder of a presigned URL sign other requests", async () => {
+    const { username, s3 } = await setupUser()
+    const url = new URL(await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: username, Key: "shared.txt" }),
+      { expiresIn: 300 },
+    ))
+    const sessionToken = url.searchParams.get("X-Amz-Security-Token")!
+    const accessKeyId = url.searchParams.get("X-Amz-Credential")!.split("/")[0]!
+    const { sid } = JSON.parse(Buffer.from(sessionToken.split(".")[1]!, "base64url").toString()) as { sid: string }
+    // How SeaweedFS derived the secret from the session id alone.
+    const derivedSecret = createHash("sha256").update(`secret-key:${sid}`).digest("base64")
+    const forged = s3ClientFor({ accessKeyId, secretAccessKey: derivedSecret, sessionToken })
+
+    await expect(
+      forged.send(new PutObjectCommand({ Bucket: username, Key: "forged.txt", Body: "x" })),
+    ).rejects.toMatchObject({ $metadata: { httpStatusCode: 403 } })
+  })
+
+  it("rejects a session token sent as a Bearer token", async () => {
+    const { username, s3, creds } = await setupUser()
+    await putText(s3, username, "bearer.txt", "x")
+    const endpoint = inject("s3Endpoint").replace(/\/+$/, "")
+    const headers = { Authorization: `Bearer ${creds.sessionToken!}` }
+
+    const read = await fetch(`${endpoint}/${username}/bearer.txt`, { headers })
+    const write = await fetch(`${endpoint}/${username}/bearer-write.txt`, { method: "PUT", headers, body: "x" })
+
+    expect(read.status).toBe(403)
+    expect(write.status).toBe(403)
+  })
 
   it("rejects the same request without the signature", async () => {
     const { username, s3 } = await setupUser()

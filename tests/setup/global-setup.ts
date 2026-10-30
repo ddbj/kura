@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { randomBytes, randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { exportJWK, exportPKCS8, generateKeyPair } from "jose"
@@ -33,16 +33,6 @@ const compose = (args: string[], env: NodeJS.ProcessEnv) => {
 const setup = async (project: TestProject) => {
   const testEnv = readEnvFile(join(repoRoot, "env.test"))
 
-  // The web service bind-mounts build/ (SPA build output) and refuses to
-  // start without an index.html, but the suite must run before a build
-  // exists. Create the directory (so docker does not make a root-owned one)
-  // and drop in a placeholder when there is no real build.
-  mkdirSync(join(repoRoot, "build", "client"), { recursive: true })
-  const indexHtml = join(repoRoot, "build", "client", "index.html")
-  if (!existsSync(indexHtml)) {
-    writeFileSync(indexHtml, "<!doctype html>\n<title>kura</title>\n")
-  }
-
   const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true })
   const jwk = { ...(await exportJWK(publicKey)), kid: "kura-test", alg: "RS256", use: "sig" }
   const jwksDir = join(repoRoot, "tests", "setup", ".jwks")
@@ -62,7 +52,21 @@ const setup = async (project: TestProject) => {
   }
   const env = { ...process.env, ...secrets }
 
-  compose(["up", "-d", "--wait"], env)
+  // The SeaweedFS data dir is a bind mount, so `down -v` leaves it behind.
+  // Every bucket takes its own volume, and once the volumes left over from
+  // earlier runs fill the volume slots (free disk / volume size limit), every
+  // write fails. Stop a stack kept by KURA_TEST_KEEP=1 first, then start from
+  // an empty dir.
+  compose(["down", "-v"], env)
+  const dataDir = resolve(repoRoot, testEnv["KURA_SEAWEEDFS_DATA_DIR"]!)
+  mkdirSync(dataDir, { recursive: true })
+  for (const entry of readdirSync(dataDir)) {
+    rmSync(join(dataDir, entry), { recursive: true, force: true })
+  }
+
+  // --build: web and ops run an image built from this checkout (SPA, scripts,
+  // dependencies), so an image left from an earlier run would test old code.
+  compose(["up", "-d", "--wait", "--build"], env)
 
   project.provide("jwtPrivateKeyPem", await exportPKCS8(privateKey))
   project.provide("adminSub", adminSub)

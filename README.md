@@ -27,14 +27,14 @@ kura の実態は SeaweedFS（S3 + STS + IAM）の設定群であり、独自の
 
 | パス | 内容 |
 | --- | --- |
-| `app/` | reference SPA（React Router v7 の SPA モード。BFF は無い） |
+| `app/` | reference SPA（React Router v8 の SPA モード。BFF は無い） |
 | `seaweedfs/` | SeaweedFS コンテナの entrypoint。env から s3.json / iam.json / security.toml を生成し、quota の reconcile ループを回す |
 | `scripts/` | SPA の配信と日次運用タスク。node が `.ts` を直接実行する |
 | `tests/` | unit / PBT / integration / E2E（[tests/README.md](./tests/README.md)） |
 | `docs/` | 仕様。下の索引を参照 |
+| `Dockerfile` | web と ops の image。SPA のビルドと、本番用の依存 package だけを入れた runtime を分ける |
 | `compose.yml` | stack 本体（seaweedfs / web / ops の 3 サービス） |
 | `compose.podman.yml` | rootless podman 用の overlay |
-| `compose.build.yml` | SPA を pin した node の container でビルドする |
 | `compose.test.yml` | テスト用の overlay（JWKS 配信を足す） |
 | `env.dev` `env.production` `env.test` | 環境ごとの設定値。secret は含まない |
 
@@ -44,8 +44,7 @@ dev 環境は DDBJ staging Keycloak を使う。ローカルに Keycloak は立�
 
 ```sh
 npm install
-npm run build:container                                  # SPA を build/client へビルド
-docker compose --env-file env.dev --env-file .env up -d --wait
+docker compose --env-file env.dev --env-file .env up -d --wait --build
 ```
 
 これで UI が `localhost:28080`、S3 API が `localhost:28333` で上がる。SPA を触るときは HMR の効く dev server を使う。
@@ -64,7 +63,7 @@ npm run typecheck
 npm run lint
 ```
 
-デプロイ固有の設定はビルド時に bundle へ焼き込まれるため、環境ごとにその環境の env でビルドする。`npm run build` は必要な env が無いと失敗する（意図した挙動）。
+デプロイ固有の設定はビルド時に bundle へ焼き込まれるため、image は環境ごとにその環境の env でビルドする。SPA や `scripts/` を変えたら `--build` を付けて起動し直す。`npm run build` は必要な env が無いと失敗する（意図した挙動）。
 
 ## ドキュメント
 

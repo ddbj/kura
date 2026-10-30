@@ -12,7 +12,27 @@
 
 ## 1. Keycloak client を用意する
 
-配備先の realm に kura 用の client を作る。public client、Authorization Code + PKCE（S256）、redirect URI は UI origin の `/*`、web origins は UI origin。dedicated scope に audience mapper を置き、access token lifespan を client レベルで 43200s に override し、CLI からの利用のために device flow（OAuth 2.0 Device Authorization Grant）を有効にする（根拠は [architecture.md](./architecture.md) の「Keycloak client」）。realm 全体の設定と既存 client には触らない。
+配備先の realm に kura 用の client を作る。設定は次のとおりで、理由は [architecture.md](./architecture.md) の「Keycloak client」にある。realm 全体の設定と既存 client には触らない。
+
+| 場所 | 項目 | 値 |
+| --- | --- | --- |
+| Settings | Client authentication | OFF（public client） |
+| Settings | Standard flow、OAuth 2.0 Device Authorization Grant | ON |
+| Settings | Direct access grants、Implicit flow | OFF |
+| Settings | Valid redirect URIs | `<UI origin>/auth/callback` |
+| Settings | Valid post logout redirect URIs | `<UI origin>` |
+| Settings | Web origins | `<UI origin>` |
+| Advanced | Proof Key for Code Exchange Code Challenge Method | S256 |
+| Advanced | Access Token Lifespan | 5 Minutes |
+| Advanced | Client Offline Session Max | 7 Days |
+| Advanced | Use refresh tokens | ON |
+| Client scopes | Default | `acr`、`basic`、`web-origins`、`<client-id>-dedicated` |
+| Client scopes | Optional | `offline_access` |
+| `<client-id>-dedicated` の Mappers | Audience | Included Client Audience = `<client-id>`、Add to access token = ON、Add to ID token = OFF |
+| `<client-id>-dedicated` の Mappers | User Attribute | User Attribute = `username`、Token Claim Name = `preferred_username`、Claim JSON Type = String、Add to access token = ON |
+| `<client-id>-dedicated` の Scope | Full scope allowed | OFF |
+
+設定したら、発行された access token をデコードして、`aud` に client id、`sub`、`preferred_username` が入っていることと、`email`・`name` が入っていないことを確かめる。
 
 ## 2. env と secret を用意する
 
@@ -43,17 +63,21 @@ podman-compose で動かす場合は、`env.production` の内容と secret を 
 
 rootless podman で共有ファイルシステム上に置く場合は、container 内の uid をホストの uid にマップする必要がある。`compose.podman.yml` の overlay がそれを担う。ホストユーザーに subuid / subgid の range が割り当てられていることも確認する。
 
-## 4. SPA をビルドする
+## 4. image をビルドする
 
-SPA の静的ビルド（`build/client`）は stack の起動前に用意する。デプロイ固有の設定はビルド時に bundle へ焼き込まれるため、環境ごとにその環境の env でビルドする。別環境向けの成果物を持ち込んではならない（[architecture.md](./architecture.md) の「reference SPA」）。
+web と ops の image は stack の起動前に作る。image には SPA のビルド結果が入り、デプロイ固有の設定はビルド時に bundle へ焼き込まれるため、環境ごとにその環境の env でビルドする。別環境向けの image を持ち込んではならない（[architecture.md](./architecture.md) の「reference SPA」「web と ops の image」）。
 
 ```sh
-KURA_ENV_FILE=env.production npm run build:container
+docker compose --env-file env.production --env-file .env build --pull
 ```
 
-ビルドが読む env は `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_S3_ENDPOINT`（必須。欠けるとビルドが失敗する）と `KURA_FILE_TTL_DAYS` / `KURA_QUOTA_DEFAULT_MB`（任意）の 5 つだけで、secret は渡らない。
+podman-compose の場合は手順 2 で merge した `.env` と overlay を使う。
 
-ビルドは patch version まで pin した node の container で行う。ホストの node を使うと、moving tag と同じく npm の minor 差で optional dependency の解決が変わり、同じ `package-lock.json` でも `npm ci` が失敗しうる。podman-compose の環境では同等の `podman run` に置き換える（`.env` を読み込み、上記 5 つの env を container へ渡して `npm ci && npm run build`）。
+```sh
+podman-compose --env-file .env -f compose.yml -f compose.podman.yml build --pull
+```
+
+ビルドが読む env は `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_S3_ENDPOINT`（必須。欠けるとビルドが失敗する）と `KURA_FILE_TTL_DAYS` / `KURA_QUOTA_DEFAULT_MB`（任意）の 5 つだけで、compose が build arg として渡す。secret は渡らない。`--pull` を付けると、base image の最新を取ってから作る。
 
 ## 5. stack を起動する
 
@@ -96,12 +120,13 @@ podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
 
 ## 更新
 
-SPA を作り直したときは、配信コンテナを再作成する。
+SPA・`scripts/`・依存 package を変えたとき、ビルドが読む env を変えたとき、base image の更新を取り込むときは、image を作り直してから web と ops を再作成する。
 
 ```sh
-docker compose --env-file env.production --env-file .env up -d --force-recreate web
+docker compose --env-file env.production --env-file .env build --pull
+docker compose --env-file env.production --env-file .env up -d --force-recreate web ops
 ```
 
-ビルドは `build/` をディレクトリごと作り直すため、起動したままのコンテナは削除済みの inode を掴み続け、SPA への request が全て失敗する。mount を親ディレクトリに移しても回避できない。
+podman-compose の場合は、同じ 2 つの command を `podman-compose --env-file .env -f compose.yml -f compose.podman.yml` で実行する。
 
-SeaweedFS の pin を上げるときは、[architecture.md](./architecture.md) の「SeaweedFS 由来の制約」の各項目を新しい version に対して確かめ、テスト一式が通ることを確認してから反映する。上げてよい上限がある点にも注意する。
+SeaweedFS の pin を上げるときは、release notes を読み、[architecture.md](./architecture.md) の「SeaweedFS 由来の制約」の各項目を新しい version に対して確かめ、テスト一式が通ることを確認してから反映する。

@@ -2,7 +2,7 @@ name: kura
 
 services:
   seaweedfs:
-    image: docker.io/chrislusf/seaweedfs:4.44
+    image: docker.io/chrislusf/seaweedfs:4.51
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/kura/entrypoint.sh"]
     command:
@@ -56,27 +56,27 @@ services:
       timeout: 2s
       retries: 60
 
-  # web と ops はどちらも scripts/*.ts を node の type stripping で直接実行する。
-  # その挙動は node の minor に依存するので、image は moving tag ではなく
-  # ビルドに使うのと同じ patch version に pin する。
+  # web と ops は Dockerfile の runtime stage から作る同じ形の image で動く。
+  # image に SPA のビルド結果が入るので、build arg は SPA に焼き込む値だけを
+  # 渡す（secret は渡さない）。
   #
   # reference SPA の静的配信。ビルド済みの build/client を vite の preview
   # server が配る。kura の機能には関与しないので SeaweedFS には一切触らない。
   web:
-    image: docker.io/library/node:24.13.0-alpine
+    build: &runtime-build
+      context: .
+      target: runtime
+      args:
+        KURA_OIDC_ISSUER: ${KURA_OIDC_ISSUER}
+        KURA_OIDC_CLIENT_ID: ${KURA_OIDC_CLIENT_ID}
+        KURA_S3_ENDPOINT: ${KURA_S3_ENDPOINT}
+        KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
+        KURA_QUOTA_DEFAULT_MB: ${KURA_QUOTA_DEFAULT_MB:-}
     restart: unless-stopped
-    working_dir: /kura
-    command: ["node", "/kura/scripts/serve-spa.ts"]
+    command: ["node", "scripts/serve-spa.ts"]
     environment:
       # 外向きの Host 名。空でも localhost / IP 直打ちは通る
       KURA_ALLOWED_HOSTS: ${KURA_ALLOWED_HOSTS:-}
-    volumes:
-      # 再ビルドは build/ をディレクトリごと作り直す。起動中の container は
-      # 消えた inode を掴んだままになるので、再ビルド後は必ず web を再作成
-      # する。
-      - ./build:/kura/build:ro
-      - ./scripts:/kura/scripts:ro
-      - ./node_modules:/kura/node_modules:ro
     ports:
       - "${KURA_BIND_ADDR:-127.0.0.1}:${KURA_HTTP_PORT}:8080"
     healthcheck:
@@ -87,9 +87,9 @@ services:
 
   # 日次の運用タスク: file TTL 削除・放置 multipart 掃除。
   ops:
-    image: docker.io/library/node:24.13.0-alpine
+    build: *runtime-build
     restart: unless-stopped
-    command: ["node", "/kura/scripts/ops-loop.ts"]
+    command: ["node", "scripts/ops-loop.ts"]
     environment:
       # compose 内部から S3 へ直接届く endpoint（env ファイルの値はホスト向け）
       KURA_S3_ENDPOINT: http://seaweedfs:8333
@@ -100,9 +100,6 @@ services:
       KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
       KURA_MULTIPART_MAX_AGE_DAYS: ${KURA_MULTIPART_MAX_AGE_DAYS:-}
       KURA_OPS_INTERVAL_SECONDS: ${KURA_OPS_INTERVAL_SECONDS:-86400}
-    volumes:
-      - ./scripts:/kura/scripts:ro
-      - ./node_modules:/kura/node_modules:ro
     depends_on:
       seaweedfs:
         condition: service_healthy

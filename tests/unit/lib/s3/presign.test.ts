@@ -68,6 +68,25 @@ describe("presignShareUrl", () => {
     expect(expiresAt).toEqual(sessionExpiry)
   })
 
+  // The STS session is what the URL is signed with, so it has to last as long
+  // as the URL; the access token's remaining life does not limit it.
+  test.each([900, 3600, 43_200])("presignShareUrl_expires%i_requestsSessionOfSameLength", async (seconds) => {
+    let body = new URLSearchParams()
+    server.use(http.post(`${ENDPOINT}/`, async ({ request }) => {
+      body = new URLSearchParams(await request.text())
+      return HttpResponse.xml(stsAssumeRoleXml({
+        accessKeyId: "AKIATEST",
+        secretAccessKey: "secret",
+        sessionToken: "session-token",
+        expiration: new Date(Date.now() + seconds * 1000).toISOString(),
+      }))
+    }))
+    const { url } = await share({ expiresInSeconds: seconds })
+
+    expect(body.get("DurationSeconds")).toBe(String(seconds))
+    expect(new URL(url).searchParams.get("X-Amz-Expires")).toBe(String(seconds))
+  })
+
   test("presignShareUrl_stsRejection_propagates", async () => {
     server.use(http.post(`${ENDPOINT}/`, () => new HttpResponse(null, { status: 403 })))
     await expect(share()).rejects.toThrow()

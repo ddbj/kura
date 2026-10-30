@@ -1,0 +1,14 @@
+.git
+.claude
+.env
+.react-router
+node_modules
+build
+dist
+data
+test-results
+playwright-report
+tests/setup/.jwks
+tests/e2e/.auth
+tests/e2e/playwright-report
+tests/e2e/test-results

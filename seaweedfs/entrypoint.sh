@@ -151,30 +151,31 @@ cat > /etc/seaweedfs/iam.json <<EOJSON
           {
             "Sid": "OwnBucket",
             "Effect": "Allow",
-            "Action": ["s3:*"],
-            "Resource": [
-              "arn:aws:s3:::\${jwt:preferred_username}",
-              "arn:aws:s3:::\${jwt:preferred_username}/*"
-            ]
+            "Action": [
+              "s3:CreateBucket",
+              "s3:ListBucket",
+              "s3:ListBucketMultipartUploads",
+              "s3:GetBucketLocation"
+            ],
+            "Resource": ["arn:aws:s3:::\${jwt:preferred_username}"]
           },
           {
-            "Sid": "DenyBucketAdminOps",
-            "Effect": "Deny",
+            "Sid": "OwnObjects",
+            "Effect": "Allow",
             "Action": [
-              "s3:PutBucketPolicy",
-              "s3:DeleteBucketPolicy",
-              "s3:PutBucketAcl",
-              "s3:PutObjectAcl",
-              "s3:PutBucketCors",
-              "s3:DeleteBucketCors",
-              "s3:PutLifecycleConfiguration",
-              "s3:DeleteLifecycleConfiguration",
-              "s3:PutBucketVersioning",
-              "s3:PutObjectLockConfiguration",
-              "s3:PutObjectRetention",
-              "s3:PutObjectLegalHold"
+              "s3:GetObject",
+              "s3:PutObject",
+              "s3:DeleteObject",
+              "s3:CreateMultipartUpload",
+              "s3:UploadPart",
+              "s3:CompleteMultipartUpload",
+              "s3:AbortMultipartUpload",
+              "s3:ListMultipartUploadParts",
+              "s3:GetObjectTagging",
+              "s3:PutObjectTagging",
+              "s3:DeleteObjectTagging"
             ],
-            "Resource": ["arn:aws:s3:::*", "arn:aws:s3:::*/*"]
+            "Resource": ["arn:aws:s3:::\${jwt:preferred_username}/*"]
           }
         ]
       }

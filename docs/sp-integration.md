@@ -39,9 +39,9 @@ UI は「kura の使い方の reference 実装」であり、ブラウザから 
 
 **username が S3 の bucket 命名規則に合わないユーザーは kura を利用できない。** DDBJ account の username のうち `_` を含むもの、`-` で終わるもの、3 文字未満のものが該当する。変換による救済はしていないので、該当するユーザーが利用対象に含まれる場合は kura の管理者に相談する。
 
-**容量上限（quota）は 1 ユーザーあたり 1 TiB** である。超過すると bucket が read-only になり、新規の upload が HTTP 500 で拒否される（判定の反映には 1 分程度かかる）。download と削除は引き続き行え、削除して上限内に戻せば upload を再開できる。ユーザー単位の変更は kura の管理者が行う。
+**容量上限（quota）は 1 ユーザーあたり 1 TiB** である。超過すると bucket が read-only になり、新規の upload が HTTP 403（`AccessDenied`）で拒否される（判定の反映には 1 分程度かかる）。download と削除は引き続き行え、削除して上限内に戻せば upload を再開できる。ユーザー単位の変更は kura の管理者が行う。
 
-**presigned URL の有効期間は最長 12 時間**だが、実際には発行時点の認証セッションの残り時間で頭打ちになる。DDBJ account の SSO セッションは最大 10 時間なので、発行できる URL の寿命はログインからの経過とともに縮む。12 時間を超える共有手段は kura には無い。
+**presigned URL の有効期間は最長 12 時間**で、ログインからの経過時間には関係しない。発行した URL を期限の前に無効にする手段は無い。12 時間を超える共有手段は kura には無い。
 
 **認証を持たない第三者への配信経路は持たない。** public 公開の機能は存在せず、presigned URL が唯一の対外的な受け渡し手段である。
 
@@ -83,7 +83,9 @@ export ACCESS_TOKEN=$(curl -s -X POST "$ISSUER/protocol/openid-connect/token" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
 ```
 
-承認前に token を要求すると `authorization_pending` が返る。5 秒以上あけて再試行する。長時間のジョブで token を取り直し続けたい場合は、`scope` に `offline_access` を足して応答の `refresh_token` を保管する（使い方は「ユーザーからの委譲」と同じ）。
+承認前に token を要求すると `authorization_pending` が返る。5 秒以上あけて再試行する。kura の client の access token は 5 分で切れるので、受け取ったらすぐに次の手順で一時 credentials に交換する。一時 credentials の長さは access token の寿命に関係しない。
+
+長時間のジョブで access token を取り直し続けたい場合は、`scope` に `offline_access` を足して応答の `refresh_token`（offline token）を保管する（使い方は「ユーザーからの委譲」と同じ）。kura の client で取った offline token は 7 日で切れ、取り直しても延びない。切れたら device flow からやり直す。
 
 UI にログイン済みなら、ブラウザの開発者ツールのコンソールから取り出すこともできる。一時的な確認向けで、token は本人の資格情報そのものなので他人と共有しない。
 
@@ -115,7 +117,7 @@ eval "$(aws sts assume-role-with-web-identity \
   | awk '{print "export AWS_ACCESS_KEY_ID="$1"\nexport AWS_SECRET_ACCESS_KEY="$2"\nexport AWS_SESSION_TOKEN="$3}')"
 ```
 
-この呼び出しに credentials は要らない（認証は web identity token で行う）。`--duration-seconds` に何を指定しても、実際のセッション長は access token の残り有効期間で頭打ちになる。返り値の `Expiration` が実効値である。
+この呼び出しに credentials は要らない（認証は web identity token で行う）。`--duration-seconds` には 900（15 分）から 43200（12 時間）までを指定でき、その長さの一時 credentials が出る。access token の残り時間には関係しない。
 
 ### 3. S3 API を叩く
 
@@ -150,7 +152,7 @@ endpoint_url = https://kura-s3.ddbj.nig.ac.jp
 - **addressing style は既定のままでよい。** aws cli は独自 endpoint を指定すると path style で送る。ただし SDK によっては virtual-host style が既定なので、その場合は path style を明示する（AWS SDK for JavaScript / Go なら `forcePathStyle` 相当）
 - **checksum の設定も既定のままでよい。** 新しい aws cli が既定で付ける追加 checksum はそのまま受け付ける
 - **100 GB クラスのファイルも既定の設定で通る。** aws cli は part 数の上限に合わせて part サイズを自動で調整する。転送を速くしたい場合は `s3.multipart_chunksize` を大きくする
-- **長い転送はセッションの残り時間に注意する。** 一時 credentials はログインから最大 10 時間で失効し、失効すると転送は途中で止まる。aws cli には再開の機能が無いので、失効した場合は credentials を取り直して同じコマンドを再実行する（未完了の part は kura 側の日次処理が回収する）。ブラウザ UI からの upload は失効を自動で回避し、中断からの再開にも対応している
+- **長い転送は一時 credentials の残り時間に注意する。** 一時 credentials は `--duration-seconds` で指定した時間（最大 12 時間）で失効し、失効すると転送は途中で止まる。aws cli には再開の機能が無いので、失効した場合は credentials を取り直して同じコマンドを再実行する（未完了の part は kura 側の日次処理が回収する）。ブラウザ UI からの upload は失効を自動で回避し、中断からの再開にも対応している
 - presigned URL の寿命は `--expires-in` の値と、一時 credentials の残り時間の小さい方になる
 - **ファイルを消しても、その親フォルダの entry が残ることがある。** `aws s3 rm` は object を消すだけなので、`aws s3 ls` には 0 byte の行として、UI には空のフォルダとして残る。消すには末尾にスラッシュを付けた key を削除する（`aws s3api delete-object --bucket <username> --key 'dir/'`）
 
@@ -161,7 +163,7 @@ endpoint_url = https://kura-s3.ddbj.nig.ac.jp
 | STS が `InvalidParameterValue ... token audience matches none of the configured client IDs` | token の `aud` にも `azp` にも `kura` が入っていない。SP の client なら audience mapper が要る |
 | STS は通るが、あらゆる S3 操作が `AccessDenied` | access token に `preferred_username` が入っていない。または他人の bucket を触っている |
 | `InvalidAccessKeyId: The access key ID you provided does not exist in our records` | 一時 credentials が失効した。STS からやり直す |
-| upload だけが HTTP 500 で失敗する | quota 超過。不要なファイルを削除するか、kura の管理者に上限の変更を相談する |
+| download と削除はできるのに、upload だけが `AccessDenied` で失敗する | quota 超過。不要なファイルを削除するか、kura の管理者に上限の変更を相談する |
 | `NoSuchBucket` | 自分の bucket をまだ作っていない（`CreateBucket` を 1 度だけ行う） |
 
 ## SP がユーザーに代わって使う
@@ -182,9 +184,10 @@ SP が自分の Keycloak client で発行した access token を kura に渡す�
 | 設定 | 値 | 必須か | 理由 |
 | --- | --- | --- | --- |
 | dedicated scope の Audience mapper | Included Client Audience = `kura`、Add to access token = ON | 必須 | kura は token の `aud`（無ければ `azp`）が `kura` と一致することを検証する。SP の client id を kura 側に登録する仕組みは無い |
-| `profile` を default client scope に残す | — | 必須 | bucket 名は `preferred_username` claim から決まる。lightweight access token などで claim が落ちると、STS は通るのに S3 がすべて拒否される |
+| access token に `preferred_username` を入れる | dedicated scope の User Attribute mapper（`username`）、または `profile` scope | 必須 | bucket 名は `preferred_username` claim から決まる。lightweight access token などで claim が落ちると、STS は通るのに S3 がすべて拒否される |
+| access token に email と氏名を入れない | `profile` と `email` を default client scope から外し、`preferred_username` は dedicated scope の mapper で入れる | 推奨 | kura の STS は access token の claim を session token に書き込み、session token は presigned URL に載る。入れると、URL を渡した相手に email と氏名が渡る |
 | `offline_access` を optional client scope に追加 | — | 長時間処理をするなら必須 | 非対話で access token を取り直し続けるために使う |
-| Access Token Lifespan の client override | 任意（例: 12 時間） | 任意 | 一時 credentials と presigned URL の寿命は token の残り時間で決まる。ただし SSO セッション（最大 10 時間）が天井になる |
+| Access Token Lifespan | 短くてよい（例: 5 分） | 任意 | 一時 credentials と presigned URL の寿命は STS に要求した `DurationSeconds` で決まり、token の寿命には関係しない |
 
 Keycloak の管理コンソールでは、Clients → 対象の client → Client scopes → `<client-id>-dedicated` → Add mapper → By configuration → Audience から追加する。設定後に発行した token をデコードし、`aud` に `kura` が含まれること、`preferred_username` が入っていることを確認する。
 
@@ -193,7 +196,7 @@ Keycloak の管理コンソールでは、Clients → 対象の client → Clien
 短時間の処理なら、ユーザーの access token をそのまま受け取って使えばよい。1 時間を超える処理や、ユーザーがブラウザを閉じたあとも続く処理には offline token を使う。
 
 1. SP がユーザーを認証するとき、scope に `offline_access` を加える（Authorization Code + PKCE）
-2. 得られた refresh token（Offline 型。期限は無く、30 日間使われないと失効する）を SP が保管する
+2. 得られた refresh token（Offline 型）を SP が保管する。期限は SP の client の設定に従い、realm の既定では期限は無く、30 日間使われないと失効する
 3. 必要になるたびに refresh token から access token を取り直す
 
    ```sh

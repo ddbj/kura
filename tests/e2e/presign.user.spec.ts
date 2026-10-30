@@ -29,8 +29,7 @@ test.describe("PRESIGN", () => {
     await uploadTextFile(page, name, content)
 
     const modal = await openPresignModalFromRow(page, name)
-    // default TTL は 最長 (= 認証セッションの残り)
-    await expect(modal.getByRole("tablist", { name: "有効期限" }).getByRole("tab", { name: "最長", selected: true }))
+    await expect(modal.getByRole("tablist", { name: "有効期限" }).getByRole("tab", { name: "12時間", selected: true }))
       .toBeVisible()
 
     await modal.getByRole("button", { name: "リンクを発行" }).click()
@@ -59,8 +58,8 @@ test.describe("PRESIGN", () => {
     const panel = getPresignPanel(page, name)
     const rowUrl = await panel.locator(".linkbar .u").textContent()
     expect(rowUrl).toBe(modalUrl)
-    // 残り時間は「N 時間 M 分」/「N 時間」/「M 分」のいずれかで出る (session の
-    // 残り寿命と 30 秒 tick 次第なので、数値そのものは pin しない)
+    // 残り時間は「N 時間 M 分」/「N 時間」/「M 分」のいずれかで出る (30 秒 tick
+    // 次第なので、数値そのものは pin しない)
     const lbl = await panel.locator(".pp-top .lbl").textContent()
     expect(lbl).toMatch(/^期限つきリンク — 約(\d+ 時間)?\s?(\d+ 分)?後に自動で失効します$/)
     expect(lbl).toMatch(/\d/)
@@ -92,19 +91,12 @@ test.describe("PRESIGN", () => {
     for (const { tab, banner } of [
       { tab: "15分", banner: "リンクは約15 分後に切れます" },
       { tab: "1時間", banner: "リンクは約1 時間後に切れます" },
+      { tab: "12時間", banner: "リンクは約12 時間後に切れます" },
     ]) {
       await ttlList.getByRole("tab", { name: tab }).click()
       await expect(ttlList.getByRole("tab", { name: tab, selected: true })).toBeVisible()
       await expect(modal.locator(".banner.ochre")).toContainText(banner)
     }
-
-    // 「最長」は認証セッションの残りに切り詰められるので、値ではなく
-    // 「セッション残りである」と説明していることを見る
-    await ttlList.getByRole("tab", { name: "最長" }).click()
-    await expect(ttlList.getByRole("tab", { name: "最長", selected: true })).toBeVisible()
-    const banner = modal.locator(".banner.ochre")
-    await expect(banner).toContainText("「最長」はいまの認証セッションの残り時間です")
-    await expect(banner).toContainText(/リンクは約(\d+ 時間)?\s?(\d+ 分)?後に切れます/)
   })
 
   // rename / move は copy + delete なので、発行済みの URL は元 key ごと 404 に

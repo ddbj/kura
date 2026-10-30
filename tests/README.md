@@ -32,6 +32,8 @@ vitest は projects 構成で、`unit`（jsdom）/ `pbt`（node）/ `integration
 **IAM policy boundary**（`iam-boundary.test.ts`）は認可境界そのものを検証する。自前鍵で署名した JWT で STS を通して一時 credentials を取り、次を確かめる。
 
 - 自分の bucket の作成（CreateBucket）と read / write / list / tagging が許可されること
+- 自分の bucket の設定（policy・ACL・CORS・lifecycle・versioning・Object Lock・暗号化・quota など）を変える操作が拒否されること。Object Lock を有効にして作った bucket でも retention と legal hold が拒否されること
+- public-read の ACL を付けて置いた object と bucket に、署名なしの request が届かないこと
 - 他人の bucket の read / write / list / tagging / delete が拒否されること
 - 他人の bucket 名での新規 bucket 作成が拒否されること
 - role 偽装（token が対応しない role の指定）が拒否されること
@@ -44,8 +46,10 @@ vitest は projects 構成で、`unit`（jsdom）/ `pbt`（node）/ `integration
 
 - STS `AssumeRoleWithWebIdentity` から multipart upload、download まで
 - 中断した multipart upload を新しい一時 credentials から再開できること（低レベル API と、SPA の resume 実装そのもの（発見 → MD5 照合 → 続行 → 完成、内容が違うファイルの拒否、破棄）の両方）
-- in-flight multipart upload の一覧の形（Prefix フィルタ、`Initiated` が無いこと、part ETag = MD5）
-- 一時 credentials による presigned URL（GET / PUT）と、署名なし request の拒否。STS session の失効後は `X-Amz-Expires` が残っていても 403 になること
+- in-flight multipart upload の一覧の形（Prefix フィルタ、part ETag = MD5）
+- 一時 credentials による presigned URL（GET / PUT）と、署名なし request の拒否。`X-Amz-Expires` を過ぎると 403 になること
+- STS session の長さが access token の残り時間ではなく `DurationSeconds` で決まること
+- presigned URL の session token から secret key を導いて別の request に署名できないこと、session token を Bearer として送っても拒否されること
 - quota 超過での write 拒否、超過中の read / delete、削除と vacuum 後の自動解除
 - 起動時 env 検証: `KURA_QUOTA_DEFAULT_MB` / `KURA_OPS_INTERVAL_SECONDS` が正の整数でなければ seaweedfs コンテナが起動しないこと
 - 運用タスク: quota reconciler が未設定 bucket に quota を付けること、TTL sweep が期限超過の object だけを消し `.keep` marker は年齢に関わらず残すこと（TTL 無効時は何もしないこと）、multipart 掃除が猶予内の upload を残すこと

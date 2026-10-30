@@ -18,7 +18,7 @@ if (typeof Blob.prototype.stream !== "function") {
   }
 }
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
 
 afterEach(() => {
   cleanup()

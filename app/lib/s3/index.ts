@@ -10,6 +10,6 @@ export { type BucketStats, foldBucketStats, type FolderStat, listBucketStats } f
 export { planResume, type PlanResumeResult, type ResumePlan, resumeUpload } from "./resume"
 export { assumeRoleWithToken, type StsCredentials, USER_ROLE_ARN } from "./sts"
 export { computePartSize, type RunningUpload, startUpload, type UploadProgress } from "./upload"
-export { accessTokenForDuration, freshAccessToken, useS3 } from "./use-s3"
+export { freshAccessToken, useS3 } from "./use-s3"
 export { ResumeMismatchError } from "./verify"
 export { canStreamZipToDisk, isSaveCancelled, isZipTooLargeForMemory, makeZipStream, MEMORY_ZIP_LIMIT_BYTES, predictZipSize, saveZipStream, zipEntriesForPrefix,type ZipEntry } from "./zip"

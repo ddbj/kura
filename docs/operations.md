@@ -18,7 +18,7 @@ compose の 3 サービスで完結する。
 
 ## 環境と env
 
-dev / production の違いは env ファイルだけで、compose も image も同じものを使う。環境ごとに変わるのは issuer と client id、外向きの URL、データディレクトリ、TTL、quota の既定値、そして secret である。env の一覧と各値の意味は `env.dev` / `env.production` にコメント付きで並んでいるので、ここでは繰り返さない。
+dev / production の違いは env ファイルだけで、compose は同じものを使う。web と ops の image は、SPA に焼き込む値が環境ごとに違うので、環境ごとにその環境の env でビルドする。環境ごとに変わるのは issuer と client id、外向きの URL、データディレクトリ、TTL、quota の既定値、そして secret である。env の一覧と各値の意味は `env.dev` / `env.production` にコメント付きで並んでいるので、ここでは繰り返さない。
 
 運用上、次の 3 点だけ知っておけばよい。
 
@@ -70,13 +70,13 @@ weed shell の topology 系コマンド（`volume.vacuum` 等）は `lock` を�
 
 quota を超過すると bucket が read-only になり、upload がエラーで拒否される（判定は約 1 分周期）。使用量が quota を下回れば自動で解除されるが、削除した分は volume の vacuum が走るまで使用量に反映されないため、解除には遅延がある。即時に解除したい場合は weed shell で `volume.vacuum -collection=<bucket>` を実行してから `s3.bucket.quota.enforce -apply` する。
 
-ユーザー単位に変更した quota は UI に出ない。SPA の使用量メーターの分母はビルド時に焼き込んだ既定値で、S3 API から実際の quota 設定値を読む手段が無いためである（[architecture.md](./architecture.md) の「quota と TTL の実現」）。既定値から変えた bucket があるなら、その差は UI 以外の手段で本人に伝える。
+ユーザー単位に変更した quota は UI に出ない。SPA の使用量メーターの分母はビルド時に焼き込んだ既定値で、一般ユーザーには実際の quota 設定値を読む権限が無いためである（[architecture.md](./architecture.md) の「quota と TTL の実現」）。既定値から変えた bucket があるなら、その差は UI 以外の手段で本人に伝える。
 
 ## 全ファイル TTL
 
-TTL は `KURA_FILE_TTL_DAYS`（日数。空なら無効で、これが default）で設定する。SPA はこの値をビルド時に取り込んで各ファイルの有効期限表示に使うので、TTL の変更は SPA の再ビルドと web の再作成を伴う。
+TTL は `KURA_FILE_TTL_DAYS`（日数。空なら無効で、これが default）で設定する。SPA はこの値をビルド時に取り込んで各ファイルの有効期限表示に使うので、TTL の変更は image の再ビルドと web・ops の再作成を伴う（[deployment.md](./deployment.md) の「更新」）。
 
-削除は ops の日次タスクが行う。作成時刻（S3 の LastModified。object は不変なので作成時刻と一致する）に TTL を足した時刻を過ぎた object を、全 bucket から削除する。したがって削除の粒度は実行間隔（日次）になる。空フォルダを表す `.keep` marker は、年齢に関わらず対象外である。
+削除は ops の日次タスクが行う。作成時刻（S3 の LastModified。object は不変なので作成時刻と一致する）に TTL を足した時刻を過ぎた object を、全 bucket から削除する。したがって削除の粒度は実行間隔（日次）になる。空フォルダを表す `.keep` marker は、年齢に関わらず対象外である。ユーザーが Object Lock を有効にして作った bucket は versioning が有効なので、削除しても古い version が残る（[architecture.md](./architecture.md) の「SeaweedFS 由来の制約」）。
 
 ## admin 操作
 

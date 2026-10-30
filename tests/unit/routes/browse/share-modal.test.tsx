@@ -55,14 +55,21 @@ const TARGETS = [
   { bucket: "kura-tester", key: "e2e/b.txt", name: "b.txt", size: 20 },
 ]
 
-const stsOk = () =>
-  server.use(http.post(ENDPOINT, () =>
-    HttpResponse.xml(stsAssumeRoleXml({
+// Returns the DurationSeconds of every STS request, in order.
+const stsOk = () => {
+  const durations: (string | null)[] = []
+  server.use(http.post(ENDPOINT, async ({ request }) => {
+    const duration = new URLSearchParams(await request.text()).get("DurationSeconds")
+    durations.push(duration)
+    return HttpResponse.xml(stsAssumeRoleXml({
       accessKeyId: "AKIATEST",
       secretAccessKey: "secret",
       sessionToken: "session-token",
-      expiration: new Date(Date.now() + 3600_000).toISOString(),
-    }))))
+      expiration: new Date(Date.now() + Number(duration ?? 3600) * 1000).toISOString(),
+    }))
+  }))
+  return durations
+}
 
 const stsFails = () =>
   server.use(http.post(ENDPOINT, () => new HttpResponse("boom", { status: 500 })))
@@ -70,12 +77,8 @@ const stsFails = () =>
 const openModal = async () => {
   render(<Wrapper><ShareModal open onClose={() => undefined} targets={TARGETS} /></Wrapper>)
   await waitFor(() => expect(screen.getByTestId("auth-state")).toHaveTextContent("ready"))
-  const modal = screen.getByRole("dialog", { name: "期限つきリンクを発行" })
-  // The seeded access token has an hour left, so only the 15-minute lifetime
-  // can be satisfied without renewing (which jsdom cannot do).
-  await userEvent.click(within(modal).getByRole("tab", { name: "15分" }))
 
-  return modal
+  return screen.getByRole("dialog", { name: "期限つきリンクを発行" })
 }
 
 // The file name also appears above each issued URL, so the status tag has to
@@ -90,6 +93,33 @@ beforeEach(() => {
 })
 
 describe("ShareModal", () => {
+  test("offers 15 min, 1 hour and 12 hours, with 12 hours selected", async () => {
+    const modal = await openModal()
+    const ttl = within(modal).getByRole("tablist", { name: "有効期限" })
+
+    expect(within(ttl).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["15分", "1時間", "12時間"])
+    expect(within(ttl).getByRole("tab", { name: "12時間", selected: true })).toBeInTheDocument()
+    expect(within(modal).getByText(/リンクは約12 時間後に切れます/)).toBeInTheDocument()
+  })
+
+  // The seeded access token has an hour left. The STS session must still be
+  // as long as the chosen lifetime, 12 hours included.
+  test.each([
+    ["15分", "900"],
+    ["1時間", "3600"],
+    ["12時間", "43200"],
+  ])("requests an STS session as long as %s for each link", async (tab, seconds) => {
+    const durations = stsOk()
+    const modal = await openModal()
+    await userEvent.click(within(modal).getByRole("tab", { name: tab }))
+
+    await userEvent.click(within(modal).getByRole("button", { name: "リンクを発行" }))
+
+    await waitFor(() => expect(within(modal).getAllByText(/X-Amz-Signature=/)).toHaveLength(TARGETS.length))
+    expect(durations).toEqual(TARGETS.map(() => seconds))
+    expect(within(modal).getAllByText(new RegExp(`X-Amz-Expires=${seconds}&`))).toHaveLength(TARGETS.length)
+  })
+
   test("issues a URL per target and records it for the session", async () => {
     stsOk()
     const modal = await openModal()

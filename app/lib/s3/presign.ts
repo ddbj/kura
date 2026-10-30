@@ -13,8 +13,8 @@ export type PresignedShare = {
   expiresAt: Date
 }
 
-// Mint a fresh STS session per issued URL so the requested lifetime is capped
-// only by the session length (~12h with the kura client token lifespan).
+// Mint a fresh STS session per issued URL, as long as the URL itself: the URL
+// is signed with that session and stops working when the session ends.
 export const presignShareUrl = async ({ endpoint, token, bucket, key, method, expiresInSeconds }: {
   endpoint: string
   token: string
@@ -23,7 +23,7 @@ export const presignShareUrl = async ({ endpoint, token, bucket, key, method, ex
   method: PresignMethod
   expiresInSeconds: number
 }): Promise<PresignedShare> => {
-  const credentials = await assumeRoleWithToken(endpoint, token)
+  const credentials = await assumeRoleWithToken(endpoint, token, expiresInSeconds)
   const client = createS3Client(endpoint, () => Promise.resolve(credentials))
   const command = method === "GET"
     ? new GetObjectCommand({ Bucket: bucket, Key: key })

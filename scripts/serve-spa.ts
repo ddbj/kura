@@ -1,10 +1,9 @@
 // SPA delivery: serves the static build in
 // build/client and nothing else.
 //
-// vite's preview server is started programmatically with configFile: false so
-// no build plugin is loaded — vite is then the only npm package this needs at
-// runtime — and so vite never bundles a config file, which it would write to
-// node_modules/.vite-temp and fail on the read-only bind mount.
+// vite's preview server is started programmatically with configFile: false:
+// vite.config.ts imports the build plugins, which are devDependencies and are
+// not installed in the runtime image. vite is the only npm package this needs.
 import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 

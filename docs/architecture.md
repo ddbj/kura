@@ -47,7 +47,7 @@ username は sanitize せずそのまま bucket 名にする。SeaweedFS は buc
 
 認可主体は 3 つあり、到達できる範囲が違う。
 
-**`KuraUserRole`（一般ユーザー）** は roleMapping の `defaultRole` で、検証を通った access token は明示指定なしでこの role になる。policy は bucket `${jwt:preferred_username}` への `s3:*` を Allow し（bucket 名の位置での policy 変数展開は成立する）、全 bucket に対して bucket 管理系の操作を明示 Deny する（`s3:PutBucketPolicy` / `DeleteBucketPolicy` / `PutBucketAcl` / `PutObjectAcl` / `PutBucketCors` / `DeleteBucketCors` / `PutLifecycleConfiguration` / `DeleteLifecycleConfiguration` / `PutBucketVersioning` / `PutObjectLockConfiguration` / `PutObjectRetention` / `PutObjectLegalHold`）。`s3:*` の Allow が必要なのは、CreateBucket の認可が SeaweedFS 内部で細粒度 action に解決されないためである。明示 Deny は Allow より常に優先するので、ユーザーが自分の bucket の公開範囲を広げる手段（bucket policy / ACL）は塞がれている。他人の bucket は read / write / list / 作成のすべてが拒否される。
+**`KuraUserRole`（一般ユーザー）** は roleMapping の `defaultRole` で、検証を通った access token は明示指定なしでこの role になる。policy は、kura が使う操作の action だけを、bucket `${jwt:preferred_username}` とその中の object に対して Allow する（bucket 名の位置での policy 変数展開は成立する）。bucket に対しては作成・一覧・multipart upload の一覧・location の取得、object に対しては読み書き・削除・multipart upload の各操作・tag の読み書きである（一覧は `seaweedfs/entrypoint.sh`）。bucket の設定を変える操作（policy・ACL・CORS・lifecycle・versioning・Object Lock・暗号化・quota など）は Allow に入れない。SeaweedFS は版を上げるたびに操作を増やすので、禁止する操作を並べる形では新しい操作が漏れる。許す操作を並べる形なら、増えた操作は既定で拒否される。これで、ユーザーが自分の bucket の公開範囲を広げる手段（bucket policy・ACL）と、自分の quota を変える手段が塞がれる。他人の bucket は read / write / list / 作成のすべてが拒否される。
 
 **`KuraAdminRole`（admin の CLI 操作）** は全 bucket への `s3:*` を持つ。roleMapping では割り当てられず、`AssumeRoleWithWebIdentity` に `RoleArn` を明示した場合にだけ到達する。trust policy が `oidc:sub` を `KURA_ADMIN_SUBS` に列挙した Keycloak の `sub`（UUID）と照合し、一致しないものを拒否する。`KURA_ADMIN_SUBS` が空のときは実在しえない番兵値が入り、role 自体が assume 不能になる（fail-closed）。admin の判定が trust policy 側で完結するので、Keycloak 側に admin 用の claim も mapper も要らない。
 
@@ -57,33 +57,29 @@ trust policy は role の偽装、つまり token が対応しない role の指
 
 SeaweedFS 側の設定ファイルは 3 つある。iam.json は OIDC provider（issuer / clientId / jwksUri）、roleMapping、policy と role の定義、`sts.signingKey` を持ち、`sts.maxSessionLength` を 12h にしている。s3.json は root identity だけを持つ。anonymous identity は置かない。認証なしで S3 に触れる経路を作らないためである。security.toml は `jwt.filer_signing.key` と `jwt.filer_signing.read.key` に同じ鍵を入れ、filer の HTTP read / write と IAM gRPC service を Bearer token 必須にする。filer の API には S3 の IAM が効かないので、この鍵が無いと compose network 上のどのプロセス（SPA 配信 process も同じ network に居る）からでも全 bucket を無認証で読み書きできてしまう。read と write で鍵を分けないのは、どちらも cluster 内で完結して client に渡らず、2 本に増やしても脅威モデル上の利得が無いためである。
 
-## presigned URL の寿命
+## presigned URL と一時 credentials の寿命
 
 presigned URL（GET / PUT）は client が一時 credentials で自己生成する。サーバ側に発行 API は無く、署名計算は client 側で完結する。したがって一時 credentials を持つ者による presign の発行を、kura 側で禁止する手段は存在しない。
 
-寿命は 3 つの上限の最小値になる。
+presigned URL の寿命は、署名に入れた `X-Amz-Expires` と、署名に使った一時 credentials（STS session）の残り時間の、短いほうになる。STS session の長さは `AssumeRoleWithWebIdentity` に渡した `DurationSeconds` で決まり、上限は `sts.maxSessionLength`（12 時間）で、指定しなければ `sts.tokenDuration`（1 時間）になる。元の access token の有効期限では頭打ちにならないので、5 分で切れる access token からも 12 時間の session を作れる。
 
-1. 元になった access token の残り有効期間。STS session はこれで頭打ちにされる
-2. 要求した `DurationSeconds`
-3. `sts.maxSessionLength` と、SeaweedFS 内の固定値である 43200 秒（12 時間）
+SPA は presigned URL を発行するたびに新しい STS session を取り、`DurationSeconds` と `X-Amz-Expires` に同じ値を入れる。UI が提示する有効期限は「15分 / 1時間 / 12時間」で、どれもログインからの経過時間に関係しない。SPA がファイル操作に使う一時 credentials は `DurationSeconds` を指定せずに取り、切れる前に新しい access token で取り直す。SSO session が切れると access token を取り直せなくなるので、SPA の操作はそこで止まる。
 
-実際に効くのはほぼ常に 1 である。Keycloak は access token の `exp` を SSO session の終了時刻で頭打ちにするため、client の lifespan を 12 時間にしても realm の SSO session max（現在の設定では 10 時間）を超える token は発行されない。`exp` の起点はログイン時刻なので、発行できる presign の寿命はログインからの経過とともに縮む（ログイン直後なら約 10 時間、9 時間経過後なら約 1 時間）。発行時に token を取り直しても同じ天井に当たる。realm の設定は全 DDBJ サービスの共有資産なので kura 側からは変えられない。
+STS session は発行後に revoke できない（AWS の仕様どおり）。credential の漏洩や presign の誤配布による暴露は自然失効まで続き、最大は 12 時間である。presigned URL を受け取った人がその URL の中の session token から secret key を導いて別の request に署名することはできない。SeaweedFS は secret key を STS の署名鍵で作るためである。
 
-このため UI が提示する有効期限は「15分 / 1時間 / 最長」であり、「最長」は上限を要求したうえで session 残りに切り詰められた実効値を表示する。
-
-STS session は発行後に revoke できない（AWS の仕様どおり）。credential の漏洩や presign の誤配布による暴露は自然失効まで続く。仕様上の最大は 12 時間、実際には上記の天井までである。
+SeaweedFS は access token の claim を session token に書き込み、session token は presigned URL の `X-Amz-Security-Token` にそのまま載る。そのため kura の client の access token には、認証と認可に使う claim だけを載せる（「Keycloak client」）。
 
 ## 委譲（SP の非対話利用）
 
 act-as-user 方式を採る。SP はユーザーの token で STS から一時 credentials を取り、ユーザー本人と同じ権限（自分の bucket のみ）で読み書きする。kura 側に SP 専用の実装も権限も無い。
 
-ユーザーは自分の token を SP に渡すことで委譲する。長時間の処理では offline token を使う。ユーザーが scope に `offline_access` を付けて認証し、得られた refresh token（Offline 型、期限なし・idle 30 日で失効）を SP に渡すと、SP は refresh で access token を得続けて STS を再取得できる。`offline_access` は optional scope として利用できるので、client 側の追加設定は要らない。
+ユーザーは自分の token を SP に渡すことで委譲する。長時間の処理では offline token を使う。SP は自分の Keycloak client でユーザーを認証するときに `offline_access` を要求し、得た offline token で access token を取り直し続けて STS を呼び直す。offline token の期限は SP の client の設定に従う。kura の client で取った offline token は 7 日で切れる（「Keycloak client」）。
 
 ## quota と TTL の実現
 
-quota は SeaweedFS native の per-bucket quota（`s3.bucket.quota`）を使う。使用量は collection（= bucket）のメトリクスから取得され、kura は自前の容量カウンタを持たない。超過すると enforcement が bucket を read-only にし、write が HTTP 500 で拒否される（filer が返す 507 が S3 層で generic エラーになる）。使用量が quota を下回れば自動で解除される。新規 bucket への既定値の適用は、quota 未設定の bucket を見つけて既定値を設定する運用スクリプトで行う。
+quota は SeaweedFS native の per-bucket quota（`s3.bucket.quota`）を使う。使用量は collection（= bucket）のメトリクスから取得され、kura は自前の容量カウンタを持たない。超過すると enforcement が bucket を read-only にし、write が HTTP 403（AccessDenied）で拒否される。使用量が quota を下回れば自動で解除される。新規 bucket への既定値の適用は、quota 未設定の bucket を見つけて既定値を設定する運用スクリプトで行う。
 
-S3 API には bucket の quota 設定値を読む手段が無い。そのため SPA が使用量メーターに出す上限は、ビルド時に焼き込んだ既定値である。admin がユーザー単位に変更した quota は UI に反映されない。
+SPA が使用量メーターに出す上限は、ビルド時に焼き込んだ既定値である。bucket の quota の設定値を読む操作は SeaweedFS の S3 拡張にしか無く、一般ユーザーの policy では許していないためである。admin がユーザー単位に変更した quota は UI に反映されない。
 
 全ファイル TTL は、作成時刻に TTL を足した時刻を過ぎた object を削除する日次の運用スクリプトで実現する。SeaweedFS の volume TTL は使わない。失効後も一覧に残り、読み出しだけがエラーになる断片状態が生じるためである。S3 lifecycle も使わない。bucket ごとのルール適用と worker の運用が必要になる割に、単純な日次削除と結果が変わらないためである。
 
@@ -99,9 +95,13 @@ CORS には SeaweedFS だけが応答する。preflight OPTIONS は SeaweedFS �
 
 ## Keycloak client
 
-kura は realm 上に専用の public client を 1 つ持ち、Authorization Code + PKCE で認証する。ブラウザを持たないホストから CLI で使うために device flow（RFC 8628）も有効にする。client の PKCE 強制は device authorization request にも適用されるので、この経路でも `code_challenge` が要る。client の dedicated scope には audience mapper だけを置く（access token の `aud` に client id を入れる。SeaweedFS の OIDC provider が検証に使う）。admin 用の claim や mapper は作らない。admin の判定は kura 側の trust policy が `sub` で行うためである。
+kura は realm 上に専用の public client を 1 つ持ち、Authorization Code + PKCE で認証する。redirect URI は UI origin の `/auth/callback` だけを完全一致で登録する。ワイルドカードにすると、ログイン後の戻り先を同じホストの任意のパスに書き換えられるためである。ブラウザを持たないホストから CLI で使うために device flow（RFC 8628）も有効にする。client の PKCE 強制は device authorization request にも適用されるので、この経路でも `code_challenge` が要る。
 
-access token の lifespan は client レベルの override で 43200 秒にする（realm の default は 60 秒）。ただし実際に発行される token の `exp` は realm の SSO session max で頭打ちになるので、この override が効くのはその範囲内だけである（「presigned URL の寿命」参照）。SSO session max と idle timeout は client override では伸ばせない Keycloak の仕様であり、SPA 上での連続作業の上限も presign の寿命も realm 側の値で決まる。長時間の作業は SPA の credentials provider が silent renew と STS 再取得で継続する。発行済みの presign は STS session として独立して動くので、発行後に SSO session が切れても失効しない。
+access token には kura が使う claim だけを載せる。presigned URL を渡した相手に、発行した人の email や氏名が渡らないようにするためである（「presigned URL と一時 credentials の寿命」）。client の default scope からは `profile`・`email`・`roles` を外し、`sub` は `basic` scope が入れる（admin の trust policy が使う）。dedicated scope には 2 つの mapper を置く。audience mapper は access token の `aud` に client id を入れ、SeaweedFS の OIDC provider が検証に使う。user attribute mapper は username を `preferred_username` claim に入れ、bucket 名と policy 変数に使う。kura は Keycloak の role を使わないので、dedicated scope の Full scope allowed は OFF にする。admin 用の claim や mapper も作らない。admin の判定は kura 側の trust policy が `sub` で行うためである。
+
+access token の lifespan は client レベルで 5 分にする。SPA は access token が切れる 1 分前に refresh token で取り直し、Keycloak の SSO session はそのたびに延びるので、タブを開いている間は realm の SSO session max まで認証が続く。lifespan を 1 分以下にすると取り直しが休みなく続き、realm の SSO session idle より長くすると、取り直すときには session が切れていて必ず失敗する。presigned URL と一時 credentials の寿命は STS session で決まるので、そのために lifespan を延ばさない。
+
+kura の client で取った offline token（CLI の長いジョブで使う）は、client の Client Offline Session Max で 7 日に切り、取り直しても延びないようにする。public client なので、XSS の攻撃者も `offline_access` を付けた認可 request で offline token を取れるためである。refresh token と offline token を出すために、client の Use refresh tokens は ON にしておく。
 
 realm 全体の設定と既存 client には手を入れない。realm は全 DDBJ サービスの共有資産だからである。
 
@@ -109,7 +109,7 @@ realm 全体の設定と既存 client には手を入れない。realm は全 DD
 
 reference SPA の静的ビルドは vite の preview server が配信する。専用の web server を別技術で用意せず、ビルドに使う道具をそのまま配信にも使う。
 
-起動は設定ファイルを介さず、`configFile: false` で preview server を直接起動する運用スクリプトで行う。build plugin を読み込まないので、配備先の runtime に必要な npm package は vite だけで済む。設定ファイルを使うと vite がそれを bundle して `node_modules/.vite-temp` に書き出すため、read-only の bind mount と両立しない。
+起動は設定ファイルを介さず、`configFile: false` で preview server を直接起動する運用スクリプトで行う。設定ファイル（`vite.config.ts`）は build plugin を import するが、runtime の image には devDependencies を入れないので、読み込めないためである。
 
 `appType` は `spa` で、未知のパスは index.html に fallback する。SPA route の直接アクセスはこれで成立する。ただしビルド asset（`/assets/`）は fallback の対象外にし、存在しなければ 404 を返す。再デプロイ前の index.html をキャッシュしたブラウザが古い asset 名を要求したとき、HTML が 200 で返ると MIME エラーという分かりにくい壊れ方をするためである。
 
@@ -117,11 +117,17 @@ reference SPA の静的ビルドは vite の preview server が配信する。�
 
 死活監視のための専用 endpoint は持たず、healthcheck は `/`（index.html）の取得で判定する。CORS には応答しない。この process を通るのは SPA の asset だけで、ファイルの byte は 1 バイトも通らない。
 
+## web と ops の image
+
+web と ops は、repo の `Dockerfile` の `runtime` stage から作る同じ image で動く。image に入れるのは、SPA のビルド結果（`build/client`）、`scripts/` と `scripts/` が import する app のファイル、`npm ci --omit=dev` で入れた依存 package だけで、npm と npx は消す。どちらの process も node で `.ts` を直接実行し、runtime で npm を使わないためである。SPA のビルドは同じ `Dockerfile` の `build` stage で行い、ビルドが読む env（「reference SPA」）は compose が build arg として渡す。secret は build arg に入れない。
+
+base image は node の LTS の major の tag（`node:26-alpine`）を使い、patch version では固定しない。upstream が rebuild した base image は、`--pull` を付けて image を作り直したときに取り込まれる。runtime の image は非 root の `node` user で動き、host の directory を mount しない。
+
 ## reference SPA
 
-SPA は kura の使い方の reference である。S3 API と STS を直接叩き、同じ操作は CLI（aws cli / curl）でもできる。SPA が無くても kura は成立する。React Router v7 の SPA モード（`ssr: false`）で、BFF は無い。要求する role は `KuraUserRole` だけで、SPA から admin 権限は取れない。
+SPA は kura の使い方の reference である。S3 API と STS を直接叩き、同じ操作は CLI（aws cli / curl）でもできる。SPA が無くても kura は成立する。React Router v8 の SPA モード（`ssr: false`）で、BFF は無い。要求する role は `KuraUserRole` だけで、SPA から admin 権限は取れない。
 
-デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / ファイル TTL / quota の既定値）は build 時に bundle へ焼き込む。したがって環境ごとにその環境の env でビルドする。runtime の設定 JSON は持たない。OIDC の redirect URI だけは `window.location.origin` から導出するので設定に含めない。
+デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / ファイル TTL / quota の既定値）は build 時に bundle へ焼き込む。したがって image は環境ごとにその環境の env でビルドする。runtime の設定 JSON は持たない。OIDC の redirect URI だけは `window.location.origin` から導出するので設定に含めない。
 
 以下は、コードを読んでも意図が復元しにくい判断である。
 
@@ -139,22 +145,23 @@ SPA は kura の使い方の reference である。S3 API と STS を直接叩�
 
 ## SeaweedFS 由来の制約
 
-SeaweedFS は release tag に pin して配備する。現在の pin は `4.44` で、`4.45` 以降には上げてはならない。`4.45` で「STS session を元の OIDC token の有効期限で頭打ちにする」挙動が失われ、要求した `DurationSeconds` がそのまま session 長になるためである。kura は一時 credentials と presigned URL の寿命をこの頭打ちに依存しているので、上げると Keycloak の session が終わったあとも 12 時間有効な credentials が残る。upstream で直ってから上げる。
-
-pin を上げるときは、下表の各項目を新しい version に対して確かめる。
+SeaweedFS は release tag に pin して配備する。現在の pin は `4.51` である。pin を上げるときは release notes を読み、下表の各項目を新しい version に対して確かめる。
 
 | 制約 | 影響する箇所 |
 | --- | --- |
 | IAM policy engine は nested claim を扱えず、STS session 経由では配列 claim が文字列に潰れる | 設計の原則 / 認証と認可 |
 | STS signing key は決定論的な固定鍵が必須（無いと起動失敗） | 認証と認可 |
-| `DurationSeconds` の上限 43200s (12h) が固定値で、presigned URL の寿命は STS session に cap される | presigned URL の寿命 |
-| STS session は元の access token の有効期限で頭打ちになる（version に依存する。上記の pin 方針） | presigned URL の寿命 |
-| per-bucket quota は超過で bucket を read-only にし、write を HTTP 500 で拒否する | quota と TTL の実現 |
-| bucket の quota 設定値を読む S3 API が無い | quota と TTL の実現 / reference SPA |
+| STS session の長さは `DurationSeconds` で決まり、上限は `sts.maxSessionLength`。元の access token の有効期限では頭打ちにならない | presigned URL と一時 credentials の寿命 |
+| 一時 credentials の secret key は session token から導けず、session token を Bearer として受け付けない | presigned URL と一時 credentials の寿命 |
+| session token に access token の claim が書き込まれる | presigned URL と一時 credentials の寿命 / Keycloak client |
+| 同じ access token で `AssumeRoleWithWebIdentity` を何度でも呼べる（SPA はファイル操作用と presign 用に同じ token を使う） | reference SPA |
+| policy の action 名は操作ごとに SeaweedFS が決め、multipart upload の各操作は独自の名前を持つ。版を上げると操作と action が増える | 認証と認可 |
+| CreateBucket は Object Lock の有効化に権限を求めない。有効にした bucket は versioning が有効になり、削除しても古い version が残る | 認証と認可 / quota と TTL の実現 |
+| per-bucket quota は超過で bucket を read-only にし、write を HTTP 403 で拒否する | quota と TTL の実現 |
+| bucket の quota 設定値は S3 拡張（`?seaweedfs-quota`、action は `s3:GetBucketQuota` / `s3:PutBucketQuota`）で読み書きできる | 認証と認可 / quota と TTL の実現 |
 | 初回 PUT による bucket の auto-create は admin 権限限定で、STS 認証のユーザーには効かない | データの配置 |
 | bucket 作成時に S3 の bucket 命名規則を強制する | データの配置 |
 | master は volume 1 本のサイズ上限に 30720 MB (30 GiB) の天井を持つ | 運用（稼働の形） |
-| 認可エンジンは一部の bucket 操作（CreateBucket 等）を細粒度 action に解決しない | 認証と認可 |
-| `ListMultipartUploads` が `Initiated` を返さず、`IsTruncated` と marker が食い違うことがある | reference SPA / 運用（日次運用タスク） |
+| `ListObjectsV2` と `ListMultipartUploads` は `IsTruncated` と marker が食い違うことがある | reference SPA / 運用（日次運用タスク） |
 | 新規 collection（= bucket）への書き込みは default で volume を 7 本確保する | 運用（稼働の形） |
 | filer API（HTTP / gRPC）には S3 IAM の認可が効かない | 認証と認可 / ネットワーク境界 |

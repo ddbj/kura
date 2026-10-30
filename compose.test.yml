@@ -17,6 +17,6 @@ services:
         condition: service_started
 
   jwks:
-    image: docker.io/library/nginx:1.29-alpine
+    image: docker.io/library/nginx:1.30-alpine-slim
     volumes:
       - ./tests/setup/.jwks:/usr/share/nginx/html:ro

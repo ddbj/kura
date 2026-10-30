@@ -8,9 +8,10 @@ import { useConfig } from "~/lib/config"
 import { createS3Client } from "./client"
 import { createStsCredentialsProvider } from "./credentials"
 
-// Renew ahead of expiry so an STS session minted from this token does not die
-// mid-action.
-const MIN_TOKEN_REMAINING_S = 120
+// STS checks the access token only when it is called, and the session it
+// returns does not end with the token. The token just has to outlive the
+// round trip and the clock skew between the browser and the IdP.
+const MIN_TOKEN_REMAINING_S = 30
 
 // A large multipart upload can have many parts in flight at once, each
 // re-invoking the S3 SDK's credentials provider around the same time; without
@@ -37,19 +38,6 @@ const renewAccessToken = async (auth: AuthContextProps): Promise<string> => {
 export const freshAccessToken = async (auth: AuthContextProps): Promise<string> => {
   const user = auth.user
   if (user && typeof user.expires_in === "number" && user.expires_in > MIN_TOKEN_REMAINING_S) {
-    return user.access_token
-  }
-  return renewAccessToken(auth)
-}
-
-// presign's STS session length is capped by the access token's remaining
-// life, so renew whenever the cached token
-// would cut the requested duration short - otherwise a requested 12h presign
-// can silently get less if the token has, say, only 5 minutes left but is
-// still above freshAccessToken's MIN_TOKEN_REMAINING_S reuse threshold.
-export const accessTokenForDuration = async (auth: AuthContextProps, minRemainingS: number): Promise<string> => {
-  const user = auth.user
-  if (user && typeof user.expires_in === "number" && user.expires_in >= minRemainingS) {
     return user.access_token
   }
   return renewAccessToken(auth)

@@ -1,7 +1,7 @@
 import type { AuthContextProps } from "react-oidc-context"
 import { describe, expect, test, vi } from "vitest"
 
-import { accessTokenForDuration, freshAccessToken } from "~/lib/s3/use-s3"
+import { freshAccessToken } from "~/lib/s3/use-s3"
 
 const fakeAuth = ({ expiresIn, renewedToken = "renewed-token" }: {
   expiresIn: number | undefined
@@ -12,46 +12,41 @@ const fakeAuth = ({ expiresIn, renewedToken = "renewed-token" }: {
     signinSilent: vi.fn().mockResolvedValue({ access_token: renewedToken }),
   }) as unknown as AuthContextProps
 
+// STS only checks the access token when it is called; the session it returns
+// does not end with the token. The token just has to survive the round trip.
 describe("freshAccessToken", () => {
   test("remainingWellOverThreshold_reusesExistingToken", async () => {
-    const auth = fakeAuth({ expiresIn: 3600 })
+    const auth = fakeAuth({ expiresIn: 300 })
     await expect(freshAccessToken(auth)).resolves.toBe("stale-token")
     expect(auth.signinSilent).not.toHaveBeenCalled()
   })
 
-  test("remainingAtOrBelowThreshold_renews", async () => {
-    const auth = fakeAuth({ expiresIn: 120 })
-    await expect(freshAccessToken(auth)).resolves.toBe("renewed-token")
-    expect(auth.signinSilent).toHaveBeenCalledOnce()
-  })
-})
-
-describe("accessTokenForDuration", () => {
-  test("remainingCoversRequestedDuration_reusesExistingToken", async () => {
-    const auth = fakeAuth({ expiresIn: 3600 })
-    await expect(accessTokenForDuration(auth, 900)).resolves.toBe("stale-token")
+  test("remainingJustOverThreshold_reusesExistingToken", async () => {
+    const auth = fakeAuth({ expiresIn: 31 })
+    await expect(freshAccessToken(auth)).resolves.toBe("stale-token")
     expect(auth.signinSilent).not.toHaveBeenCalled()
   })
 
-  test("remainingShorterThanRequestedDuration_renewsEvenAboveGeneralThreshold", async () => {
-    // 300s remaining is above freshAccessToken's 120s reuse threshold, but
-    // short of the 900s (15 min) presign the caller asked for.
-    const auth = fakeAuth({ expiresIn: 300 })
-    await expect(accessTokenForDuration(auth, 900)).resolves.toBe("renewed-token")
+  test("remainingAtThreshold_renews", async () => {
+    const auth = fakeAuth({ expiresIn: 30 })
+    await expect(freshAccessToken(auth)).resolves.toBe("renewed-token")
+    expect(auth.signinSilent).toHaveBeenCalledOnce()
+  })
+
+  test("noUser_renews", async () => {
+    const auth = fakeAuth({ expiresIn: undefined })
+    await expect(freshAccessToken(auth)).resolves.toBe("renewed-token")
     expect(auth.signinSilent).toHaveBeenCalledOnce()
   })
 
   test("silentRenewReturnsNull_throws", async () => {
     const auth = { user: null, signinSilent: vi.fn().mockResolvedValue(null) } as unknown as AuthContextProps
-    await expect(accessTokenForDuration(auth, 900)).rejects.toThrow()
+    await expect(freshAccessToken(auth)).rejects.toThrow()
   })
 
   test("concurrentCallsNeedingRenewal_shareOneSigninSilentCall", async () => {
-    const auth = fakeAuth({ expiresIn: 60 })
-    const [first, second] = await Promise.all([
-      accessTokenForDuration(auth, 900),
-      accessTokenForDuration(auth, 900),
-    ])
+    const auth = fakeAuth({ expiresIn: 10 })
+    const [first, second] = await Promise.all([freshAccessToken(auth), freshAccessToken(auth)])
     expect(first).toBe("renewed-token")
     expect(second).toBe("renewed-token")
     expect(auth.signinSilent).toHaveBeenCalledOnce()
