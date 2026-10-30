@@ -147,10 +147,20 @@ test.describe("UPLOAD", () => {
         { timeout: 60_000 },
       )
 
+      // The row (and its cancel button) shows up while the conflict check is
+      // still in flight. Cancelling then leaves no multipart upload to abort,
+      // so wait until CreateMultipartUpload has answered: only then is the
+      // upload running.
+      const createdPromise = page.waitForResponse(
+        (res) => res.request().method() === "POST" && res.url().includes("?uploads"),
+        { timeout: 30_000 },
+      )
+
       await uploadFileFromPath(page, path)
       const row = page.locator(".upcard .urow").filter({ hasText: name })
       const cancelBtn = row.getByRole("button", { name: "キャンセル" })
       await cancelBtn.waitFor({ state: "visible", timeout: 15_000 })
+      await createdPromise
       await cancelBtn.click()
 
       await deletePromise
