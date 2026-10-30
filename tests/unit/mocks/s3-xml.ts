@@ -161,3 +161,39 @@ export const completeMultipartUploadXml = ({ bucket, key, etag }: {
   <Key>${escapeXml(key)}</Key>
   <ETag>&quot;${escapeXml(etag)}&quot;</ETag>
 </CompleteMultipartUploadResult>`
+
+// GetBucketVersioning: a bucket that never had versioning answers with no
+// <Status> at all.
+export const bucketVersioningXml = (status?: "Enabled" | "Suspended"): string => `<?xml version="1.0" encoding="UTF-8"?>
+<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">${status === undefined ? "" : `<Status>${status}</Status>`}</VersioningConfiguration>`
+
+type ListedVersion = {
+  key: string
+  versionId: string
+  isLatest: boolean
+}
+
+export const listObjectVersionsXml = ({ bucket, versions, deleteMarkers = [], nextKeyMarker, nextVersionIdMarker, truncatedNoMarker }: {
+  bucket: string
+  versions: ListedVersion[]
+  deleteMarkers?: ListedVersion[]
+  nextKeyMarker?: string
+  nextVersionIdMarker?: string
+  // Force IsTruncated=true without either Next* marker (pagination
+  // no-progress shape).
+  truncatedNoMarker?: boolean
+}): string => {
+  const isTruncated = truncatedNoMarker === true || nextKeyMarker !== undefined || nextVersionIdMarker !== undefined
+  const entry = (tag: string, v: ListedVersion) =>
+    `<${tag}><Key>${escapeXml(v.key)}</Key><VersionId>${escapeXml(v.versionId)}</VersionId><IsLatest>${v.isLatest ? "true" : "false"}</IsLatest><LastModified>2026-07-01T00:00:00.000Z</LastModified></${tag}>`
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<ListVersionsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>${escapeXml(bucket)}</Name>
+  <IsTruncated>${isTruncated ? "true" : "false"}</IsTruncated>
+  ${nextKeyMarker === undefined ? "" : `<NextKeyMarker>${escapeXml(nextKeyMarker)}</NextKeyMarker>`}
+  ${nextVersionIdMarker === undefined ? "" : `<NextVersionIdMarker>${escapeXml(nextVersionIdMarker)}</NextVersionIdMarker>`}
+  ${versions.map((v) => entry("Version", v)).join("\n  ")}
+  ${deleteMarkers.map((v) => entry("DeleteMarker", v)).join("\n  ")}
+</ListVersionsResult>`
+}

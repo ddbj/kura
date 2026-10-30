@@ -40,10 +40,14 @@
 
 - `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_OIDC_JWKS_URI`: 手順 1 の client
 - `KURA_S3_ENDPOINT` / `KURA_ALLOWED_HOSTS`: 外向きの FQDN。`KURA_S3_ALLOWED_ORIGINS` は全環境で `*`（origin は認可の境界ではない。[architecture.md](./architecture.md) の「ネットワーク境界」）
+- `KURA_UI_ORIGIN`: UI の外向きの origin（`https://<UI の FQDN>`。末尾に `/` を付けない）。robots.txt と sitemap.xml の絶対 URL に使う
+- `KURA_NOINDEX`: 検索エンジンに載せない環境（staging）は `true`、載せる環境（production）は空（[architecture.md](./architecture.md) の「SPA の配信」）
 - `KURA_BIND_ADDR`: gateway が別ホストから来るなら `0.0.0.0`。default の `127.0.0.1` では届かない
 - `KURA_SEAWEEDFS_DATA_DIR`: 手順 3 のディレクトリ
 - `KURA_HTTP_PORT` / `KURA_S3_PORT` / `KURA_SEAWEEDFS_DATA_DIR`: 同じホストに複数の環境を置くときは、環境ごとに違う値にする
 - `KURA_VOLUME_SIZE_LIMIT_MB`: 30720（= 30 GiB）以下。これを超える値は master が起動時に弾く
+- `KURA_VOLUME_MIN_FREE_SPACE`: データを大きな共有ファイルシステムに置くなら、容量（例: `100GiB`）で指定する（[operations.md](./operations.md) の「稼働の形」）
+- `KURA_LOG_DIR`: rootless podman で動かすとき、コンテナの出力を書く dir の絶対パス。`KURA_SEAWEEDFS_DATA_DIR` と別のディスクにし、同じホストに複数の環境を置くときは環境ごとに分ける。podman は `~/` を展開しない（[operations.md](./operations.md) の「コンテナの出力」）
 
 secret は新規に生成し、git 管理外の `.env` に置く（用途と差し替えの影響は [operations.md](./operations.md) の「secret 管理」）。
 
@@ -66,6 +70,8 @@ compose の project 名は `compose.yml` の `name`（production の名前）に
 
 rootless podman で共有ファイルシステム上に置く場合は、container 内の uid をホストの uid にマップする必要がある。`compose.podman.yml` の overlay がそれを担う。ホストユーザーに subuid / subgid の range が割り当てられていることも確認する。
 
+rootless podman で動かす場合は、`KURA_LOG_DIR` が指すディレクトリも最初の起動の前に作る。
+
 ## 4. image をビルドする
 
 web と ops の image は stack の起動前に作る。image には SPA のビルド結果が入り、デプロイ固有の設定はビルド時に bundle へ焼き込まれるため、環境ごとにその環境の env でビルドする。別環境向けの image を持ち込んではならない（[architecture.md](./architecture.md) の「reference SPA」「web と ops の image」）。
@@ -80,7 +86,7 @@ podman-compose の場合は手順 2 で merge した `.env` と overlay を使�
 podman-compose --env-file .env -f compose.yml -f compose.podman.yml build --pull
 ```
 
-ビルドが読む env は `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_S3_ENDPOINT`（必須。欠けるとビルドが失敗する）と `KURA_FILE_TTL_DAYS` / `KURA_QUOTA_DEFAULT_MB`（任意）の 5 つだけで、compose が build arg として渡す。secret は渡らない。`--pull` を付けると、base image の最新を取ってから作る。
+ビルドが読む env は `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_S3_ENDPOINT` / `KURA_UI_ORIGIN`（必須。欠けるとビルドが失敗する）と `KURA_FILE_TTL_DAYS` / `KURA_QUOTA_DEFAULT_MB` / `KURA_NOINDEX`（任意）の 7 つだけで、compose が build arg として渡す。secret は渡らない。`--pull` を付けると、base image の最新を取ってから作る。
 
 ## 5. stack を起動する
 
@@ -108,7 +114,8 @@ podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
    ```
 
    200 が返り、`Access-Control-Allow-Headers` に要求した header がそのまま並び、`Access-Control-Allow-Origin` が SPA origin と一致すること
-4. gateway の access log に upload / download / delete が client IP 付きで記録されること。kura の監査はこの log だけが情報源なので、記録されていることを管理者と確認する（[operations.md](./operations.md) の「監査ログ」）
+4. UI の FQDN の `/robots.txt` が `text/plain` で返り、production では `Sitemap:` の行が、`KURA_NOINDEX=true` の環境では `Disallow: /` の行があること
+5. gateway の access log に upload / download / delete が client IP 付きで記録されること。kura の監査はこの log だけが情報源なので、記録されていることを管理者と確認する（[operations.md](./operations.md) の「監査ログ」）
 
 ## 7. 配備先での実測
 
@@ -131,5 +138,7 @@ docker compose --env-file env.production --env-file .env up -d --force-recreate 
 ```
 
 podman-compose の場合は、同じ 2 つの command を `podman-compose --env-file .env -f compose.yml -f compose.podman.yml` で実行する。
+
+compose の file か `.env` を変えたときは、変わった設定を使う service を `up -d --force-recreate <service>` で作り直す。seaweedfs を作り直す間は S3 API が数秒止まる。発行済みの一時 credentials と presigned URL は、STS signing key が変わらない限り、作り直したあとも使える。
 
 SeaweedFS の pin を上げるときは、release notes を読み、[architecture.md](./architecture.md) の「SeaweedFS 由来の制約」の各項目を新しい version に対して確かめ、テスト一式が通ることを確認してから反映する。

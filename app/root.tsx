@@ -17,6 +17,7 @@ import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, 
 
 import { oidcProviderProps } from "~/lib/auth"
 import { ConfigProvider, readConfig } from "~/lib/config"
+import { parseNoindex } from "~/lib/crawl"
 import { LangProvider } from "~/lib/i18n"
 import { createQueryClient } from "~/lib/query"
 import { OverlayProviders } from "~/shell"
@@ -28,11 +29,17 @@ import type { Route } from "./+types/root"
 // ErrorBoundary instead of a blank page.
 export const clientLoader = () => readConfig()
 
+// Read here rather than through the clientLoader's config: the prerendered
+// index.html is what a crawler reads, and it is rendered before any loader
+// runs.
+const noindex = parseNoindex(import.meta.env["VITE_KURA_NOINDEX"])
+
 export const Layout = ({ children }: { children: ReactNode }) => (
   <html lang="ja">
     <head>
       <meta charSet="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
+      {noindex && <meta name="robots" content="noindex" />}
       <title>kura</title>
       <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       <Meta />

@@ -5,17 +5,41 @@
 #   到達できるよう userns を固定する。web / ops は host の directory を mount
 #   しないので不要
 # - label=disable は SELinux 環境向けの慣習 (他 DDBJ サービスと足並みを揃える)
+# - 各サービスの出力は journald ではなく KURA_LOG_DIR/<service>.log に書く。
+#   journald の保存量はホスト全体で決まり、他の出力が多いと web と ops の
+#   数行はすぐに消える。KURA_LOG_DIR はデータと別のディスクにする: podman は
+#   container の出力を読んでから書くので、書き込みが止まると stdout に書く
+#   process も止まる
+# - podman は healthcheck を 1 回実行するごとに journald に記録する。
+#   compose.yml の 2 秒 (テストの up --wait 用) ではホストの journald を埋める
+#   ので、間隔を延ばす
 
 services:
   seaweedfs:
     userns_mode: "keep-id:uid=1000,gid=1000"
     security_opt:
       - label=disable
+    healthcheck:
+      interval: 30s
+    logging:
+      driver: k8s-file
+      options:
+        path: ${KURA_LOG_DIR:?KURA_LOG_DIR is required}/seaweedfs.log
 
   web:
     security_opt:
       - label=disable
+    healthcheck:
+      interval: 30s
+    logging:
+      driver: k8s-file
+      options:
+        path: ${KURA_LOG_DIR:?KURA_LOG_DIR is required}/web.log
 
   ops:
     security_opt:
       - label=disable
+    logging:
+      driver: k8s-file
+      options:
+        path: ${KURA_LOG_DIR:?KURA_LOG_DIR is required}/ops.log

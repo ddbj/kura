@@ -39,7 +39,7 @@ UI は「kura の使い方の reference 実装」であり、ブラウザから 
 
 **領域は bucket そのもの**である。bucket 名は DDBJ account の username（access token の `preferred_username` claim）と等しく、ファイル `<user>/<path>` の実体は bucket `<user>` の object `<path>` になる。ユーザーは自分の bucket だけを読み書きでき、他人の bucket は読み・書き・一覧のすべてが拒否される。
 
-**bucket は client が作る。** 初回の upload の前に `HeadBucket` で存在を確かめ、無ければ `CreateBucket` する。kura 側での申請や事前登録は要らない。
+**bucket は client が作る。** 初回の upload の前に `HeadBucket` で存在を確かめ、無ければ `CreateBucket` する。kura 側での申請や事前登録は要らない。 `CreateBucket` に Object Lock を指定しない。指定すると bucket の versioning が有効になり、削除や上書きの前の中身が最長 1 日残って quota に数えられる。
 
 **username が S3 の bucket 命名規則に合わないユーザーは kura を利用できない。** DDBJ account の username のうち `_` を含むもの、`-` で終わるもの、3 文字未満のものが該当する。変換による救済はしていないので、該当するユーザーが利用対象に含まれる場合は kura の管理者に相談する。
 

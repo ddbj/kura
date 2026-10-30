@@ -3,6 +3,7 @@ import type { S3Client } from "@aws-sdk/client-s3"
 import { cleanupBucketUploads } from "./multipart.ts"
 import { listBucketNames, opsS3Client } from "./s3.ts"
 import { sweepBucketTtl } from "./ttl.ts"
+import { purgeOldVersions } from "./versions.ts"
 
 const parseDays = (name: string, raw: string): number => {
   const days = Number(raw)
@@ -26,14 +27,17 @@ const optionalDaysEnv = (name: string): number | null => {
   return raw === undefined || raw === "" ? null : parseDays(name, raw)
 }
 
-// One daily ops pass: file-TTL sweep (when enabled) and
-// stale multipart cleanup.
+// One daily ops pass: file-TTL sweep (when enabled), removal of old versions
+// in buckets with versioning on, and stale multipart cleanup. The version
+// removal runs after the TTL sweep, which in such a bucket only leaves delete
+// markers over the expired files.
 export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise<void> => {
   const ttlDays = optionalDaysEnv("KURA_FILE_TTL_DAYS")
   const multipartMaxAgeDays = daysEnv("KURA_MULTIPART_MAX_AGE_DAYS", 7)
 
   const buckets = await listBucketNames(s3)
   let ttlDeleted = 0
+  let versionsDeleted = 0
   let uploadsAborted = 0
   // One bucket's failure (transient S3 error, etc.) must not cost every other
   // bucket its TTL sweep / multipart cleanup.
@@ -51,6 +55,17 @@ export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise
           continue
         }
       }
+      const purge = await purgeOldVersions(s3, bucket)
+      if (purge.versioned) {
+        versionsDeleted += purge.deleted
+        // Named every day so the admin can see which user made such a bucket.
+        console.log(`kura-ops: bucket ${bucket} has versioning on (created with Object Lock): deleted ${purge.deleted} old version(s) and delete marker(s)`)
+        if (purge.failed > 0) {
+          failedBuckets.push(bucket)
+          console.error(`kura-ops: bucket ${bucket}: ${purge.failed} old version(s) could not be deleted`)
+          continue
+        }
+      }
       uploadsAborted += await cleanupBucketUploads(s3, bucket, multipartMaxAgeDays, now)
     } catch (err) {
       failedBuckets.push(bucket)
@@ -61,6 +76,7 @@ export const runDaily = async (now: Date, s3: S3Client = opsS3Client()): Promise
   console.log(
     `kura-ops: daily pass done: buckets=${buckets.length}`
     + ` ttlDeleted=${ttlDays === null ? "off" : ttlDeleted}`
+    + ` versionsDeleted=${versionsDeleted}`
     + ` uploadsAborted=${uploadsAborted}`
     + (failedBuckets.length === 0 ? "" : ` failedBuckets=${failedBuckets.join(",")}`),
   )

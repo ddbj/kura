@@ -10,6 +10,8 @@ import { join, resolve } from "node:path"
 import type { Plugin } from "vite"
 import { preview } from "vite"
 
+import { CRAWL_FILES } from "../app/lib/crawl.ts"
+
 const outDir = resolve(process.cwd(), "build/client")
 
 // vite always accepts localhost and bare IPs; any other Host — the name the
@@ -23,7 +25,12 @@ const allowedHosts = (process.env["KURA_ALLOWED_HOSTS"] ?? "")
 // makes /browse/* and /auth/callback resolve on a direct hit. Build assets
 // must be exempt: a browser holding a cached index.html from before a
 // redeploy asks for asset names that no longer exist, and answering those
-// with 200 text/html turns a missing file into a confusing MIME error.
+// with 200 text/html turns a missing file into a confusing MIME error. The
+// crawler files are exempt for the same reason: a deployment kept out of
+// search engines has no sitemap.xml, and a crawler must not read index.html
+// as one.
+const crawlPaths: readonly string[] = CRAWL_FILES.map((name) => `/${name}`)
+
 const assetNotFound = (): Plugin => ({
   name: "kura-asset-404",
   configurePreviewServer: (server) => {
@@ -35,7 +42,7 @@ const assetNotFound = (): Plugin => ({
       } catch {
         return next()
       }
-      if (!pathname.startsWith("/assets/")) return next()
+      if (!pathname.startsWith("/assets/") && !crawlPaths.includes(pathname)) return next()
       // A ".." inside an asset path is never a real asset name. Answering 404
       // without resolving it keeps this middleware out of path arithmetic and
       // still avoids the SPA fallback replying to an asset request with HTML.

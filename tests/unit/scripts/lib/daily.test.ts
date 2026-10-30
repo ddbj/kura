@@ -3,7 +3,7 @@ import { http, HttpResponse } from "msw"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { runDaily } from "../../../../scripts/lib/daily.ts"
-import { deleteObjectsXml, listBucketsXml, listMultipartUploadsXml } from "../../mocks/s3-xml"
+import { bucketVersioningXml, deleteObjectsXml, listBucketsXml, listMultipartUploadsXml, listObjectVersionsXml } from "../../mocks/s3-xml"
 import { server } from "../../mocks/server"
 
 const ENDPOINT = "http://localhost:28333"
@@ -34,6 +34,9 @@ const seedS3 = ({ buckets, fail500 = new Set<string>() }: {
           return new HttpResponse("boom", { status: 500 })
         }
         const url = new URL(request.url)
+        if (url.searchParams.has("versioning")) {
+          return HttpResponse.xml(bucketVersioningXml())
+        }
         if (url.searchParams.has("uploads")) {
           return HttpResponse.xml(listMultipartUploadsXml({ bucket: name, uploads: [] }))
         }
@@ -86,6 +89,9 @@ describe("runDaily bucket isolation", () => {
 </ListAllMyBucketsResult>`)),
       http.get(`${ENDPOINT}/dave`, ({ request }) => {
         const url = new URL(request.url)
+        if (url.searchParams.has("versioning")) {
+          return HttpResponse.xml(bucketVersioningXml())
+        }
         if (url.searchParams.has("uploads")) {
           return HttpResponse.xml(listMultipartUploadsXml({ bucket: "dave", uploads: [] }))
         }
@@ -103,5 +109,32 @@ describe("runDaily bucket isolation", () => {
 
     await expect(runDaily(new Date(), opsClient())).resolves.toBeUndefined()
     expect(bareBucketHits).toBe(0)
+  })
+})
+
+describe("runDaily versioned buckets", () => {
+  // A versioned bucket whose old versions could not all be deleted has to
+  // reach the retry backoff like any other failed delete.
+  it("versionDelete_fails_passRejectsNamingBucket", async () => {
+    server.use(
+      http.get(`${ENDPOINT}/`, () => HttpResponse.xml(listBucketsXml([{ name: "erin" }]))),
+      http.get(`${ENDPOINT}/erin`, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.has("versioning")) return HttpResponse.xml(bucketVersioningXml("Enabled"))
+        if (url.searchParams.has("versions")) {
+          return HttpResponse.xml(listObjectVersionsXml({ bucket: "erin", versions: [{ key: "a.txt", versionId: "a1", isLatest: false }] }))
+        }
+        return HttpResponse.xml(listMultipartUploadsXml({ bucket: "erin", uploads: [] }))
+      }),
+      http.post(`${ENDPOINT}/erin`, () => HttpResponse.xml(deleteObjectsXml({
+        deleted: [],
+        errors: [{ key: "a.txt", code: "InternalError", message: "boom" }],
+      }))),
+    )
+
+    vi.stubEnv("KURA_FILE_TTL_DAYS", "")
+    vi.stubEnv("KURA_MULTIPART_MAX_AGE_DAYS", "7")
+
+    await expect(runDaily(new Date(), opsClient())).rejects.toThrow(/erin/)
   })
 })

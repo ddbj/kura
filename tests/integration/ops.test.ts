@@ -3,14 +3,18 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
+  CreateBucketCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  GetBucketVersioningCommand,
   ListMultipartUploadsCommand,
   ListObjectsV2Command,
+  ListObjectVersionsCommand,
   UploadPartCommand,
 } from "@aws-sdk/client-s3"
 import { describe, expect, inject, it } from "vitest"
 
-import { eventually, putText, setupUser, weedShell } from "./_helpers"
+import { assumeRole, eventually, putText, rootS3Client, s3ClientFor, setupUser, signToken, uniqueUser, weedShell } from "./_helpers"
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -93,6 +97,75 @@ describe("file TTL sweep", () => {
     await putText(s3, username, "forever.txt", "f")
 
     runOpsDaily(daysFromNow(10_000), { KURA_FILE_TTL_DAYS: "" })
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    expect(listed.Contents?.length).toBe(1)
+  })
+})
+
+// A user who creates their bucket with Object Lock gets versioning, which kura
+// does not offer: what they delete or overwrite stays behind, out of their
+// reach and counted against their quota.
+describe("old versions in a bucket created with Object Lock", () => {
+  const setupObjectLockUser = async () => {
+    const username = uniqueUser()
+    const s3 = s3ClientFor(await assumeRole(await signToken({ username })))
+    await s3.send(new CreateBucketCommand({ Bucket: username, ObjectLockEnabledForBucket: true }))
+
+    return { username, s3 }
+  }
+
+  const listVersions = async (bucket: string) => {
+    const res = await rootS3Client().send(new ListObjectVersionsCommand({ Bucket: bucket }))
+
+    return {
+      versions: (res.Versions ?? []).map((v) => `${v.Key ?? "?"}:${v.IsLatest === true ? "latest" : "old"}`).sort(),
+      deleteMarkers: (res.DeleteMarkers ?? []).length,
+    }
+  }
+
+  it("turns versioning on, which the cleanup relies on to find the bucket", async () => {
+    const { username } = await setupObjectLockUser()
+    const res = await rootS3Client().send(new GetBucketVersioningCommand({ Bucket: username }))
+    expect(res.Status).toBe("Enabled")
+  })
+
+  it("deletes old versions and delete markers, keeps the files the owner sees", async () => {
+    const { username, s3 } = await setupObjectLockUser()
+    await putText(s3, username, "a.txt", "one")
+    await putText(s3, username, "a.txt", "two")
+    await putText(s3, username, "b.txt", "gone")
+    await s3.send(new DeleteObjectCommand({ Bucket: username, Key: "b.txt" }))
+    await putText(s3, username, "empty/.keep", "")
+
+    // The ops container of the test stack runs the same pass every few
+    // seconds, so the state before this run is not asserted: either pass may
+    // be the one that cleans up.
+    const out = runOpsDaily(daysFromNow(0), { KURA_FILE_TTL_DAYS: "" })
+
+    expect(await listVersions(username)).toEqual({ versions: ["a.txt:latest", "empty/.keep:latest"], deleteMarkers: 0 })
+    expect(out).toContain(`bucket ${username} has versioning on`)
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    expect((listed.Contents ?? []).map((o) => o.Key).sort()).toEqual(["a.txt", "empty/.keep"])
+  })
+
+  // The TTL sweep only lays delete markers over expired files in such a
+  // bucket; the same pass has to take the content away too.
+  it("leaves nothing of a file past the TTL", async () => {
+    const { username, s3 } = await setupObjectLockUser()
+    await putText(s3, username, "old.txt", "x")
+
+    runOpsDaily(daysFromNow(31))
+
+    expect(await listVersions(username)).toEqual({ versions: [], deleteMarkers: 0 })
+  })
+
+  it("leaves a bucket without versioning out of the report", async () => {
+    const { username, s3 } = await setupUser()
+    await putText(s3, username, "plain.txt", "p")
+
+    const out = runOpsDaily(daysFromNow(0), { KURA_FILE_TTL_DAYS: "" })
+
+    expect(out).not.toContain(`bucket ${username} has versioning on`)
     const listed = await s3.send(new ListObjectsV2Command({ Bucket: username }))
     expect(listed.Contents?.length).toBe(1)
   })

@@ -16,6 +16,10 @@ services:
       # master が起動時に弾く上限は 30720 (= 30 GiB、4-byte offset ビルドの
       # VolumeSizeLimitGB)。KURA_VOLUME_SIZE_LIMIT_MB はこれ以下にする。
       - -master.volumeSizeLimitMB=${KURA_VOLUME_SIZE_LIMIT_MB}
+      # データのファイルシステムの空きがこれを下回ると、全 volume が read-only に
+      # なる。既定は SeaweedFS と同じ 1%。大きな共有ファイルシステムでは 1% でも
+      # kura が使う量よりずっと大きいので、容量 (例: 100GiB) で指定する。
+      - -volume.minFreeSpace=${KURA_VOLUME_MIN_FREE_SPACE:-1}
       - -volume.port=8082
       - -filer
       - -filer.port=8888
@@ -72,6 +76,8 @@ services:
         KURA_S3_ENDPOINT: ${KURA_S3_ENDPOINT}
         KURA_FILE_TTL_DAYS: ${KURA_FILE_TTL_DAYS:-}
         KURA_QUOTA_DEFAULT_MB: ${KURA_QUOTA_DEFAULT_MB:-}
+        KURA_UI_ORIGIN: ${KURA_UI_ORIGIN}
+        KURA_NOINDEX: ${KURA_NOINDEX:-}
     restart: unless-stopped
     command: ["node", "scripts/serve-spa.ts"]
     environment:

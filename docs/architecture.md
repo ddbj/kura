@@ -83,6 +83,8 @@ SPA が使用量メーターに出す上限は、ビルド時に焼き込んだ�
 
 全ファイル TTL は、作成時刻に TTL を足した時刻を過ぎた object を削除する日次の運用スクリプトで実現する。SeaweedFS の volume TTL は使わない。失効後も一覧に残り、読み出しだけがエラーになる断片状態が生じるためである。S3 lifecycle も使わない。bucket ごとのルール適用と worker の運用が必要になる割に、単純な日次削除と結果が変わらないためである。
 
+ユーザーが CLI で Object Lock を有効にして bucket を作ると、その bucket は versioning が有効になり、削除や上書きをしても古い version が残る。CreateBucket が Object Lock の有効化に権限を求めないためである（「SeaweedFS 由来の制約」）。古い version は quota の使用量に数えられるが、一般ユーザーの policy は version を一覧・削除する操作を許さないので、ユーザーは古い version を消せない。そこで日次の運用スクリプトが、versioning が有効な bucket の古い version と delete marker を、TTL の設定に関係なくすべて削除する。一般ユーザーは versioning を変える操作も許されないので、versioning が有効な bucket は Object Lock を有効にして作った bucket だけである。kura は versioning を提供しないので（[requirements.md](./requirements.md) の Non-goals）、削除と上書きの結果は 1 日以内に他の bucket と同じになる。retention と legal hold は一般ユーザーの policy が許さないので、消せない version は作られない。
+
 ## ネットワーク境界
 
 外部に出る endpoint は S3 API と SPA 配信の 2 つだけで、filer（HTTP / gRPC）と master は compose の内部 network に閉じる。
@@ -91,7 +93,7 @@ SPA が使用量メーターに出す上限は、ビルド時に焼き込んだ�
 
 CORS には SeaweedFS だけが応答する。preflight OPTIONS は SeaweedFS が単独で完結させる（auth 不要、200）。許可 origin は起動 flag（env `KURA_S3_ALLOWED_ORIGINS`）で渡し、そこから全 bucket 共通の fallback CORS config が生成される。この値は全環境で `*` にする。kura は cookie も ambient credential も使わず、認可は SigV4 署名（= 一時 credentials を持っていること）だけで決まるので、origin は認可の境界にならない。列挙しても防げるものが無い一方、ユーザーが権限を委譲した SP の origin が増えるたびに設定変更とコンテナ再作成が要る。この config は `AllowedHeaders: ["*"]` を持ち、SeaweedFS はこれを「preflight の `Access-Control-Request-Headers` を verbatim で echo する」意味で扱う。おかげで AWS SDK が付ける header 群（`amz-sdk-*` / `x-amz-*` / 将来追加される checksum バリアント等）を gateway 側で列挙する必要が無い。
 
-この形を保つために、一般ユーザーには `s3:PutBucketCors` / `s3:DeleteBucketCors` を Deny して per-bucket CORS による fallback の無効化を防ぎ、gateway と SPA 配信 server は `Access-Control-*` を付けず preflight も短絡させない。結果として全環境で CORS の応答経路が単一化される。
+この形を保つために、一般ユーザーの policy は per-bucket の CORS を設定する操作を許さず（「認証と認可」）、per-bucket CORS による fallback の無効化を防ぐ。gateway と SPA 配信 server は `Access-Control-*` を付けず、preflight も短絡させない。結果として全環境で CORS の応答経路が単一化される。
 
 ## Keycloak client
 
@@ -111,11 +113,17 @@ reference SPA の静的ビルドは vite の preview server が配信する。�
 
 起動は設定ファイルを介さず、`configFile: false` で preview server を直接起動する運用スクリプトで行う。設定ファイル（`vite.config.ts`）は build plugin を import するが、runtime の image には devDependencies を入れないので、読み込めないためである。
 
-`appType` は `spa` で、未知のパスは index.html に fallback する。SPA route の直接アクセスはこれで成立する。ただしビルド asset（`/assets/`）は fallback の対象外にし、存在しなければ 404 を返す。再デプロイ前の index.html をキャッシュしたブラウザが古い asset 名を要求したとき、HTML が 200 で返ると MIME エラーという分かりにくい壊れ方をするためである。
+`appType` は `spa` で、未知のパスは index.html に fallback する。SPA route の直接アクセスはこれで成立する。ただしビルド asset（`/assets/`）と、検索エンジンとプログラム向けの 3 つのファイル（下記）は fallback の対象外にし、存在しなければ 404 を返す。再デプロイ前の index.html をキャッシュしたブラウザが古い asset 名を要求したとき、HTML が 200 で返ると MIME エラーという分かりにくい壊れ方をするためである。3 つのファイルも、HTML が 200 で返ると crawler が HTML を robots.txt や sitemap として読む。
 
 `allowedHosts` には外向きの host 名を設定する。vite は localhost と IP 直打ち以外の Host を既定で拒否するので、設定しないと gateway 経由の request が通らない。
 
 死活監視のための専用 endpoint は持たず、healthcheck は `/`（index.html）の取得で判定する。CORS には応答しない。この process を通るのは SPA の asset だけで、ファイルの byte は 1 バイトも通らない。
+
+検索エンジンとプログラム向けに、`/robots.txt`・`/sitemap.xml`・`/llms.txt` を SPA のビルドで `build/client` に書き出す。中身は環境ごとに違うので、SPA と同じく build 時の env で決まる（「reference SPA」）。
+
+- 検索エンジンに載せるのはトップページ（`/`）だけである。`/browse` 以下はログインした人の領域の一覧で、`/auth/` 以下はログインの途中のページなので、robots.txt でクロールを拒否する。sitemap.xml にはトップページだけを書く。robots.txt と sitemap.xml には絶対 URL が要るので、UI origin（`KURA_UI_ORIGIN`）を build 時に焼き込む
+- `KURA_NOINDEX` を `true` にした環境では、robots.txt で `/llms.txt` 以外のクロールを拒否し、sitemap.xml を作らず、index.html に noindex の meta を付ける。staging は production と同じ画面なので、検索結果に production と並んで出ないようにするためである
+- `/llms.txt` には、kura の説明と、プログラムから使う方法（S3 endpoint、OIDC issuer と client id、device flow で取った access token を `AssumeRoleWithWebIdentity` に渡すこと、bucket 名が username であること）を英語の Markdown で書き、詳しい手順として [sp-integration.md](./sp-integration.md) の GitHub の URL を示す。プログラムで使う読み手（LLM の agent など）に、画面ではなく S3 API を使ってもらうためである。`KURA_NOINDEX` の環境でも robots.txt で読めるようにする
 
 ## web と ops の image
 
@@ -127,7 +135,7 @@ base image は node の LTS の major の tag（`node:26-alpine`）を使い、p
 
 SPA は kura の使い方の reference である。S3 API と STS を直接叩き、同じ操作は CLI（aws cli / curl）でもできる。SPA が無くても kura は成立する。React Router v8 の SPA モード（`ssr: false`）で、BFF は無い。要求する role は `KuraUserRole` だけで、SPA から admin 権限は取れない。
 
-デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / ファイル TTL / quota の既定値）は build 時に bundle へ焼き込む。したがって image は環境ごとにその環境の env でビルドする。runtime の設定 JSON は持たない。OIDC の redirect URI だけは `window.location.origin` から導出するので設定に含めない。
+デプロイ固有の設定（OIDC issuer / client id / S3 endpoint / ファイル TTL / quota の既定値 / UI origin / 検索エンジンに載せるか）は build 時に bundle と静的ファイルへ焼き込む。したがって image は環境ごとにその環境の env でビルドする。runtime の設定 JSON は持たない。OIDC の redirect URI は、UI origin の設定ではなく、開いているページの origin（`window.location.origin`）から導出する。
 
 以下は、コードを読んでも意図が復元しにくい判断である。
 
@@ -162,6 +170,7 @@ SeaweedFS は release tag に pin して配備する。現在の pin は `4.51` 
 | 初回 PUT による bucket の auto-create は admin 権限限定で、STS 認証のユーザーには効かない | データの配置 |
 | bucket 作成時に S3 の bucket 命名規則を強制する | データの配置 |
 | master は volume 1 本のサイズ上限に 30720 MB (30 GiB) の天井を持つ | 運用（稼働の形） |
+| volume server は、データのファイルシステムの空きが `-volume.minFreeSpace`（既定は 1%）を下回ると全 volume を read-only にする | 運用（稼働の形） |
 | `ListObjectsV2` と `ListMultipartUploads` は `IsTruncated` と marker が食い違うことがある | reference SPA / 運用（日次運用タスク） |
 | 新規 collection（= bucket）への書き込みは default で volume を 7 本確保する | 運用（稼働の形） |
 | filer API（HTTP / gRPC）には S3 IAM の認可が効かない | 認証と認可 / ネットワーク境界 |

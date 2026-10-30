@@ -14,6 +14,8 @@ compose の 3 サービスで完結する。
 
 ストレージの構成は per-user bucket に合わせてある。bucket ごとに collection を消費するため、volume は 1 本ずつ増やし（entrypoint が生成する master.toml）、volume 数の上限は空きディスクからの自動算出に任せる。volume 1 本のサイズ上限は `KURA_VOLUME_SIZE_LIMIT_MB` で、100 GB クラスのファイルは複数 volume に分割保存されるので、この上限が実使用を制限することはない。
 
+データのファイルシステムの空きが `KURA_VOLUME_MIN_FREE_SPACE`（SeaweedFS の `-volume.minFreeSpace`）を下回ると、SeaweedFS は全 volume を read-only にし、全ユーザーの upload を拒否する。既定は SeaweedFS と同じ 1% である。データを大きな共有ファイルシステムに置く環境では、容量（例: `100GiB`）で指定する。共有ファイルシステムでは 1% でも kura が使う量よりずっと大きく、空きが十分にあるうちに upload が止まるためである。
+
 定期実行はすべて compose の中で完結する。ホスト側に cron や systemd timer は置かない。
 
 ## 環境と env
@@ -48,7 +50,9 @@ secret は env で渡し、repo・image・env の example ファイルには含�
 
 default quota reconciler は seaweedfs コンテナの entrypoint 内のループで、quota 未設定の bucket に `KURA_QUOTA_DEFAULT_MB` を適用する。
 
-ops サービスは 2 つのタスクを持つ。1 つは全ファイル TTL の削除（「全ファイル TTL」参照）。もう 1 つは放置された multipart upload の掃除で、part の最終アップロードから `KURA_MULTIPART_MAX_AGE_DAYS`（default 7）日を超えた未完了 upload を破棄する。中断した upload の再開猶予がこの日数になる。未完了の part は一覧に見えないまま bucket の容量を消費するので、この掃除が容量リークを防いでいる。part を 1 つも持たない upload は日付を決められないため対象外で、容量も消費していない。
+ops サービスは 3 つのタスクを持つ。1 つ目は全ファイル TTL の削除（「全ファイル TTL」参照）。2 つ目は放置された multipart upload の掃除で、part の最終アップロードから `KURA_MULTIPART_MAX_AGE_DAYS`（default 7）日を超えた未完了 upload を破棄する。中断した upload の再開猶予がこの日数になる。未完了の part は一覧に見えないまま bucket の容量を消費するので、この掃除が容量リークを防いでいる。part を 1 つも持たない upload は日付を決められないため対象外で、容量も消費していない。
+
+3 つ目は、versioning が有効な bucket の古い version と delete marker の削除である。TTL の設定に関係なく、毎回すべて消す。versioning が有効になるのは、ユーザーが CLI で Object Lock を有効にして作った bucket だけである（[architecture.md](./architecture.md) の「quota と TTL の実現」）。対象の bucket があると、ops はその bucket 名と消した数を出力に書く。
 
 削除に失敗した object が 1 つでもあれば、その bucket はその回の失敗として扱われ、上記の再試行に乗る。
 
@@ -78,7 +82,7 @@ quota を超過すると bucket が read-only になり、upload がエラーで
 
 TTL は `KURA_FILE_TTL_DAYS`（日数。空なら無効で、これが default）で設定する。SPA はこの値をビルド時に取り込んで各ファイルの有効期限表示に使うので、TTL の変更は image の再ビルドと web・ops の再作成を伴う（[deployment.md](./deployment.md) の「更新」）。
 
-削除は ops の日次タスクが行う。作成時刻（S3 の LastModified。object は不変なので作成時刻と一致する）に TTL を足した時刻を過ぎた object を、全 bucket から削除する。したがって削除の粒度は実行間隔（日次）になる。空フォルダを表す `.keep` marker は、年齢に関わらず対象外である。ユーザーが Object Lock を有効にして作った bucket は versioning が有効なので、削除しても古い version が残る（[architecture.md](./architecture.md) の「SeaweedFS 由来の制約」）。
+削除は ops の日次タスクが行う。作成時刻（S3 の LastModified。object は不変なので作成時刻と一致する）に TTL を足した時刻を過ぎた object を、全 bucket から削除する。したがって削除の粒度は実行間隔（日次）になる。空フォルダを表す `.keep` marker は、年齢に関わらず対象外である。versioning が有効な bucket で TTL の削除が残した古い version は、同じ日次タスクの 3 つ目の処理が消す。
 
 ## admin 操作
 
@@ -108,6 +112,20 @@ path に含まれる bucket 名が username なので、操作は対象ユーザ
 
 保持期間は gateway 側の access log の運用に従う。kura は独自の保持期間を規定せず、log の保存にも rotate にも関与しない。閲覧手段は当面ホスト上での直接参照で、閲覧 UI は持たない。記録の内容が足りない場合は、SeaweedFS の audit log 機構（`-s3.auditLogConfig`、fluentd 形式）による構造化 event の取得を追加する。
 
+## コンテナの出力
+
+rootless podman で配備したコンテナの出力（stdout と stderr）は、`compose.podman.yml` の設定で `KURA_LOG_DIR/<service>.log`（`seaweedfs.log`・`web.log`・`ops.log`）に書く（podman の log driver の `k8s-file`）。各行の先頭に時刻と `stdout` / `stderr` が付く。日次タスクの結果は ops の出力に 1 回ごとに 1 行出て、失敗は stderr に出る。
+
+- podman の既定の journald に書かないのは、ホストの journald の保存量がホスト全体で決まるためである。同じホストの他の出力が多いと、数十分前の行も消える。web は起動したときに、ops は日次タスクの 1 回ごとに数行しか書かないので、journald ではすぐに読めなくなる。
+- `KURA_LOG_DIR` は `KURA_SEAWEEDFS_DATA_DIR` と別のディスクにする。データのディスクが止まったときのエラーを残すためである。同じディスクに書くと、ログの書き込みが止まったときに、stdout に書こうとした process も止まる。
+- コンテナを作り直しても、同じファイルに追記する。ファイルは消さず、ローテーションもしない。増えるのは主に seaweedfs の出力で、データのディスクの使用率が 95% を超えている間は数秒に 1 行出る（1 環境で年 2 GB 程度）。
+- 配備先では healthcheck の間隔を 30 秒にする（`compose.podman.yml`）。podman は healthcheck を 1 回実行するごとに journald に記録するので、`compose.yml` の 2 秒のままだと、kura の記録がホストの journald を埋めて、同じホストの他のサービスのログを押し出す。2 秒は、dev とテストで `up --wait` を早く終えるための値である。
+
+```sh
+tail -f <KURA_LOG_DIR>/ops.log          # 日次タスクの結果を見る
+grep ' stderr ' <KURA_LOG_DIR>/ops.log  # 日次タスクのエラーを見る
+```
+
 ## 監視とバックアップ
 
 データのバックアップは行わない。kura は TTL を前提とした一時的な受け渡し場所であり、データの保全は利用者の責任とする（必要なデータは手元にも持ってもらう）。
@@ -115,5 +133,5 @@ path に含まれる bucket 名が username なので、操作は対象ユーザ
 監視は 3 点から始める。
 
 - 死活: SPA 配信の `/` と S3 API の `/healthz` への HTTP 監視
-- 容量: データディレクトリのディスク使用量。volume 数の上限は空きディスクから自動算出されるため、ディスク逼迫は新規書き込みの失敗として現れる
-- コンテナの稼働状態: ops サービスの停止は、TTL 削除と multipart 掃除の停止を意味する
+- 容量: データディレクトリのファイルシステムの空き。空きが `KURA_VOLUME_MIN_FREE_SPACE` を下回ると、全ユーザーの upload が止まる（「稼働の形」）
+- コンテナの稼働状態: ops サービスの停止は、日次運用タスクの停止を意味する。日次タスクの失敗は ops の出力の stderr に出る（「コンテナの出力」）

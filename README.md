@@ -34,9 +34,9 @@ kura の実態は SeaweedFS（S3 + STS + IAM）の設定群であり、独自の
 | `docs/` | 仕様。下の索引を参照 |
 | `Dockerfile` | web と ops の image。SPA のビルドと、本番用の依存 package だけを入れた runtime を分ける |
 | `compose.yml` | stack 本体（seaweedfs / web / ops の 3 サービス） |
-| `compose.podman.yml` | rootless podman 用の overlay |
+| `compose.podman.yml` | rootless podman で配備するときの overlay（userns、コンテナの出力のファイル、healthcheck の間隔） |
 | `compose.test.yml` | テスト用の overlay（JWKS 配信を足す） |
-| `env.dev` `env.production` `env.test` | 環境ごとの設定値。secret は含まない |
+| `env.dev` `env.staging` `env.production` `env.test` | 環境ごとの設定値。secret は含まない |
 
 ## 開発
 
@@ -71,7 +71,7 @@ npm run lint
 | --- | --- |
 | [docs/requirements.md](./docs/requirements.md) | 要求仕様。kura が利用者に約束すること、および扱わないこと |
 | [docs/architecture.md](./docs/architecture.md) | 設計。構成、認証と認可、presign の寿命、quota と TTL、SPA の位置づけ、SeaweedFS 由来の制約 |
-| [docs/operations.md](./docs/operations.md) | 運用。env と secret、日次運用タスク、quota、TTL、admin 操作、監査ログ、監視 |
+| [docs/operations.md](./docs/operations.md) | 運用。env と secret、日次運用タスク、quota、TTL、admin 操作、監査ログ、コンテナの出力、監視 |
 | [docs/deployment.md](./docs/deployment.md) | 配備手順。新しい環境に置くとき上から実行する |
 | [docs/sp-integration.md](./docs/sp-integration.md) | SP 向け利用ガイド。公開中の kura の接続先、S3 client（aws cli）からの利用、委譲のための Keycloak client 設定 |
 | [tests/README.md](./tests/README.md) | テストの層と走らせ方 |

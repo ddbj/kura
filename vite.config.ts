@@ -6,6 +6,8 @@ import tailwindcss from "@tailwindcss/vite"
 import type { Plugin } from "vite"
 import { defineConfig } from "vite"
 
+import { crawlFiles, isHttpOrigin, parseNoindex } from "./app/lib/crawl.ts"
+
 const appDir = fileURLToPath(new URL("./app", import.meta.url))
 const envDevPath = fileURLToPath(new URL("./env.dev", import.meta.url))
 
@@ -19,15 +21,19 @@ const BUILD_ENV = [
   "KURA_S3_ENDPOINT",
   "KURA_FILE_TTL_DAYS",
   "KURA_QUOTA_DEFAULT_MB",
+  "KURA_UI_ORIGIN",
+  "KURA_NOINDEX",
 ] as const
 
-// Values without which the SPA cannot reach Keycloak or S3. The file TTL and
-// the quota default are deliberately absent: both have a meaningful fallback
-// (no TTL / the specified 1 TB).
+// Values without which the SPA cannot reach Keycloak or S3, or robots.txt and
+// sitemap.xml cannot write an absolute URL. The file TTL, the quota default
+// and noindex are deliberately absent: each has a meaningful fallback (no TTL
+// / the specified 1 TB / listed in search engines).
 const REQUIRED_BUILD_ENV = [
   "VITE_KURA_OIDC_ISSUER",
   "VITE_KURA_OIDC_CLIENT_ID",
   "VITE_KURA_S3_ENDPOINT",
+  "VITE_KURA_UI_ORIGIN",
 ] as const
 
 const parseEnvFile = (path: string): Record<string, string> =>
@@ -85,13 +91,39 @@ const requireBuildEnv = (): Plugin => ({
     if (missing.length > 0) {
       throw new Error(`kura build: missing required env: ${missing.join(", ")}`)
     }
+    const uiOrigin = process.env["VITE_KURA_UI_ORIGIN"] ?? ""
+    if (!isHttpOrigin(uiOrigin)) {
+      throw new Error(`kura build: KURA_UI_ORIGIN must be an http(s) origin without a trailing slash, got ${JSON.stringify(uiOrigin)}`)
+    }
+    parseNoindex(process.env["VITE_KURA_NOINDEX"])
+  },
+})
+
+// robots.txt, sitemap.xml and llms.txt (app/lib/crawl.ts), written into the
+// client build next to the bundle. react-router also runs an ssr build to
+// prerender index.html; its output is discarded, so it emits nothing.
+const emitCrawlFiles = (): Plugin => ({
+  name: "kura-crawl-files",
+  apply: "build",
+  generateBundle() {
+    if (this.environment.name !== "client") return
+    const files = crawlFiles({
+      uiOrigin: process.env["VITE_KURA_UI_ORIGIN"] ?? "",
+      noindex: parseNoindex(process.env["VITE_KURA_NOINDEX"]),
+      s3Endpoint: process.env["VITE_KURA_S3_ENDPOINT"] ?? "",
+      oidcIssuer: process.env["VITE_KURA_OIDC_ISSUER"] ?? "",
+      oidcClientId: process.env["VITE_KURA_OIDC_CLIENT_ID"] ?? "",
+    })
+    for (const [fileName, source] of Object.entries(files)) {
+      this.emitFile({ type: "asset", fileName, source })
+    }
   },
 })
 
 export default defineConfig({
   // devEnvFromEnvDev fills in KURA_* from env.dev before publishBuildEnv
   // renames them, so the dev plugin has to run first.
-  plugins: [tailwindcss(), reactRouter(), devEnvFromEnvDev(), publishBuildEnv(), requireBuildEnv()],
+  plugins: [tailwindcss(), reactRouter(), devEnvFromEnvDev(), publishBuildEnv(), requireBuildEnv(), emitCrawlFiles()],
   resolve: {
     alias: { "~": appDir },
   },

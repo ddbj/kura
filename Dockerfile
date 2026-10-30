@@ -21,6 +21,8 @@ ARG KURA_OIDC_CLIENT_ID
 ARG KURA_S3_ENDPOINT
 ARG KURA_FILE_TTL_DAYS
 ARG KURA_QUOTA_DEFAULT_MB
+ARG KURA_UI_ORIGIN
+ARG KURA_NOINDEX
 COPY . .
 RUN npm run build
 
@@ -35,4 +37,5 @@ COPY --from=build /kura/build/client ./build/client
 COPY scripts ./scripts
 # scripts/ が import する app のファイル
 COPY app/lib/s3/paginate.ts app/lib/s3/seaweedfs-compat.ts ./app/lib/s3/
+COPY app/lib/crawl.ts ./app/lib/
 USER node

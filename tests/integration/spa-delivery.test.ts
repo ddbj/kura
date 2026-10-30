@@ -69,6 +69,37 @@ describe("SPA delivery", () => {
     expect(String(res.headers["content-type"])).toContain("text/plain")
   })
 
+  // env.test sets KURA_NOINDEX=true, so this is the shape a deployment kept
+  // out of search engines serves. The indexed shape is unit-tested.
+  describe("crawler files of a deployment kept out of search engines", () => {
+    it("serves a robots.txt that closes everything but /llms.txt", async () => {
+      const res = await get("/robots.txt")
+      expect(res.status).toBe(200)
+      expect(String(res.headers["content-type"])).toContain("text/plain")
+      expect(res.body).toBe("User-agent: *\nAllow: /llms.txt\nDisallow: /\n")
+    })
+
+    // Without a sitemap the SPA fallback would answer 200 with index.html,
+    // which a crawler would try to read as one.
+    it("404s /sitemap.xml instead of falling back to index.html", async () => {
+      const res = await get("/sitemap.xml")
+      expect(res.status).toBe(404)
+      expect(String(res.headers["content-type"])).toContain("text/plain")
+    })
+
+    it("serves an /llms.txt that names the deployment's S3 endpoint", async () => {
+      const res = await get("/llms.txt")
+      expect(res.status).toBe(200)
+      expect(res.body.startsWith("# kura\n")).toBe(true)
+      expect(res.body).toContain(inject("s3Endpoint"))
+    })
+
+    it("marks the prerendered index.html noindex", async () => {
+      const res = await get("/")
+      expect(res.body).toMatch(/<meta name="robots" content="noindex"\/?>/)
+    })
+  })
+
   it.each([
     "/assets/../../package.json",
     "/assets/%2e%2e%2f%2e%2e%2fpackage.json",

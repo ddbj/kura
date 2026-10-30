@@ -52,7 +52,7 @@ vitest は projects 構成で、`unit`（jsdom）/ `pbt`（node）/ `integration
 - presigned URL の session token から secret key を導いて別の request に署名できないこと、session token を Bearer として送っても拒否されること
 - quota 超過での write 拒否、超過中の read / delete、削除と vacuum 後の自動解除
 - 起動時 env 検証: `KURA_QUOTA_DEFAULT_MB` / `KURA_OPS_INTERVAL_SECONDS` が正の整数でなければ seaweedfs コンテナが起動しないこと
-- 運用タスク: quota reconciler が未設定 bucket に quota を付けること、TTL sweep が期限超過の object だけを消し `.keep` marker は年齢に関わらず残すこと（TTL 無効時は何もしないこと）、multipart 掃除が猶予内の upload を残すこと
+- 運用タスク: quota reconciler が未設定 bucket に quota を付けること、TTL sweep が期限超過の object だけを消し `.keep` marker は年齢に関わらず残すこと（TTL 無効時は何もしないこと）、multipart 掃除が猶予内の upload を残すこと、Object Lock を有効にして作った bucket で古い version と delete marker を消し、利用者に見えるファイルは残すこと（TTL を過ぎたファイルは何も残らないこと）
 
 **SPA 配信**（`spa-delivery.test.ts`）は、配信 server が SPA を配る形を検証する。
 
@@ -62,6 +62,7 @@ vitest は projects 構成で、`unit`（jsdom）/ `pbt`（node）/ `integration
 - ビルドディレクトリの外へ出る path（`..` とその percent-encode 形）が配信されないこと
 - 許可していない `Host` header の request が拒否されること
 - 配信 server が `Access-Control-*` を付けないこと（CORS に応答するのは SeaweedFS だけ、という不変条件）
+- 検索エンジンに載せない環境（`env.test` は `KURA_NOINDEX=true`）で、robots.txt が `/llms.txt` 以外を拒否すること、`/sitemap.xml` が SPA fallback に流れず 404 になること、`/llms.txt` が S3 endpoint を示すこと、index.html に noindex が付くこと。載せる環境の中身は unit テストで見る
 
 ## unit
 
@@ -80,7 +81,7 @@ UI の文言が必ず i18n resources を経由することも unit テストで�
 - key / prefix の構築（`..`、percent-encoding、unicode、空 segment）
 - username の S3 bucket 名適合判定（SeaweedFS の受理集合との一致）
 - filename validation の境界値
-- ビルド時設定（ファイル TTL / quota の既定値）の受理集合
+- ビルド時設定（ファイル TTL / quota の既定値 / UI origin）の受理集合
 - i18n resources の ja / en パリティ（キー集合の一致、空文字の禁止、翻訳漏れの検知）
 - presigned URL の発行履歴と失効判定の不変条件
 
