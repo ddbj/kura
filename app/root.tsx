@@ -15,7 +15,7 @@ import { useState } from "react"
 import { AuthProvider } from "react-oidc-context"
 import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError } from "react-router"
 
-import { oidcProviderProps } from "~/lib/auth"
+import { oidcProviderProps, renewExpiredSession } from "~/lib/auth"
 import { ConfigProvider, readConfig } from "~/lib/config"
 import { parseNoindex } from "~/lib/crawl"
 import { LangProvider } from "~/lib/i18n"
@@ -26,8 +26,14 @@ import { LoadingView } from "~/ui"
 import type { Route } from "./+types/root"
 
 // Runs through the router so a malformed build-time config surfaces in the
-// ErrorBoundary instead of a blank page.
-export const clientLoader = () => readConfig()
+// ErrorBoundary instead of a blank page. The session is renewed here, before
+// AuthProvider reads it, so a tab reopened with an expired access token shows
+// the loading fallback rather than the login screen while it renews.
+export const clientLoader = async () => {
+  const config = readConfig()
+  await renewExpiredSession(config)
+  return config
+}
 
 // Read here rather than through the clientLoader's config: the prerendered
 // index.html is what a crawler reads, and it is rendered before any loader

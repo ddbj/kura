@@ -148,7 +148,7 @@ access token には、kura が使う claim だけを載せる。presigned URL �
 - kura は Keycloak の role を使わないので、dedicated scope の Full scope allowed は OFF にする
 - admin 用の claim や mapper は作らない。admin の判定は、kura の trust policy が `sub` で行うためである
 
-access token の lifespan は、client レベルで 5 分にする。SPA は、access token が切れる 1 分前に refresh token で access token を取り直す。Keycloak の SSO session は取り直すたびに延びるので、ユーザーがタブを開いている間は、realm の SSO session max まで認証が続く。
+access token の lifespan は、client レベルで 5 分にする。SPA は、access token が切れる 1 分前に refresh token で access token を取り直す。Keycloak の SSO session は取り直すたびに延びるので、ユーザーがタブを開いている間は、realm の SSO session max まで認証が続く。ページを開いた時点で保存してある access token が切れていれば、SPA は画面を表示する前に refresh token で取り直し、取り直せなかったときだけログイン画面を表示する。スリープなどで止まっていたタブでは、切れる 1 分前の取り直しが行われないためである。
 
 - lifespan を 1 分以下にすると、取り直しが絶え間なく続く
 - lifespan を realm の SSO session idle より長くすると、取り直すときには SSO session が切れていて、取り直しが必ず失敗する
