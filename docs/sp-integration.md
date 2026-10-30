@@ -15,11 +15,15 @@ SP 側だけで完結する作業と、kura の管理者への依頼が要る作
 
 ## アクセス先
 
-| 用途 | URL |
-| --- | --- |
-| UI（reference SPA） | `https://kura.ddbj.nig.ac.jp` |
-| S3 API / STS | `https://kura-s3.ddbj.nig.ac.jp` |
-| 認証（DDBJ account） | `https://idp.ddbj.nig.ac.jp/realms/master`（kura 自身の client id は `kura`） |
+| 用途 | production | staging（接続テスト用） |
+| --- | --- | --- |
+| UI（reference SPA） | `https://kura.ddbj.nig.ac.jp` | `https://kura-staging.ddbj.nig.ac.jp` |
+| S3 API / STS | `https://kura-s3.ddbj.nig.ac.jp` | `https://kura-s3-staging.ddbj.nig.ac.jp` |
+| 認証（DDBJ account） | `https://idp.ddbj.nig.ac.jp/realms/master` | `https://idp-staging.ddbj.nig.ac.jp/realms/master` |
+
+kura 自身の Keycloak client id は、どちらの環境でも `kura` である。
+
+接続テストは staging で行う。staging は DDBJ account の staging realm で認証するので、SP は staging realm の自分の client に audience mapper を足せばよく（「Keycloak client の設定」）、production の DDBJ account の設定を変える必要はない。staging のユーザーとファイルは production とは別で、staging のファイルは置いてから 30 日で自動的に消える。以下の例は production の URL で書いてあるので、staging では上の表の URL に置き換える。
 
 S3 API と STS は同じ endpoint で提供する。region は `us-east-1` を指定する（値に意味は無いが署名の計算に要る）。疎通は認証なしで確認できる。
 

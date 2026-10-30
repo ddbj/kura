@@ -2,7 +2,7 @@
 
 新しい環境に kura を置くときの手順である。上から順に実行すれば配備が完了する。なぜその設定が必要かは [architecture.md](./architecture.md) と [operations.md](./operations.md) にあり、ここでは参照に留める。
 
-配備先ごとに違う値（FQDN、ホストのパス、Keycloak realm）は env ファイルに集める。この文書には実値を書かない。
+配備先ごとに違う値（FQDN、ホストのパス、Keycloak realm）は環境ごとの env ファイル（`env.production` / `env.staging`）に集める。この文書には実値を書かず、例は production で書く。staging を置くときは、`env.production` を `env.staging` に置き換えて同じ手順を実行する。
 
 ## 前提
 
@@ -36,12 +36,13 @@
 
 ## 2. env と secret を用意する
 
-`env.production` を配備先の値に合わせる。少なくとも次を確認する。
+環境ごとに repo を別の directory へ clone する。`.env` と image が環境ごとに違うためである。その環境の env ファイルを配備先の値に合わせ、少なくとも次を確認する。
 
 - `KURA_OIDC_ISSUER` / `KURA_OIDC_CLIENT_ID` / `KURA_OIDC_JWKS_URI`: 手順 1 の client
 - `KURA_S3_ENDPOINT` / `KURA_ALLOWED_HOSTS`: 外向きの FQDN。`KURA_S3_ALLOWED_ORIGINS` は全環境で `*`（origin は認可の境界ではない。[architecture.md](./architecture.md) の「ネットワーク境界」）
 - `KURA_BIND_ADDR`: gateway が別ホストから来るなら `0.0.0.0`。default の `127.0.0.1` では届かない
 - `KURA_SEAWEEDFS_DATA_DIR`: 手順 3 のディレクトリ
+- `KURA_HTTP_PORT` / `KURA_S3_PORT` / `KURA_SEAWEEDFS_DATA_DIR`: 同じホストに複数の環境を置くときは、環境ごとに違う値にする
 - `KURA_VOLUME_SIZE_LIMIT_MB`: 30720（= 30 GiB）以下。これを超える値は master が起動時に弾く
 
 secret は新規に生成し、git 管理外の `.env` に置く（用途と差し替えの影響は [operations.md](./operations.md) の「secret 管理」）。
@@ -55,7 +56,9 @@ KURA_ROOT_SECRET_KEY=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32
 
 admin として扱う Keycloak の `sub`（UUID）があれば `KURA_ADMIN_SUBS` にカンマ区切りで並べる。空のままなら誰も admin role を assume できない。
 
-podman-compose で動かす場合は、`env.production` の内容と secret を merge した `.env` 1 ファイルにする（podman-compose 1.0.6 は `--env-file` を複数回渡しても最後の 1 つしか読まない）。
+podman-compose で動かす場合は、env ファイルの内容と secret を merge した `.env` 1 ファイルにする（podman-compose 1.0.6 は `--env-file` を複数回渡しても最後の 1 つしか読まない）。
+
+compose の project 名は `compose.yml` の `name`（production の名前）になる。同じホストに別の環境を置くときは、以降のすべての compose の command に `-p <project 名>` を付けて、container・network・image の名前を分ける。
 
 ## 3. ホスト側のディレクトリを用意する
 

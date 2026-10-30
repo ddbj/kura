@@ -18,7 +18,9 @@ compose の 3 サービスで完結する。
 
 ## 環境と env
 
-dev / production の違いは env ファイルだけで、compose は同じものを使う。web と ops の image は、SPA に焼き込む値が環境ごとに違うので、環境ごとにその環境の env でビルドする。環境ごとに変わるのは issuer と client id、外向きの URL、データディレクトリ、TTL、quota の既定値、そして secret である。env の一覧と各値の意味は `env.dev` / `env.production` にコメント付きで並んでいるので、ここでは繰り返さない。
+環境は dev / staging / production の 3 つで、違いは env ファイル（`env.dev` / `env.staging` / `env.production`）だけである。compose は同じものを使い、web と ops の image は、SPA に焼き込む値が環境ごとに違うので、環境ごとにその環境の env でビルドする。環境ごとに変わるのは issuer と client id、外向きの URL、公開 port、データディレクトリ、TTL、quota の既定値、そして secret である。
+
+staging は SP の接続テストに使う。DDBJ account の staging realm で認証するので、SP は production の DDBJ account の設定を変えずに接続を試せる。staging は production と同じホストに置けるように、公開 port とデータディレクトリを分けてあり、compose の project 名も分けて起動する（[deployment.md](./deployment.md)）。staging のファイルは TTL で自動的に消える。env の一覧と各値の意味は `env.dev` / `env.production` にコメント付きで並んでいるので、ここでは繰り返さない。
 
 運用上、次の 3 点だけ知っておけばよい。
 
