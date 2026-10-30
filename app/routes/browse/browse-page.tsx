@@ -8,6 +8,7 @@ import { usernameFromAccessToken } from "~/lib/auth/token"
 import { useConfig } from "~/lib/config"
 import { formatBytes, formatDuration } from "~/lib/format"
 import { formatListDateTime, useLang, useT } from "~/lib/i18n"
+import { refreshAfterWrite } from "~/lib/query"
 import {
   abortPendingUpload,
   dirName,
@@ -583,7 +584,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
   const abortPending = async (key: string, uploadId: string) => {
     try {
       await abortPendingUpload(s3, bucket, key, uploadId)
-      await queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+      await refreshAfterWrite(queryClient, ["pendingUploads", bucket])
       setFlash({ tone: "ok", message: t("notice.discarded") })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -1236,7 +1237,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
         bucket={bucket}
         prefix={prefix}
         existingNames={existingFolderNames}
-        onCreated={() => queryClient.invalidateQueries({ queryKey: ["objects", bucket, prefix] })}
+        onCreated={() => refreshAfterWrite(queryClient, ["objects", bucket, prefix])}
       />
 
       {/* Reserve room below the card for row menus that overflow the card edge. */}

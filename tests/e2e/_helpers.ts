@@ -202,28 +202,37 @@ export const expectUploadRowAutoDismissed = async (page: Page, name: string): Pr
 // Extracts the OIDC access token from the SPA sessionStorage. The key shape is
 // `oidc.user:${issuer}:${clientId}`; we scan for the "oidc.user:" prefix
 // instead of hardcoding issuer/client so the helper works across environments.
+//
+// The fixture restores the session captured by auth.setup.ts on every page
+// load, and once that access token has expired the SPA renews it while the
+// page loads. Waits for a token with time left, or STS rejects the stale one.
 const accessTokenFromPage = async (page: Page): Promise<string> => {
-  const token = await page.evaluate(() => {
+  const handle = await page.waitForFunction(() => {
     for (let i = 0; i < sessionStorage.length; i++) {
       const key = sessionStorage.key(i)
       if (key === null || !key.startsWith("oidc.user:")) continue
       const raw = sessionStorage.getItem(key)
       if (raw === null) continue
       try {
-        const parsed = JSON.parse(raw) as { access_token?: unknown }
-        if (typeof parsed.access_token === "string") return parsed.access_token
+        const parsed = JSON.parse(raw) as { access_token?: unknown; expires_at?: unknown }
+        if (
+          typeof parsed.access_token === "string"
+          && typeof parsed.expires_at === "number"
+          && parsed.expires_at > Date.now() / 1000 + 30
+        ) {
+          return parsed.access_token
+        }
       } catch {
         continue
       }
     }
 
     return null
+  }, undefined, { timeout: 30_000 }).catch(() => {
+    throw new Error("accessTokenFromPage: no oidc.user:* entry with an unexpired access_token in sessionStorage")
   })
-  if (token === null) {
-    throw new Error("accessTokenFromPage: no oidc.user:* entry with access_token in sessionStorage")
-  }
 
-  return token
+  return (await handle.jsonValue()) as string
 }
 
 export const s3ClientForE2e = async (page: Page): Promise<S3Client> => {

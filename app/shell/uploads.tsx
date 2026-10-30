@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { formatBytes } from "~/lib/format"
 import { useT } from "~/lib/i18n"
+import { refreshAfterWrite } from "~/lib/query"
 import type { RunningUpload, UploadProgress } from "~/lib/s3"
 import { copyObject, deleteEmptyDirectory, deleteObjects, entryName, isSaveCancelled, isZipTooLargeForMemory, keyParent, listAllUnderPrefix, makeZipStream, MEMORY_ZIP_LIMIT_BYTES, objectExists, predictZipSize, renameObject, ResumeMismatchError, resumeUpload, saveZipStream, splitExtension, startUpload, zipEntriesForPrefix, type ZipEntry } from "~/lib/s3"
 import { useS3 } from "~/lib/s3/use-s3"
@@ -269,13 +270,13 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     running.done
       .then(() => {
         updateOne(id, { state: "done", loaded: file.size, total: file.size, uploadId: undefined })
-        void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
-        void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+        void refreshAfterWrite(queryClient, ["objects", bucket])
+        void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
+        void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
       })
       .catch((error: unknown) => {
         if (cancelState.requested) {
-          void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+          void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
           removeOne(id)
 
           return
@@ -289,7 +290,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
           error: message,
           ...(finalUploadId === undefined ? {} : { uploadId: finalUploadId }),
         })
-        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+        void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
       })
       .finally(() => {
         runningMap.current.delete(id)
@@ -410,13 +411,13 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     running.done
       .then(() => {
         updateOne(id, { state: "done", loaded: file.size, total: file.size, uploadId: undefined })
-        void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
-        void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+        void refreshAfterWrite(queryClient, ["objects", bucket])
+        void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
+        void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
       })
       .catch((error: unknown) => {
         if (cancelState.requested) {
-          void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+          void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
           removeOne(id)
 
           return
@@ -425,7 +426,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
           ? "content mismatch"
           : error instanceof Error ? error.message : String(error)
         updateOne(id, { state: "failed", error: message, uploadId })
-        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+        void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
       })
       .finally(() => {
         runningMap.current.delete(id)
@@ -543,13 +544,13 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
     running.done
       .then(() => {
         updateOne(id, { state: "done", loaded: file.size, total: file.size })
-        void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
-        void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+        void refreshAfterWrite(queryClient, ["objects", bucket])
+        void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
+        void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
       })
       .catch((error: unknown) => {
         if (cancelState.requested) {
-          void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+          void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
           removeOne(id)
 
           return
@@ -558,7 +559,7 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
           ? "content mismatch"
           : error instanceof Error ? error.message : String(error)
         updateOne(id, { state: "failed", error: message })
-        void queryClient.invalidateQueries({ queryKey: ["pendingUploads", bucket] })
+        void refreshAfterWrite(queryClient, ["pendingUploads", bucket])
       })
       .finally(() => {
         runningMap.current.delete(id)
@@ -608,8 +609,8 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       } else {
         finishOperation(id)
       }
-      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+      void refreshAfterWrite(queryClient, ["objects", bucket])
+      void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
 
       return { ok: res.deleted, failed: res.failed }
     } catch (err) {
@@ -646,8 +647,8 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       if (kind !== "copy") dropSessionPresigned(bucket, [srcKey])
       updateOne(id, { loaded: 1 })
       finishOperation(id)
-      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+      void refreshAfterWrite(queryClient, ["objects", bucket])
+      void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       finishOperation(id, message)
@@ -699,8 +700,8 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       // up as a CommonPrefix. Best-effort — deleteEmptyDirectory swallows any
       // 404 for prefixes that were never materialized.
       await deleteEmptyDirectory(s3, bucket, prefix)
-      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+      void refreshAfterWrite(queryClient, ["objects", bucket])
+      void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
 
       return { ok: res.deleted, failed: res.failed }
     } catch (err) {
@@ -758,8 +759,8 @@ export const UploadsProvider = ({ children }: { children: ReactNode }) => {
       // Rename / move copies-and-deletes each key; the empty source directory
       // entry lingers in the SeaweedFS filer until we explicitly remove it.
       await deleteEmptyDirectory(s3, bucket, srcPrefix)
-      void queryClient.invalidateQueries({ queryKey: ["objects", bucket] })
-      void queryClient.invalidateQueries({ queryKey: ["bucket-usage", bucket] })
+      void refreshAfterWrite(queryClient, ["objects", bucket])
+      void refreshAfterWrite(queryClient, ["bucket-usage", bucket])
 
       return { ok, failed }
     } catch (err) {
