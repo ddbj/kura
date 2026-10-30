@@ -19,7 +19,7 @@ const probe = async (label: string, url: string, check: (res: Response) => Promi
   await check(res)
 }
 
-// The SPA's config is baked in at build time, so there is nothing to fetch
+// The SPA's config is embedded at build time, so there is nothing to fetch
 // from the running stack: read the issuer from the env file the dev build was
 // made with.
 const issuerFromEnvDev = (): string => {

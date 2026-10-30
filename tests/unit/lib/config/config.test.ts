@@ -89,7 +89,7 @@ describe("readConfig", () => {
     expect(readConfig({ ...validEnv, VITE_KURA_FILE_TTL_DAYS: "30" }).fileTtlDays).toBe(30)
   })
 
-  // A build that did not receive the value bakes in `undefined`, which must
+  // A build that did not receive the value embeds `undefined`, which must
   // fail loudly rather than produce a half-configured SPA.
   test.each(["VITE_KURA_OIDC_ISSUER", "VITE_KURA_OIDC_CLIENT_ID", "VITE_KURA_S3_ENDPOINT"])(
     "readConfig_missing_%s_throws",

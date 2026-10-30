@@ -197,7 +197,7 @@ describe("BrowsePage quota", () => {
     expect(screen.getByRole("button", { name: /アップロード/ })).toBeEnabled()
   })
 
-  // The denominator is the deployment default baked into the bundle, not a
+  // The denominator is the deployment default embedded in the bundle, not a
   // constant: a deployment with a different quota must show its own number.
   test("browsePage_quotaFromConfig_isTheMeterDenominator", async () => {
     seedBucket({ files: [file("small.txt", 10)] })

@@ -1,166 +1,166 @@
 # E2E シナリオ
 
-E2E で扱うのは、実ブラウザと実 Keycloak を通さないと証明できないことだけである。シナリオ ID は `test(...)` 名と 1:1 なので、ID を grep すれば実装に辿り着く。走らせ方と前提は [../README.md](../README.md)。
+E2E で扱うのは、実際のブラウザと実際の Keycloak を通さないと確かめられないことだけである。シナリオ ID は `test(...)` に渡すテスト名と 1 対 1 に対応するので、ID で grep すると実装が見つかる。実行方法と前提は [../README.md](../README.md) にある。
 
 ## ペルソナ
 
-- **P-ANON**: 未認証。cookie も storage も空の fresh context で開く
-- **P-USER**: staging Keycloak にログイン済み。`preferred_username` がそのまま自分の bucket 名になる
+- P-ANON: 未認証の利用者。テストは、cookie も storage も空の新しい browser context でページを開く
+- P-USER: staging の Keycloak にログイン済みの利用者。`preferred_username` がそのまま自分の bucket 名になる
 
 ## 状態の分離
 
-全 test が 1 つの bucket を共有するため、並列実行はしない。ファイルは必ず runId 配下の prefix に置き、spec ファイルの開始時・各 test の前後で自分の scope だけを掃除する（他の runId には触らない）。掃除は S3 SDK を直接叩いて行う。UI 経由の bulk delete は副作用があり遅い。過去の run の残骸は `scripts/e2e-cleanup.ts` で手動掃除する。
+全 test が 1 つの bucket を共有するので、test は並列に実行しない。各 test は、ファイルを必ず実行ごとの ID（runId）の下の prefix に置く。spec ファイルの開始時と各 test の前後に、自分の scope だけを掃除する。他の runId の下の object には一切アクセスしない。掃除には S3 SDK を直接使う。UI から一括削除すると副作用があり、遅いためである。過去の実行で残ったファイルは、`scripts/e2e-cleanup.ts` を手で実行して削除する。
 
-Playwright の `storageState()` は cookie と localStorage しか保存しない。oidc-client-ts は token を sessionStorage に置くので、認証状態の再利用には sessionStorage の snapshot を別ファイルに保存して注入する必要がある。
+Playwright の `storageState()` は、cookie と localStorage しか保存しない。oidc-client-ts は token を sessionStorage に置くので、認証状態を再利用するには、sessionStorage の snapshot を別のファイルに保存し、test の開始時にページへ入れ直す必要がある。
 
-logout は Keycloak の server-side session を落とす。主テストユーザーの storageState で logout すると、以降その storageState を使う test の silent renew が全て失敗する。したがって logout のシナリオは専用ユーザーか fresh login で行う。
+logout すると、Keycloak の server-side の session が無効になる。主テストユーザーの storageState で logout すると、それ以降に同じ storageState を使う test の silent renew がすべて失敗する。したがって、logout のシナリオは、logout 専用のユーザーか、その場でのログイン（fresh login）で行う。
 
-SeaweedFS の書き込みは ListObjectsV2 への反映が遅れることがある（通常 1 秒未満）。空状態を主張するシナリオは auto-retry の timeout で吸収する。
+SeaweedFS への書き込みが ListObjectsV2 の結果に出るまでに、遅れが出ることがある（通常は 1 秒未満）。一覧が空であることを確かめるシナリオでは、Playwright の auto-retry の timeout の間に一覧が空になるのを待つ。
 
 ## AUTH
 
-PKCE の redirect、Keycloak のログインフォーム、callback からの復帰は実 IdP を通さないと成立しない。
+PKCE の redirect、Keycloak のログインフォーム、callback からの復帰は、実際の IdP を通さないと成立しない。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
 | S-AUTH-01 | 未認証で `/` を開くと LoginBox が出る（Header は描画されない） |
-| S-AUTH-02 | ログインボタンが PKCE（S256）の認可 request で Keycloak へ飛ばす |
-| S-AUTH-03 | 保存済みの認証状態で `/` を開くと Header まで復元される |
-| S-AUTH-04 | SPA 起動時に自分の bucket への HeadBucket が発行される |
-| S-AUTH-05 | fresh login から logout して LoginBox に戻る |
+| S-AUTH-02 | ログインボタンを押すと、PKCE（S256）の認可 request で Keycloak へ遷移する |
+| S-AUTH-03 | 保存済みの認証状態で `/` を開くと、Header まで復元される |
+| S-AUTH-04 | SPA の起動時に、自分の bucket への HeadBucket が発行される |
+| S-AUTH-05 | fresh login から logout して、LoginBox に戻る |
 | E-AUTH-01 | callback の `error=access_denied` がエラー表示になる |
-| E-AUTH-02 | callback のエラー画面から `/` に戻ってもエラー Callout が残る |
-| E-AUTH-03 | 未認証で SPA route を叩くと LoginBox に落ち、ログイン後に元の URL へ戻る |
-| E-AUTH-04 | 領域の初期化に失敗するとエラー Callout が出る |
+| E-AUTH-02 | callback のエラー画面から `/` に戻っても、エラー Callout が残る |
+| E-AUTH-03 | 未認証で SPA の route を開くと LoginBox が出て、ログイン後に元の URL へ戻る |
+| E-AUTH-04 | 領域（自分の bucket）の初期化に失敗すると、エラー Callout が出る |
 
 ## SHELL
 
-実 UA の focus 移動とクリックの伝播、リロードをまたぐ言語の永続化を見る。
+実際のブラウザでの focus の移動とクリックの伝播、リロードしたあとも言語の設定が残ることを確かめる。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
 | S-SHELL-01 | Header の wordmark で `/` に戻る |
-| S-SHELL-02 | UserMenu が開閉し、外側クリックで閉じる |
-| S-SHELL-03 | UserMenu を Escape で閉じると focus が trigger に戻る |
-| S-SHELL-04 | 言語切替が browse 画面まで波及する |
-| S-SHELL-05 | `?lang=en` の URL hint が効き、URL から除去される |
+| S-SHELL-02 | UserMenu が開閉し、外側をクリックすると閉じる |
+| S-SHELL-03 | UserMenu を Escape で閉じると、focus が trigger に戻る |
+| S-SHELL-04 | 言語の切り替えが browse 画面にも反映される |
+| S-SHELL-05 | `?lang=en` の URL hint で言語が切り替わり、`?lang=en` が URL から除去される |
 
 ## BROWSE
 
-history と URL 直打ちの挙動は、SPA fallback を含む実配信の上でしか確かめられない。
+history と、URL を直接入力したときの挙動は、SPA fallback を含む実際の配信でしか確かめられない。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-BROWSE-01 | 空の prefix が empty state になる |
+| S-BROWSE-01 | 空の prefix で empty state が表示される |
 | S-BROWSE-02 | 新規フォルダの `.keep` は一覧に出ず、folder 行だけが見える |
-| S-BROWSE-03 | フォルダに入ると breadcrumb が延びる |
-| S-BROWSE-04 | 中間の breadcrumb で親に戻る |
-| S-BROWSE-05 | ブラウザの戻る / 進むが SPA の history と整合する |
-| S-BROWSE-06 | 深い prefix の URL 直打ちで遷移できる |
+| S-BROWSE-03 | フォルダに入ると、breadcrumb にフォルダが追加される |
+| S-BROWSE-04 | 途中の breadcrumb で親のフォルダに戻る |
+| S-BROWSE-05 | ブラウザの戻る / 進むで、SPA の history と同じ画面に移る |
+| S-BROWSE-06 | 深い prefix の URL を直接入力して遷移できる |
 | E-BROWSE-01 | 存在しない prefix は空フォルダとして表示される |
 
 ## TOOLBAR
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-TOOLBAR-01 | 検索が substring 一致で絞り込む |
-| S-TOOLBAR-02 | ヒット 0 の表示から「検索をクリア」で復帰する |
-| S-TOOLBAR-04 | 「期限つき」レンズが presign 済みのファイルだけを出す |
-| S-TOOLBAR-05 | sort カラムで並び順が変わる |
+| S-TOOLBAR-01 | 検索が部分文字列の一致で一覧を絞り込む |
+| S-TOOLBAR-02 | 検索結果が 0 件の表示から、「検索をクリア」で元の一覧に戻る |
+| S-TOOLBAR-04 | 「期限つき」レンズが、presign 済みのファイルだけを表示する |
+| S-TOOLBAR-05 | sort のカラムで並び順が変わる |
 | S-TOOLBAR-06 | 使用量メーターが表示される |
 
 ## UPLOAD
 
-file input・drag & drop・フォルダ選択は、実 UA の File API を通さないと再現できない。
+file input・drag & drop・フォルダ選択は、実際のブラウザの File API を通さないと再現できない。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-UPLOAD-01 | メニューの「ファイルを選択」で単一ファイルを upload できる |
+| S-UPLOAD-01 | メニューの「ファイルを選択」で、単一のファイルを upload できる |
 | S-UPLOAD-02 | 空状態の primary button から upload できる |
 | S-UPLOAD-03 | drag & drop で upload できる |
-| S-UPLOAD-04 | 「フォルダを選択」でサブフォルダ込みの upload ができる |
-| S-UPLOAD-05 | 実行中の upload を行の「キャンセル」で止められる |
-| S-UPLOAD-06 | 「すべてキャンセル」で実行中の upload をまとめて止められる |
-| E-UPLOAD-01 | 同名衝突をスキップできる |
-| E-UPLOAD-02 | 同名衝突を上書きできる |
-| E-UPLOAD-03 | 同名衝突を別名で保存できる |
+| S-UPLOAD-04 | 「フォルダを選択」で、サブフォルダを含めて upload できる |
+| S-UPLOAD-05 | 実行中の upload を、行の「キャンセル」で止められる |
+| S-UPLOAD-06 | 「すべてキャンセル」で、実行中の upload をまとめて止められる |
+| E-UPLOAD-01 | 同名のファイルとの衝突で、upload をスキップできる |
+| E-UPLOAD-02 | 同名のファイルとの衝突で、上書きできる |
+| E-UPLOAD-03 | 同名のファイルとの衝突で、別名で保存できる |
 | E-UPLOAD-04 | 失敗した upload を「再試行」でやり直せる |
 
 ## RESUME
 
-中断はネットワーク層で起こすしかなく、リロードやセッション取り直しをまたぐ復元は実ブラウザでしか再現できない。
+upload の中断はネットワーク層で起こすしかない。リロードや認証セッションの取り直しのあとに upload を復元する動作は、実際のブラウザでしか再現できない。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-RESUME-01 | 同一セッション内で中断した upload を再開し、byte が一致する |
-| S-RESUME-02 | 別 context で再ログインしても「再開待ち」から復元できる |
-| S-RESUME-03 | リロード後に「再開待ち」から復元できる |
-| E-RESUME-01 | 同一サイズで内容の違うファイルでの再開が拒否される |
+| S-RESUME-01 | 同じセッションの中で中断した upload を再開でき、upload したファイルの byte が元のファイルと一致する |
+| S-RESUME-02 | 別の browser context で再ログインしても、「再開待ち」から upload を復元できる |
+| S-RESUME-03 | リロードしたあとに、「再開待ち」から upload を復元できる |
+| E-RESUME-01 | サイズが同じで内容が違うファイルでの再開が拒否される |
 | E-RESUME-02 | 再開待ちの upload を「破棄」で消せる |
 
 ## DOWNLOAD
 
-download の受け取りと zip の組み立てはブラウザ API に依存する。
+download の受け取りと zip の組み立ては、ブラウザの API に依存する。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-DOWNLOAD-01 | 行メニューの「ダウンロード」で byte が一致する |
+| S-DOWNLOAD-01 | 行メニューの「ダウンロード」で取得したファイルの byte が、元のファイルと一致する |
 | S-DOWNLOAD-02 | unicode・space・`%`・`?`・`#` を含む key を download できる |
-| S-DOWNLOAD-03 | 複数選択を zip にまとめて download できる |
-| S-DOWNLOAD-04 | フォルダを zip で download でき、相対パスと空フォルダが保たれる |
+| S-DOWNLOAD-03 | 複数選択したファイルを、1 つの zip にまとめて download できる |
+| S-DOWNLOAD-04 | フォルダを zip で download でき、zip の中で相対パスと空フォルダが保たれる |
 
 ## PRESIGN
 
-発行したリンクが未認証の相手から実際に引けることは、2 つの context を使う実ブラウザでしか示せない。
+発行したリンクから未認証の相手が実際にファイルを取得できることは、2 つの browser context を使う実際のブラウザでしか確かめられない。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-PRESIGN-01 | 発行したリンクが badge と panel に出て、未認証 context から byte が一致する |
-| S-PRESIGN-02 | TTL の 3 択と表示される失効時刻が対応する |
-| S-PRESIGN-03 | rename すると発行済みの記録が落ちる |
-| S-PRESIGN-04 | 削除すると発行済みの記録が落ちる |
+| S-PRESIGN-01 | 発行したリンクが badge と panel に表示され、未認証の context でリンクから取得したファイルの byte が元のファイルと一致する |
+| S-PRESIGN-02 | 有効期間（TTL）の 3 つの選択肢と、表示される失効時刻が対応する |
+| S-PRESIGN-03 | rename すると、発行済みのリンクの記録が消える |
+| S-PRESIGN-04 | 削除すると、発行済みのリンクの記録が消える |
 
 ## FILEOPS
 
-モーダル経由の操作と、その後の一覧の整合を UI 層で固定する。
+モーダルを使う操作と、操作したあとの一覧が操作の結果と一致することを、UI の層で確かめ、回帰を防ぐ。
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
 | S-FILEOPS-01 | ファイルの rename |
 | S-FILEOPS-02 | フォルダの rename |
-| S-FILEOPS-03 | FolderPicker 経由のファイルの move |
+| S-FILEOPS-03 | FolderPicker を使ったファイルの move |
 | S-FILEOPS-04 | ファイルの copy |
-| S-FILEOPS-05 | 単一削除（確認モーダルと初期 focus を含む） |
-| S-FILEOPS-06 | 選択バー経由の複数削除 |
+| S-FILEOPS-05 | 単一の削除（確認モーダルと初期 focus を含む） |
+| S-FILEOPS-06 | 選択バーを使った複数の削除 |
 | S-FILEOPS-07 | フォルダの削除 |
 | S-FILEOPS-08 | フォルダの move |
 | S-FILEOPS-09 | 新規フォルダの作成 |
-| E-FILEOPS-01 | rename の名前衝突が拒否される |
+| E-FILEOPS-01 | rename で名前が衝突すると拒否される |
 | E-FILEOPS-02 | 元と同じ名前での rename が拒否される |
 | E-FILEOPS-03 | `/` を含む名前が拒否される |
-| E-FILEOPS-04 | フォルダを自身の中へ move できない（picker 上で disabled になる） |
+| E-FILEOPS-04 | フォルダを自分自身の中へ move できない（picker 上で disabled になる） |
 | E-FILEOPS-05 | 空の名前での submit が拒否される |
 
 ## FLOW
 
-| ID | 証明すること |
+| ID | 確かめること |
 | --- | --- |
-| S-FLOW-01 | upload から期限つきリンクの発行まで通し、未認証で 200 と byte 一致が得られる |
+| S-FLOW-01 | upload から期限つきリンクの発行までを続けて行い、未認証の context でリンクから HTTP 200 と、元のファイルと一致する byte が得られる |
 
-## E2E でやらないこと
+## E2E で確かめないこと
 
-以下は他の層が担保する。E2E に書くと重複するか、deterministic に書けない。
+次の項目は、E2E 以外のテストか、配備時の実測で確かめる。E2E で書くと、他のテストと重複するか、決まった結果になるように書けない。
 
-- IAM 境界の網羅（他 bucket の拒否 / admin role / audience / exp）: integration の IAM boundary test。SPA に他 bucket へ向かう経路が無い
-- quota 超過とその回復、日次運用タスクの挙動: integration。UI 側の表示は unit
-- resume ロジック本体（MD5 照合 / part 分割 / abort）: integration と unit
-- key encoding、bucket 名の判定、i18n の parity、設定値の受理集合: unit と PBT
-- 利用できない username の画面: unit。staging に `_` 入りの username を用意できない
-- silent renew の発火: token の失効時刻を外から動かせず、実 flow を deterministic に観測できない。unit が renew のロジックを担保し、長時間セッションの継続は配備時の実測で見る
-- SPA 配信の形（fallback / asset の 404 / Host 検証 / CORS に触らないこと）: integration
-- CORS の preflight: 通常フローの成功が暗黙に担保する（block されれば S3 操作自体が失敗する）
-- 大容量ファイル（100 GB クラス、1 時間超の upload、実サイズのストリーミング）: 配備時の実測（[../../docs/deployment.md](../../docs/deployment.md) の「配備先での実測」）
+- IAM の境界の網羅（他の bucket の拒否 / admin role / audience / exp）: integration の IAM boundary のテストで確かめる。SPA には、他の bucket にアクセスする操作が無い
+- quota の超過とその回復、日次運用タスクの挙動: integration で確かめる。UI 側の表示は unit で確かめる
+- resume のロジック本体（MD5 照合 / part の分割 / abort）: integration と unit で確かめる
+- key の encoding、bucket 名の判定、i18n の ja と en の対応、ビルド時の設定として受け付ける値の集合: unit と PBT で確かめる
+- 利用できない username（`_` を含む username など）の画面: unit で確かめる。staging に `_` を含む username を用意できない
+- silent renew の発火: テストからは token の失効時刻を動かせないので、実際の flow を決まった結果になるように観測できない。renew のロジックは unit で確かめ、長時間のセッションが続くことは配備時の実測で確かめる
+- SPA の配信（fallback / asset の 404 / Host の検証 / 配信 server が CORS の header を付けないこと）: integration で確かめる
+- CORS の preflight: 通常の操作が成功することで、間接的に確かめられる（preflight が block されれば、S3 の操作そのものが失敗する）
+- 大容量ファイル（100 GB クラス、1 時間を超える upload、実際のサイズでのストリーミング）: 配備時の実測で確かめる（[../../docs/deployment.md](../../docs/deployment.md) の「7. 配備先での実測」）
 
 ## trace の扱い
 
-Playwright の trace には storageState と `page.evaluate` の戻り値が入るため、access token / refresh token が平文で残る。trace はホストの `test-results/`（git 管理外）に留め、artifact として外に出さない。`.auth/` の認証状態も同様に外に出さない。
+Playwright の trace には storageState と `page.evaluate` の戻り値が入るので、access token と refresh token が平文で残る。trace は、ホストの `test-results/`（git 管理外）に置いたままにし、artifact として外に出さない。`.auth/` の認証状態も、同じく外に出さない。

@@ -14,7 +14,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 
 # --- build: SPA の静的ビルド ---
 FROM deps AS build
-# デプロイ固有の設定は bundle に焼き込まれる。vite.config.ts が読む値だけを
+# デプロイ固有の設定は bundle に埋め込まれる。vite.config.ts が読む値だけを
 # 受け取り、secret は渡さない。
 ARG KURA_OIDC_ISSUER
 ARG KURA_OIDC_CLIENT_ID

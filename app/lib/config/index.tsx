@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useContext } from "react"
 import { z } from "zod"
 
-// Deployment-specific values, baked into the bundle at build time from the
+// Deployment-specific values, embedded in the bundle at build time from the
 // VITE_KURA_* env vars. The OIDC redirect URI is derived from
 // window.location.origin and is deliberately not part of this.
 const httpUrl = z.url({ protocol: /^https?$/ })

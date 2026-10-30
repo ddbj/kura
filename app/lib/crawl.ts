@@ -1,6 +1,6 @@
 // What the deployment tells search engines and programs: robots.txt,
 // sitemap.xml and llms.txt. vite.config.ts writes them next to the bundle at
-// build time, from the same baked values as the SPA, and
+// build time, from the same embedded values as the SPA, and
 // scripts/serve-spa.ts keeps their names out of the SPA fallback.
 //
 // Only the top page is for search engines: /browse lists a signed-in user's

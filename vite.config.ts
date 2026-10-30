@@ -11,7 +11,7 @@ import { crawlFiles, isHttpOrigin, parseNoindex } from "./app/lib/crawl.ts"
 const appDir = fileURLToPath(new URL("./app", import.meta.url))
 const envDevPath = fileURLToPath(new URL("./env.dev", import.meta.url))
 
-// Deployment settings the SPA bakes into the bundle. The same names are used
+// Deployment settings the SPA embeds in the bundle. The same names are used
 // by the stack itself as KURA_*; only these are republished under the VITE_
 // prefix, so an unrelated KURA_* (a secret, a port) can never reach the
 // bundle.
@@ -50,7 +50,7 @@ const parseEnvFile = (path: string): Record<string, string> =>
 // The stack names its settings KURA_*; vite only exposes VITE_* to the bundle.
 // Doing the rename here rather than in each caller means a build only has to
 // supply the KURA_* it already uses for the stack, and the list of what gets
-// baked lives in exactly one place. An explicit VITE_KURA_* wins.
+// embedded lives in exactly one place. An explicit VITE_KURA_* wins.
 const publishBuildEnv = (): Plugin => ({
   name: "kura-build-env",
   config: () => {
@@ -68,7 +68,7 @@ const publishBuildEnv = (): Plugin => ({
 // Gated on KURA_DEV (set by `npm run dev`) rather than `apply: "serve"`:
 // `react-router build` resolves this config with command "serve" internally,
 // so apply cannot tell a dev server from a build. Without the gate a
-// production build would silently bake env.dev's values instead of failing.
+// production build would silently embed env.dev's values instead of failing.
 const devEnvFromEnvDev = (): Plugin => ({
   name: "kura-dev-env",
   config: () => {
@@ -79,7 +79,7 @@ const devEnvFromEnvDev = (): Plugin => ({
   },
 })
 
-// Deployment config is baked into the bundle,
+// Deployment config is embedded in the bundle,
 // so a missing value would only show up as a broken deployment. Fail here.
 // buildStart, not config: `react-router typegen` resolves the config with
 // command "build" too, and it has no reason to need deployment values.

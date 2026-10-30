@@ -61,7 +61,7 @@ services:
       retries: 60
 
   # web と ops は Dockerfile の runtime stage から作る同じ形の image で動く。
-  # image に SPA のビルド結果が入るので、build arg は SPA に焼き込む値だけを
+  # image に SPA のビルド結果が入るので、build arg は SPA に埋め込む値だけを
   # 渡す（secret は渡さない）。
   #
   # reference SPA の静的配信。ビルド済みの build/client を vite の preview

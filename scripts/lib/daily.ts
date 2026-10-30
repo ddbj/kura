@@ -20,7 +20,7 @@ const daysEnv = (name: string, fallback: number): number => {
   return raw === undefined || raw === "" ? fallback : parseDays(name, raw)
 }
 
-// Empty means disabled (same contract as the SPA's baked file TTL).
+// Empty means disabled (same contract as the SPA's embedded file TTL).
 const optionalDaysEnv = (name: string): number | null => {
   const raw = process.env[name]
 

@@ -1,8 +1,8 @@
 # テスト
 
-kura の本体は SeaweedFS の設定群なので、設定群そのものを実物に対して自動検証することを主要テストに据えている。reference SPA と運用スクリプトは、その上で unit / PBT / E2E の 3 層で担保する。
+kura の本体は SeaweedFS の設定群なので、kura の主要なテストは、設定群を実物の SeaweedFS に対して自動で検証する integration テストである。reference SPA と運用スクリプトは、integration テストに加えて、unit・PBT・E2E の 3 種類のテストで検証する。
 
-## 走らせ方
+## 実行方法
 
 ```sh
 npm test                 # unit + pbt + integration
@@ -11,84 +11,95 @@ npm run test:integration # integration のみ
 npm run test:e2e         # E2E（起動済みの dev compose + staging Keycloak が必要）
 ```
 
-`npm test` は compose（`env.test`）と JWKS 配信を自動で起動し、終了時に破棄する。`KURA_TEST_KEEP=1` を渡すとスタックを残せる。test stack は dev stack と port・データディレクトリの両方を分けてあるので、dev を起動したまま実行できる。両者が同じデータディレクトリを指すと、後から起動した側が filer の LevelDB の flock を取れずに起動に失敗する。
+`npm test` は、test stack（compose（`env.test`）と JWKS の配信サービス）を自動で起動し、終了時に test stack を破棄する。`KURA_TEST_KEEP=1` を渡すと、test stack を破棄せずに残せる。test stack は、dev stack と port とデータディレクトリの両方を分けてあるので、dev stack を起動したまま実行できる。test stack と dev stack が同じデータディレクトリを使うと、後から起動した側が filer の LevelDB の flock を取れずに、起動に失敗する。
 
-vitest は projects 構成で、`unit`（jsdom）/ `pbt`（node）/ `integration`（node。compose を起動する globalSetup を持つ）に分かれている。
+vitest は projects 構成で、次の 3 つの project に分かれている。
 
-テストはホストで実行する。`npm test` 自身が compose を起動する側であり、integration はホストの公開 port と `docker exec` に、E2E は Playwright のブラウザに依存する。
+- `unit`（jsdom）
+- `pbt`（node）
+- `integration`（node）。compose を起動する globalSetup を持つ
+
+テストはホストで実行する。`npm test` 自身が compose を起動し、integration はホストの公開 port と `docker exec` を使い、E2E は Playwright のブラウザを使うためである。
 
 ## 方針
 
 - テストはバグを探すために書く。境界値・エッジケース・異常系を必ず対象にする
-- mock してよいのは外部境界だけで、内部実装は mock しない。S3（SeaweedFS）と filer は mock せず実物を使う
-- Keycloak は自前鍵で署名した JWT とローカルの JWKS 配信で代替する（SeaweedFS の OIDC provider に食わせる）。実 Keycloak を使うのは E2E だけ
-- frontend の unit テストの HTTP 境界は msw で mock する
-- テスト間で状態を共有せず、実行順序に依存しない。integration はテストごとに一意な username（= bucket）を使う
+- mock してよいのは外部境界だけで、内部の実装は mock しない。S3（SeaweedFS）と filer は mock せず、実物を使う
+- テストは、Keycloak の代わりに、テスト用の鍵で署名した JWT と、ローカルの JWKS の配信サービスを使う。SeaweedFS の OIDC provider は、この JWKS で JWT を検証する。実際の Keycloak を使うのは E2E だけである
+- frontend の unit テストでは、HTTP の境界を msw で mock する
+- テスト間で状態を共有せず、テストの実行順序に依存させない。integration はテストごとに一意な username（= bucket 名）を使う
 
-## integration — 設定群のテスト
+## integration（設定群のテスト）
 
-`tests/integration/`。実 SeaweedFS（compose）に対して、kura の設定群が意図どおりに効いていることを確認する。kura の主要テストである。
+`tests/integration/` にある。実物の SeaweedFS（compose）に対して、kura の設定群が意図どおりに効いていることを確認する。
 
-**IAM policy boundary**（`iam-boundary.test.ts`）は認可境界そのものを検証する。自前鍵で署名した JWT で STS を通して一時 credentials を取り、次を確かめる。
+IAM policy boundary（`iam-boundary.test.ts`）は、認可の境界そのものを検証する。テスト用の鍵で署名した JWT で STS から一時 credentials を取り、次のことを確かめる。
 
-- 自分の bucket の作成（CreateBucket）と read / write / list / tagging が許可されること
-- 自分の bucket の設定（policy・ACL・CORS・lifecycle・versioning・Object Lock・暗号化・quota など）を変える操作が拒否されること。Object Lock を有効にして作った bucket でも retention と legal hold が拒否されること
-- public-read の ACL を付けて置いた object と bucket に、署名なしの request が届かないこと
+- 自分の bucket の作成（CreateBucket）と、read / write / list / tagging が許可されること
+- 自分の bucket の設定（policy・ACL・CORS・lifecycle・versioning・Object Lock・暗号化・quota など）を変える操作が拒否されること
+- Object Lock を有効にして作った bucket でも、retention と legal hold が拒否されること
+- public-read の ACL を付けて置いた object と bucket に、署名の無い request が届かないこと
 - 他人の bucket の read / write / list / tagging / delete が拒否されること
-- 他人の bucket 名での新規 bucket 作成が拒否されること
-- role 偽装（token が対応しない role の指定）が拒否されること
-- `KURA_ADMIN_SUBS` に列挙した `sub` だけが `KuraAdminRole` を取れ、任意の bucket にアクセスできること
-- audience が一致しない token・期限切れ token が STS で拒否されること
-- 認証なし（anonymous）の request が bucket / object のいずれにも到達できないこと
-- compose network 上の別コンテナから filer の HTTP API を無認証で読めないこと。filer には S3 の IAM が効かないので、security.toml の鍵が唯一の防壁になる
+- 他人の bucket 名での、新しい bucket の作成が拒否されること
+- role の偽装（token に対応しない role の指定）が拒否されること
+- `KURA_ADMIN_SUBS` に列挙した `sub` を持つユーザーだけが `KuraAdminRole` を取れ、任意の bucket にアクセスできること
+- audience が一致しない token と、期限切れの token が、STS で拒否されること
+- 認証の無い（anonymous の）request が、bucket にも object にも届かないこと
+- compose network 上の別のコンテナから、filer の HTTP API を認証なしで読めないこと。filer には S3 の IAM が効かないので、filer へのアクセスに認証を求める手段は、security.toml の鍵（filer JWT signing key）だけである
 
-**S3 のフロー**は、ユースケースを実物に対して通す。
+S3 のフローのテストは、ユースケースを実物の SeaweedFS に対して最後まで実行する。
 
-- STS `AssumeRoleWithWebIdentity` から multipart upload、download まで
-- 中断した multipart upload を新しい一時 credentials から再開できること（低レベル API と、SPA の resume 実装そのもの（発見 → MD5 照合 → 続行 → 完成、内容が違うファイルの拒否、破棄）の両方）
-- in-flight multipart upload の一覧の形（Prefix フィルタ、part ETag = MD5）
-- 一時 credentials による presigned URL（GET / PUT）と、署名なし request の拒否。`X-Amz-Expires` を過ぎると 403 になること
-- STS session の長さが access token の残り時間ではなく `DurationSeconds` で決まること
-- presigned URL の session token から secret key を導いて別の request に署名できないこと、session token を Bearer として送っても拒否されること
-- quota 超過での write 拒否、超過中の read / delete、削除と vacuum 後の自動解除
-- 起動時 env 検証: `KURA_QUOTA_DEFAULT_MB` / `KURA_OPS_INTERVAL_SECONDS` が正の整数でなければ seaweedfs コンテナが起動しないこと
-- 運用タスク: quota reconciler が未設定 bucket に quota を付けること、TTL sweep が期限超過の object だけを消し `.keep` marker は年齢に関わらず残すこと（TTL 無効時は何もしないこと）、multipart 掃除が猶予内の upload を残すこと、Object Lock を有効にして作った bucket で古い version と delete marker を消し、利用者に見えるファイルは残すこと（TTL を過ぎたファイルは何も残らないこと）
+- STS の `AssumeRoleWithWebIdentity` から、multipart upload、download まで
+- 中断した multipart upload を、新しい一時 credentials で再開できること。低レベルの API で再開する場合と、SPA の resume 実装そのもので再開する場合の両方を確かめる。SPA の resume 実装では、発見 → MD5 照合 → 続行 → 完成の流れと、内容が違うファイルの拒否と、破棄を確かめる
+- 実行中の multipart upload の一覧の形式（Prefix による絞り込み、part の ETag = MD5）
+- 一時 credentials で作った presigned URL（GET / PUT）が使えることと、署名の無い request が拒否されること。`X-Amz-Expires` を過ぎると 403 になること
+- STS session の長さが、access token の残り時間ではなく `DurationSeconds` で決まること
+- presigned URL を受け取った人が、URL の中の session token から secret key を導いて別の request に署名できないこと。session token を Bearer として送っても拒否されること
+- quota を超えると write が拒否されること。quota を超えている間も read と delete ができること。削除と vacuum のあとに read-only が自動で解除されること
+- 起動時の env の検証: `KURA_QUOTA_DEFAULT_MB` / `KURA_OPS_INTERVAL_SECONDS` が正の整数でなければ、seaweedfs コンテナが起動しないこと
+- 運用タスク:
+  - quota reconciler が、quota が未設定の bucket に quota を設定すること
+  - TTL の削除が期限を過ぎた object だけを消し、空フォルダを表す `.keep` marker は作成からの経過時間に関わらず残すこと。TTL が無効のときは何もしないこと
+  - multipart upload の掃除が、猶予の期間内の upload を残すこと
+  - Object Lock を有効にして作った bucket で、日次運用タスクが古い version と delete marker を消し、利用者に見えるファイルは残すこと。TTL を過ぎたファイルは、version も delete marker も残らないこと
 
-**SPA 配信**（`spa-delivery.test.ts`）は、配信 server が SPA を配る形を検証する。
+SPA の配信のテスト（`spa-delivery.test.ts`）は、SPA の配信 server がどう SPA を配るかを検証する。
 
-- ルート `/` が index.html を 200 で返すこと（compose の healthcheck が依存する）
-- SPA route の URL 直打ちで index.html が返ること
-- 存在しないビルド asset が SPA fallback に流れず 404 になること
-- ビルドディレクトリの外へ出る path（`..` とその percent-encode 形）が配信されないこと
-- 許可していない `Host` header の request が拒否されること
-- 配信 server が `Access-Control-*` を付けないこと（CORS に応答するのは SeaweedFS だけ、という不変条件）
-- 検索エンジンに載せない環境（`env.test` は `KURA_NOINDEX=true`）で、robots.txt が `/llms.txt` 以外を拒否すること、`/sitemap.xml` が SPA fallback に流れず 404 になること、`/llms.txt` が S3 endpoint を示すこと、index.html に noindex が付くこと。載せる環境の中身は unit テストで見る
+- `/` が index.html を 200 で返すこと（compose の healthcheck が `/` を使う）
+- SPA の route の URL に直接アクセスすると、index.html が返ること
+- 存在しないビルド asset には、SPA の fallback で index.html を返さず、404 を返すこと
+- ビルドディレクトリの外を指す path（`..` と、`..` を percent-encode した形）を配信しないこと
+- 許可していない `Host` header の request を拒否すること
+- 配信 server が `Access-Control-*` の header を付けないこと（CORS に応答するのは SeaweedFS だけ、という不変条件）
+- 検索エンジンに載せない環境（`env.test` は `KURA_NOINDEX=true`）で、次のとおりになること。robots.txt は `/llms.txt` 以外のクロールを拒否する。`/sitemap.xml` は SPA の fallback で index.html を返さず、404 になる。`/llms.txt` は S3 endpoint を示す。index.html に noindex が付く
+
+検索エンジンに載せる環境の robots.txt などの中身は、unit テストで確かめる。
 
 ## unit
 
-`tests/unit/`。コンポーネントは実物の provider（AuthProvider / i18n / react-query）ごと動かす。認証済み状態は oidc-client-ts のストレージへ User を seed して作る（ストレージ = 外部境界）。
+`tests/unit/` にある。unit テストは、コンポーネントを実物の provider（AuthProvider・i18n・react-query）ごと動かす。認証済みの状態は、oidc-client-ts のストレージに User を seed して作る（ストレージは外部境界として扱う）。
 
-E2E に出せない画面の状態（quota 超過、一覧取得の失敗、領域の初期化の失敗）はここで担保する。実 SeaweedFS でその状態を再現するのは不安定なので、E2E は正常系の導線だけを通す。
+E2E で再現できない画面の状態（quota の超過、一覧の取得の失敗、領域の初期化の失敗）は、unit テストで確かめる。実物の SeaweedFS でこうした状態を再現すると結果が安定しないので、E2E は正常系の操作の流れだけを確かめる。
 
-UI の文言が必ず i18n resources を経由することも unit テストで守る。`app/` 配下のソース（resources を除く）にコメント以外の日本語リテラルが無いことを検査している。
+UI の文言が必ず i18n resources を経由することも、unit テストで確かめる。unit テストは、`app/` の下のソース（i18n resources を除く）のコメント以外の部分に、日本語のリテラルが無いことを検査する。
 
-モーダルの focus 挙動（開いたときの初期 focus、Tab の折り返し、Escape、閉じたあとの focus 復帰）も固定してある。すべてのモーダルが同じ実装を共有しているため、壊れたときの影響範囲が広い。
+モーダルの focus の挙動（開いたときの初期 focus、Tab の折り返し、Escape、閉じたあとの focus の復帰）も、unit テストで確かめる。すべてのモーダルが同じ実装を共有しているので、モーダルの実装が壊れたときの影響の範囲が広い。
 
 ## PBT
 
-`tests/pbt/`。fast-check で不変条件を検査する。重点対象は次のとおり。
+`tests/pbt/` にある。fast-check で不変条件を検査する。主な対象は次のとおりである。
 
-- key / prefix の構築（`..`、percent-encoding、unicode、空 segment）
-- username の S3 bucket 名適合判定（SeaweedFS の受理集合との一致）
-- filename validation の境界値
-- ビルド時設定（ファイル TTL / quota の既定値 / UI origin）の受理集合
-- i18n resources の ja / en パリティ（キー集合の一致、空文字の禁止、翻訳漏れの検知）
-- presigned URL の発行履歴と失効判定の不変条件
+- key と prefix の組み立て（`..`、percent-encoding、unicode、空の segment）
+- username が S3 の bucket 名として使えるかの判定（SeaweedFS が受け付ける名前の集合と一致すること）
+- ファイル名の検証の境界値
+- ビルド時の設定（ファイルの TTL・quota の既定値・UI の origin）として受け付ける値の集合
+- i18n resources の ja と en の対応（キーの集合が一致すること、空文字が無いこと、翻訳漏れが無いこと）
+- presigned URL の発行履歴と、失効の判定の不変条件
 
 ## E2E
 
-`tests/e2e/`。3 つのユースケース（upload / download / presign）を実ブラウザで通す。起動済みの dev compose と DDBJ staging Keycloak を使い、staging の専用テストユーザーでログインする。資格情報は git 管理外の `.env` の `E2E_USERNAME` / `E2E_PASSWORD` に置く。staging へのネットワーク到達が必要なため `npm test` には含めない。
+`tests/e2e/` にある。3 つのユースケース（upload・download・presign）を、実際のブラウザで実行する。E2E は、起動済みの dev compose と DDBJ の staging の Keycloak を使い、staging の専用のテストユーザーでログインする。テストユーザーの資格情報は、git 管理外の `.env` の `E2E_USERNAME` / `E2E_PASSWORD` に置く。E2E は staging にネットワークで到達する必要があるので、`npm test` には含めない。
 
-シナリオの一覧と、各シナリオが E2E でなければならない理由は [e2e/scenarios.md](./e2e/scenarios.md) にある。
+シナリオの一覧と、各シナリオを E2E で確かめなければならない理由は、[e2e/scenarios.md](./e2e/scenarios.md) にある。
 
-配備先でしか確かめられない要求（100 GB クラス、1 時間を超える upload、gateway 経由のストリーミング）は自動テストの対象外で、配備時に手で確認する（[../docs/deployment.md](../docs/deployment.md) の「配備先での実測」）。
+配備先でしか確かめられない要求（100 GB クラス、1 時間を超える upload、gateway を通したストリーミング）は、自動テストの対象外である。配備時に手で確認する（[../docs/deployment.md](../docs/deployment.md) の「7. 配備先での実測」）。
