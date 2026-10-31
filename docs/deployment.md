@@ -70,9 +70,9 @@ compose の project 名は、`compose.yml` の `name`（production の project �
 
 ## 3. ホスト側のディレクトリを用意する
 
-`KURA_SEAWEEDFS_DATA_DIR` が指すディレクトリを作り、`chmod 0777` を実行しておく。SeaweedFS のデータは、named volume ではなく bind mount で、このディレクトリに直接置く。filer の LevelDB も同じディレクトリの下に作られるので、永続データはこのディレクトリ 1 つに収まる。
+`KURA_SEAWEEDFS_DATA_DIR` が指すディレクトリを、コンテナを動かすユーザーで作る。SeaweedFS のデータは、named volume ではなく bind mount で、このディレクトリに直接置く。filer の LevelDB も同じディレクトリの下に作られるので、永続データはこのディレクトリ 1 つに収まる。
 
-rootless podman で共有ファイルシステムにデータを置く場合は、container 内の uid をホストの uid に対応させる必要がある。この対応の設定は、`compose.podman.yml` の overlay にある。ホストのユーザーに subuid / subgid の range が割り当てられていることも確認する。
+rootless podman で動かす場合は、ホストのユーザーに subuid / subgid の range が割り当てられていることを確認する。image の中には root 以外の uid が持つファイルがあり、podman は image を展開するときに subuid を使うためである。kura のコンテナはコンテナ内の root で動くので、データのディレクトリはホストのユーザーの所有のまま読み書きされる（[operations.md](./operations.md) の「稼働の形」）。
 
 rootless podman で動かす場合は、`KURA_LOG_DIR` が指すディレクトリも、最初に起動する前に作る。
 

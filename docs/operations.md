@@ -10,6 +10,8 @@ kura は compose の 3 サービスだけで動く。
 - web: SPA の静的ビルドを配信する。ファイルの byte は web を 1 バイトも通らない
 - ops: 日次運用タスクを実行する
 
+3 つのコンテナは、すべてコンテナ内の root で動く。rootless の container runtime（rootless podman・rootless Docker）は、コンテナ内の root だけをホストでコンテナを動かすユーザーに対応させ、それ以外の uid はホストの subuid に対応させる。コンテナを root 以外の uid で動かすと、SeaweedFS がデータのディレクトリに書くファイルの持ち主が subuid になり、ホストのユーザーがそのファイルを書き換えられない。subuid による読み書きを拒否するファイルシステムでは、SeaweedFS が起動できない。SeaweedFS の image の標準の entrypoint は root で起動されると uid 1000 に切り替えるので、`seaweedfs/entrypoint.sh` は標準の entrypoint を経由せずに SeaweedFS を起動する。
+
 外部から接続を受けてよい port は、SPA の配信（`KURA_HTTP_PORT`）と S3 API（`KURA_S3_PORT`）の 2 つだけである。filer と master は、compose の内部 network の中だけで使う。公開 port の bind 先は `KURA_BIND_ADDR` で決まる。既定値の `127.0.0.1` は、開発機やテストの port が意図せず LAN に公開されないための値である。gateway が別のホストから接続する配備先では、`KURA_BIND_ADDR` を、gateway から届くアドレスに明示的に変える必要がある。
 
 ストレージの構成は、per-user bucket に合わせてある。SeaweedFS は bucket ごとに collection を作るので、entrypoint が生成する master.toml で、volume を 1 本ずつ増やす設定にしている。volume 数の上限は、SeaweedFS が空きディスクから自動で決める。volume 1 本のサイズ上限は `KURA_VOLUME_SIZE_LIMIT_MB` である。100 GB クラスのファイルは複数の volume に分けて保存されるので、volume 1 本のサイズ上限が実際の利用を制限することはない。

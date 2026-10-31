@@ -38,4 +38,3 @@ COPY scripts ./scripts
 # scripts/ が import する app のファイル
 COPY app/lib/s3/paginate.ts app/lib/s3/seaweedfs-compat.ts ./app/lib/s3/
 COPY app/lib/crawl.ts ./app/lib/
-USER node

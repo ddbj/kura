@@ -1,7 +1,7 @@
 #!/bin/sh
 # Generates s3.json / iam.json / security.toml from environment variables,
-# then hands off to the stock SeaweedFS entrypoint. IAM policy variables like
-# ${jwt:preferred_username} are escaped so they reach the JSON literally.
+# then starts weed. IAM policy variables like ${jwt:preferred_username} are
+# escaped so they reach the JSON literally.
 set -euo pipefail
 
 : "${KURA_OIDC_ISSUER:?}"
@@ -298,4 +298,11 @@ wait_for_master() {
   done
 ) &
 
-exec /entrypoint.sh "$@"
+# Start weed directly instead of through the image's stock /entrypoint.sh.
+# Started as root, the stock entrypoint chowns /data to uid 1000 and switches
+# to uid 1000. Under a rootless runtime only the container's root maps to the
+# host user, so data written as uid 1000 is owned by a subuid on the host: the
+# host user cannot change it, and file systems that refuse subuids refuse it.
+# GODEBUG keeps the FIPS 140-3 mode that the stock entrypoint turns on.
+export GODEBUG="${GODEBUG:+$GODEBUG,}fips140=on"
+exec weed -logtostderr=true "$@"

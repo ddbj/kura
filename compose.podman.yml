@@ -1,9 +1,6 @@
 # rootless podman-compose overlay。compose.yml と合わせて使う:
 #   podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
 #
-# - seaweedfs は image が非 root uid で走るため、bind mount 先へ host uid で
-#   到達できるよう userns を固定する。web / ops は host の directory を mount
-#   しないので不要
 # - label=disable は SELinux 環境向けの慣習 (他 DDBJ サービスと足並みを揃える)
 # - 各サービスの出力は journald ではなく KURA_LOG_DIR/<service>.log に書く。
 #   journald の保存量はホスト全体で決まり、他の出力が多いと web と ops の
@@ -16,7 +13,6 @@
 
 services:
   seaweedfs:
-    userns_mode: "keep-id:uid=1000,gid=1000"
     security_opt:
       - label=disable
     healthcheck:

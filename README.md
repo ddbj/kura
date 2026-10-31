@@ -38,7 +38,7 @@ kura の機能は次の 3 つだけである。kura は、認証していない�
 | `docs/` | 仕様。下の「ドキュメント」に一覧がある |
 | `Dockerfile` | web と ops の image。SPA をビルドする stage と、devDependencies を除く依存 package だけを入れる runtime の stage に分かれる |
 | `compose.yml` | stack 本体（seaweedfs・web・ops の 3 サービス） |
-| `compose.podman.yml` | rootless podman で配備するときに `compose.yml` と一緒に渡す overlay。コンテナ内の uid とホストの uid の対応（userns）、コンテナの出力をファイルに書く設定、healthcheck の間隔を持つ |
+| `compose.podman.yml` | rootless podman で配備するときに `compose.yml` と一緒に渡す overlay。コンテナの出力をファイルに書く設定と、healthcheck の間隔を持つ |
 | `compose.test.yml` | テストのときに `compose.yml` と一緒に渡す overlay。テストで Keycloak の代わりに使う JWKS の配信サービスを足す |
 | `env.dev` `env.staging` `env.production` `env.test` | 環境ごとの設定値。secret は含まない |
 

@@ -189,7 +189,7 @@ web と ops は、repo の `Dockerfile` の `runtime` stage から作る同じ i
 
 SPA のビルドは、同じ `Dockerfile` の `build` stage で行う。ビルドが読む env（「reference SPA」）は、compose が build arg として渡す。secret は build arg に入れない。
 
-base image には、node の LTS の major の tag（`node:26-alpine`）を使い、patch version では固定しない。upstream が rebuild した base image は、`--pull` を付けて image を作り直したときに取り込まれる。runtime の image は非 root の `node` user で動き、host の directory を mount しない。
+base image には、node の LTS の major の tag（`node:26-alpine`）を使い、patch version では固定しない。upstream が rebuild した base image は、`--pull` を付けて image を作り直したときに取り込まれる。web と ops は、seaweedfs と同じくコンテナ内の root で動き（[operations.md](./operations.md) の「稼働の形」）、host の directory を mount しない。
 
 ## reference SPA
 
@@ -249,3 +249,4 @@ SeaweedFS は release tag に pin して配備する。現在の pin は `4.51` 
 | `ListObjectsV2` と `ListMultipartUploads` は、`IsTruncated` と marker が食い違うことがある | reference SPA / [operations.md](./operations.md) の「日次運用タスク」 |
 | 新しい collection（= bucket）に書き込むと、既定で volume を 7 本確保する | [operations.md](./operations.md) の「稼働の形」 |
 | filer の API（HTTP / gRPC）には、S3 の IAM の認可が効かない | 認証と認可 / ネットワーク境界 |
+| image の標準の entrypoint は、root で起動されると `/data` の持ち主を uid 1000 に変え、uid 1000 に切り替えて SeaweedFS を起動する | [operations.md](./operations.md) の「稼働の形」 |
