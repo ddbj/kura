@@ -135,10 +135,10 @@ podman-compose --env-file .env -f compose.yml -f compose.podman.yml up -d
 3. upload の途中でネットワークを切断し（DevTools の offline）、転送カードの「再開」で続きから完了できることと、完成したファイルが元のファイルと一致することを確認する
 4. ブラウザを閉じて開き直し、「再開待ちのアップロード」からファイルを選び直して再開できることを確認する
 5. presigned URL を発行し、別のブラウザ（未認証）から download した内容が一致することを確認する。presigned URL に `curl -r 0-1023` で request し、partial content が返ることも確認する（gateway を通したストリーミングと Range の確認を兼ねる）
-6. 配備先に対して E2E を実行し、すべて通ることを確認する（[tests/README.md](../tests/README.md)）。次の 3 つの env を配備先の値にする。E2E のテストユーザー（`E2E_USERNAME` / `E2E_PASSWORD`）には、配備先の realm のユーザーを使う
-   - `KURA_E2E_BASE_URL`: UI の origin
-   - `KURA_E2E_OIDC_ISSUER`: 配備先の `KURA_OIDC_ISSUER`
-   - `KURA_E2E_S3_ENDPOINT`: 配備先の `KURA_S3_ENDPOINT`
+6. staging では E2E を実行し、すべて通ることを確認する（[tests/README.md](../tests/README.md)）。production では E2E を実行しない。E2E はテストユーザーの bucket にファイルを作って消すので、実ユーザーのデータを置く環境では実行しない。次の 3 つの env を staging の値にする。E2E のテストユーザー（`E2E_USERNAME` / `E2E_PASSWORD`）には、staging の realm のユーザーを使う
+   - `KURA_E2E_BASE_URL`: staging の UI の origin
+   - `KURA_E2E_OIDC_ISSUER`: staging の `KURA_OIDC_ISSUER`
+   - `KURA_E2E_S3_ENDPOINT`: staging の `KURA_S3_ENDPOINT`
 
 ## 更新
 
