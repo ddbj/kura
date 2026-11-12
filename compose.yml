@@ -119,6 +119,8 @@ services:
 # The filer's gRPC port, the master and the volume server accept any caller
 # that reaches them, so only the containers that need SeaweedFS share a network
 # with it. web takes requests from outside and never talks to SeaweedFS.
+# The empty mappings are spelled out because podman-compose 1.0.6 cannot merge
+# a null entry with the driver_opts in compose.podman.yml.
 networks:
-  storage:
-  web:
+  storage: {}
+  web: {}
