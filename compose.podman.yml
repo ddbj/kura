@@ -7,6 +7,8 @@
 #   数行はすぐに消える。KURA_LOG_DIR はデータと別のディスクにする: podman は
 #   container の出力を読んでから書くので、書き込みが止まると stdout に書く
 #   process も止まる
+# - podman は bridge network の間の通信を既定で通す。両方の network に isolate を
+#   付けないと、web が SeaweedFS の container に IP アドレスで届く
 # - podman は healthcheck を 1 回実行するごとに journald に記録する。
 #   compose.yml の 2 秒 (テストの up --wait 用) ではホストの journald を埋める
 #   ので、間隔を延ばす
@@ -39,3 +41,11 @@ services:
       driver: k8s-file
       options:
         path: ${KURA_LOG_DIR:?KURA_LOG_DIR is required}/ops.log
+
+networks:
+  storage:
+    driver_opts:
+      isolate: "true"
+  web:
+    driver_opts:
+      isolate: "true"

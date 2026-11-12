@@ -73,7 +73,7 @@ SeaweedFS の設定ファイルは 3 つある。
 
 - iam.json: OIDC provider（issuer・clientId・jwksUri）、roleMapping、policy と role の定義、`sts.signingKey` を書く。`sts.maxSessionLength` は 12h にする
 - s3.json: root identity だけを書く。anonymous identity は置かない。認証なしで S3 にアクセスできる経路を作らないためである
-- security.toml: `jwt.filer_signing.key` と `jwt.filer_signing.read.key` に同じ鍵を書き、filer の HTTP の read・write と IAM の gRPC service に Bearer token を必須にする。filer の API には S3 の IAM が効かない。この鍵が無いと、compose network 上のどのプロセスからでも（SPA の配信 server も同じ network にある）、全 bucket を認証なしで読み書きできる
+- security.toml: `jwt.filer_signing.key` と `jwt.filer_signing.read.key` に同じ鍵を書き、filer の HTTP の read・write と IAM の gRPC service に Bearer token を必須にする。filer の API には S3 の IAM が効かない。この鍵が無いと、SeaweedFS と同じ network にあるどのプロセスからでも、filer の HTTP で全 bucket を認証なしで読み書きできる。この鍵は filer の gRPC のほかの service には効かないので、SeaweedFS に届く container を network で絞る（「ネットワーク境界」）
 
 filer の read 用と write 用で鍵を分けないのは、どちらの鍵も cluster の中だけで使われて client に渡らないので、鍵を 2 本に増やしても脅威モデル上の利点が無いためである。
 
@@ -116,7 +116,9 @@ SPA が使用量メーターに出す上限は、ビルド時に埋め込んだ�
 
 ## ネットワーク境界
 
-外部に公開する endpoint は、S3 API と SPA の配信の 2 つだけである。filer（HTTP / gRPC）と master は、compose の内部 network の中だけで使う。
+外部に公開する endpoint は、S3 API と SPA の配信の 2 つだけである。filer（HTTP / gRPC）・master・volume server は、compose の内部 network の中だけで使う。
+
+compose の network は `storage` と `web` の 2 つに分ける。`storage` には seaweedfs と ops を置き、`web` には web だけを置く。filer の gRPC・master・volume server は、届いた相手を認証せずに受け付け、filer の gRPC だけで全 bucket を読み書きできる。web は外部からのリクエストを受ける container で、SeaweedFS とは通信しないので、web から SeaweedFS のどの port にも届かない形にする。ops は root の credentials を持つので、`storage` に置いても守る範囲は変わらない。podman は bridge network の間の通信を既定で通すので、`compose.podman.yml` が 2 つの network に `isolate` を付ける。
 
 S3 API と SPA の配信は、別の subdomain に分ける。Host は SigV4 の署名対象なので、外向きの S3 endpoint と、presigned URL の生成時に使う endpoint は一致していなければならない。SPA と S3 API を同じ origin に置くと、この 2 つの endpoint を一致させるために path による振り分けが必要になり、署名の対象が環境ごとに変わる。
 
@@ -228,7 +230,7 @@ presign の履歴: SPA は、session の中で発行した presigned URL の一�
 
 ## SeaweedFS 由来の制約
 
-SeaweedFS は release tag に pin して配備する。現在の pin は `4.51` である。pin を上げるときは、release notes を読み、下の表の各項目を新しい version で確かめる。
+SeaweedFS は release tag に pin して配備する。現在の pin は `4.53` である。pin を上げるときは、release notes を読み、下の表の各項目を新しい version で確かめる。
 
 | 制約 | 影響する箇所 |
 | --- | --- |
@@ -248,5 +250,5 @@ SeaweedFS は release tag に pin して配備する。現在の pin は `4.51` 
 | volume server は、データのファイルシステムの空きが `-volume.minFreeSpace`（既定は 1%）を下回ると、全 volume を read-only にする | [operations.md](./operations.md) の「稼働の形」 |
 | `ListObjectsV2` と `ListMultipartUploads` は、`IsTruncated` と marker が食い違うことがある | reference SPA / [operations.md](./operations.md) の「日次運用タスク」 |
 | 新しい collection（= bucket）に書き込むと、既定で volume を 7 本確保する | [operations.md](./operations.md) の「稼働の形」 |
-| filer の API（HTTP / gRPC）には、S3 の IAM の認可が効かない | 認証と認可 / ネットワーク境界 |
+| filer の API（HTTP / gRPC）には、S3 の IAM の認可が効かない。`jwt.filer_signing` の鍵が効くのは、filer の HTTP と IAM の gRPC service だけである | 認証と認可 / ネットワーク境界 |
 | image の標準の entrypoint は、root で起動されると `/data` の持ち主を uid 1000 に変え、uid 1000 に切り替えて SeaweedFS を起動する | [operations.md](./operations.md) の「稼働の形」 |

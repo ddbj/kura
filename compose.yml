@@ -2,7 +2,7 @@ name: kura
 
 services:
   seaweedfs:
-    image: docker.io/chrislusf/seaweedfs:4.51
+    image: docker.io/chrislusf/seaweedfs:4.53
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/kura/entrypoint.sh"]
     command:
@@ -54,6 +54,8 @@ services:
       # bind 先は default で loopback。外から届く必要がある環境だけ
       # KURA_BIND_ADDR で開ける。
       - "${KURA_BIND_ADDR:-127.0.0.1}:${KURA_S3_PORT}:8333"
+    networks:
+      - storage
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
       interval: 2s
@@ -85,6 +87,8 @@ services:
       KURA_ALLOWED_HOSTS: ${KURA_ALLOWED_HOSTS:-}
     ports:
       - "${KURA_BIND_ADDR:-127.0.0.1}:${KURA_HTTP_PORT}:8080"
+    networks:
+      - web
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 2s
@@ -109,3 +113,12 @@ services:
     depends_on:
       seaweedfs:
         condition: service_healthy
+    networks:
+      - storage
+
+# The filer's gRPC port, the master and the volume server accept any caller
+# that reaches them, so only the containers that need SeaweedFS share a network
+# with it. web takes requests from outside and never talks to SeaweedFS.
+networks:
+  storage:
+  web:

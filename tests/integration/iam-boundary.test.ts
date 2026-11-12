@@ -160,9 +160,8 @@ describe("IAM policy boundary", () => {
   })
 
   // The filer's own HTTP API is not behind S3's IAM, and every container on
-  // the compose network can reach it — including the SPA delivery process,
-  // which has no business reading buckets. security.toml's read signing key is
-  // what closes that door.
+  // its network can reach it. security.toml's read signing key is what closes
+  // that door.
   it("denies an unauthenticated filer read from another container on the network", () => {
     const status = execFileSync("docker", [
       "exec", "kura-test-ops-1", "sh", "-c",
@@ -171,6 +170,32 @@ describe("IAM policy boundary", () => {
 
     expect(status).toBe("401")
   })
+
+  // The filer signing key covers the filer's HTTP API and its IAM gRPC
+  // service only. The rest of the filer gRPC port, the master and the volume
+  // server accept any caller that reaches them, and that is enough to read,
+  // write and delete every bucket. The SPA delivery process is the one
+  // container that takes requests from outside and never talks to SeaweedFS,
+  // so it sits on a network of its own.
+  it("keeps every SeaweedFS port out of reach of the SPA delivery container", () => {
+    const address = execFileSync("docker", [
+      "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", "kura-test-seaweedfs-1",
+    ], { encoding: "utf8" }).trim().split(/\s+/)[0]!
+    expect(address).toMatch(/^\d+\.\d+\.\d+\.\d+$/)
+
+    const probe = (container: string, host: string) =>
+      execFileSync("docker", [
+        "exec", container, "sh", "-c",
+        `for p in 8333 8888 18888 9333 19333 8082 18082; do nc -z -w 2 ${host} $p 2>/dev/null && printf '%s ' $p; done; true`,
+      ], { encoding: "utf8" }).trim()
+
+    // Control: the same probe from a container that shares the network sees
+    // every port, so an empty result below means "unreachable", not "no nc".
+    expect(probe("kura-test-ops-1", address)).toBe("8333 8888 18888 9333 19333 8082 18082")
+
+    expect(probe("kura-test-web-1", "seaweedfs")).toBe("")
+    expect(probe("kura-test-web-1", address)).toBe("")
+  }, 60_000)
 
   it("rejects tokens with a wrong audience", async () => {
     const token = await signToken({ username: uniqueUser(), aud: "someone-else" })

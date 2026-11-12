@@ -72,9 +72,10 @@ copy_other = 1
 EOTOML
 
 # Bearer-token gate on the filer's own HTTP API and IAM gRPC service, which
-# S3's IAM never sees. The read key matters because the SPA delivery process
-# sits on the same compose network and has no business reading the filer;
-# without it any process on that network could read every bucket unauthenticated.
+# S3's IAM never sees. Without the read key any process that reaches the filer
+# could read every bucket over HTTP unauthenticated. The key does not cover
+# the rest of the filer's gRPC port, so the compose networks keep every
+# container that has no business with SeaweedFS away from it.
 # In-cluster components (the S3 server included) sign with this same file, so
 # one key covers both directions.
 cat > /etc/seaweedfs/security.toml <<EOTOML

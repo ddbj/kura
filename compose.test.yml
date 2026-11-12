@@ -20,3 +20,5 @@ services:
     image: docker.io/library/nginx:1.30-alpine-slim
     volumes:
       - ./tests/setup/.jwks:/usr/share/nginx/html:ro
+    networks:
+      - storage
