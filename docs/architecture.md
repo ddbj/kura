@@ -73,7 +73,7 @@ SeaweedFS の設定ファイルは 3 つある。
 
 - iam.json: OIDC provider（issuer・clientId・jwksUri）、roleMapping、policy と role の定義、`sts.signingKey` を書く。`sts.maxSessionLength` は 12h にする
 - s3.json: root identity だけを書く。anonymous identity は置かない。認証なしで S3 にアクセスできる経路を作らないためである
-- security.toml: `jwt.filer_signing.key` と `jwt.filer_signing.read.key` に同じ鍵を書き、filer の HTTP の read・write と IAM の gRPC service に Bearer token を必須にする。filer の API には S3 の IAM が効かない。この鍵が無いと、SeaweedFS と同じ network にあるどのプロセスからでも、filer の HTTP で全 bucket を認証なしで読み書きできる。この鍵は filer の gRPC のほかの service には効かないので、SeaweedFS に届く container を network で絞る（「ネットワーク境界」）
+- security.toml: `jwt.filer_signing.key` と `jwt.filer_signing.read.key` に同じ鍵を書き、filer の HTTP の read・write と IAM の gRPC service に Bearer token を必須にする。filer の API には S3 の IAM が効かない。S3 の gRPC port の service（IAM の書き換えなど）も、同じ鍵で呼び出し元を確かめる。この鍵は filer の gRPC のほかの service・master・volume server には効かないので、これらの port は container の外に出さない（「ネットワーク境界」）
 
 filer の read 用と write 用で鍵を分けないのは、どちらの鍵も cluster の中だけで使われて client に渡らないので、鍵を 2 本に増やしても脅威モデル上の利点が無いためである。
 
@@ -116,9 +116,11 @@ SPA が使用量メーターに出す上限は、ビルド時に埋め込んだ�
 
 ## ネットワーク境界
 
-外部に公開する endpoint は、S3 API と SPA の配信の 2 つだけである。filer（HTTP / gRPC）・master・volume server は、compose の内部 network の中だけで使う。
+外部に公開する endpoint は、S3 API と SPA の配信の 2 つだけである。
 
-compose の network は `storage` と `web` の 2 つに分ける。`storage` には seaweedfs と ops を置き、`web` には web だけを置く。filer の gRPC・master・volume server は、届いた相手を認証せずに受け付け、filer の gRPC だけで全 bucket を読み書きできる。web は外部からのリクエストを受ける container で、SeaweedFS とは通信しないので、web から SeaweedFS のどの port にも届かない形にする。ops は root の credentials を持つので、`storage` に置いても守る範囲は変わらない。podman は bridge network の間の通信を既定で通すので、`compose.podman.yml` が 2 つの network に `isolate` を付ける。
+seaweedfs の container の外から届く port は、S3 API と S3 の gRPC の 2 つだけにする。master・filer（HTTP / gRPC）・volume server は、container の loopback だけで listen する。filer の gRPC・master・volume server は、届いた相手を認証せずに受け付け、filer の gRPC だけで全 bucket を読み書きできるためである。これらは S3 API と同じ 1 つの process で動くので、互いの通信は loopback で足りる。ops も S3 API だけを使う。SeaweedFS が既定で開く Iceberg と Lance の port は、kura が使わないので止める。S3 の gRPC の port は、S3 API と同じアドレスでしか listen できない。
+
+compose の network は `storage` と `web` の 2 つに分ける。`storage` には seaweedfs と ops を置き、`web` には web だけを置く。web は外部からのリクエストを受ける container で、SeaweedFS とは通信しないので、web から SeaweedFS のどの port にも届かない形にする。podman は bridge network の間の通信を既定で通すので、`compose.podman.yml` が 2 つの network に `isolate` を付ける。
 
 S3 API と SPA の配信は、別の subdomain に分ける。Host は SigV4 の署名対象なので、外向きの S3 endpoint と、presigned URL の生成時に使う endpoint は一致していなければならない。SPA と S3 API を同じ origin に置くと、この 2 つの endpoint を一致させるために path による振り分けが必要になり、署名の対象が環境ごとに変わる。
 

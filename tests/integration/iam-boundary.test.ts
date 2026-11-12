@@ -159,25 +159,47 @@ describe("IAM policy boundary", () => {
     }
   })
 
-  // The filer's own HTTP API is not behind S3's IAM, and every container on
-  // its network can reach it. security.toml's read signing key is what closes
-  // that door.
-  it("denies an unauthenticated filer read from another container on the network", () => {
+  // The master, the filer and the volume server accept any caller that
+  // reaches them, and the filer's gRPC port alone is enough to read, write and
+  // delete every bucket. They all run in one process, so they listen on the
+  // container's loopback only. The listeners are read from the container
+  // instead of probing a fixed list, because SeaweedFS adds ports from release
+  // to release.
+  it("listens beyond the container's loopback on the S3 ports only", () => {
+    const listeners = execFileSync("docker", [
+      "exec", "kura-test-seaweedfs-1", "netstat", "-ltn",
+    ], { encoding: "utf8" })
+      .split("\n")
+      .filter((line) => line.includes("LISTEN"))
+      .map((line) => line.trim().split(/\s+/)[3]!)
+
+    // Control: the loopback listeners are visible, so the filter below is
+    // what removes them, not a netstat that prints nothing.
+    expect(listeners).toContain("127.0.0.1:18888")
+
+    const exposed = listeners
+      .filter((address) => !address.startsWith("127."))
+      .map((address) => Number(address.slice(address.lastIndexOf(":") + 1)))
+      .sort((x, y) => x - y)
+
+    // 8333 is the S3 API and 18333 its gRPC port, which follows the same bind.
+    expect(exposed).toEqual([8333, 18333])
+  })
+
+  // The filer's own HTTP API is not behind S3's IAM. security.toml's read
+  // signing key keeps it closed to a caller that does reach the filer.
+  it("denies an unauthenticated filer read", () => {
     const status = execFileSync("docker", [
-      "exec", "kura-test-ops-1", "sh", "-c",
-      "wget -S -q -O /dev/null http://seaweedfs:8888/buckets/ 2>&1 | awk '/HTTP\\//{print $2; exit}'",
+      "exec", "kura-test-seaweedfs-1", "sh", "-c",
+      "wget -S -q -O /dev/null http://127.0.0.1:8888/buckets/ 2>&1 | awk '/HTTP\\//{print $2; exit}'",
     ], { encoding: "utf8" }).trim()
 
     expect(status).toBe("401")
   })
 
-  // The filer signing key covers the filer's HTTP API and its IAM gRPC
-  // service only. The rest of the filer gRPC port, the master and the volume
-  // server accept any caller that reaches them, and that is enough to read,
-  // write and delete every bucket. The SPA delivery process is the one
-  // container that takes requests from outside and never talks to SeaweedFS,
-  // so it sits on a network of its own.
-  it("keeps every SeaweedFS port out of reach of the SPA delivery container", () => {
+  // The SPA delivery process is the one container that takes requests from
+  // outside and never talks to SeaweedFS, so it sits on a network of its own.
+  it("keeps SeaweedFS out of reach of the SPA delivery container", () => {
     const address = execFileSync("docker", [
       "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", "kura-test-seaweedfs-1",
     ], { encoding: "utf8" }).trim().split(/\s+/)[0]!
@@ -186,12 +208,12 @@ describe("IAM policy boundary", () => {
     const probe = (container: string, host: string) =>
       execFileSync("docker", [
         "exec", container, "sh", "-c",
-        `for p in 8333 8888 18888 9333 19333 8082 18082; do nc -z -w 2 ${host} $p 2>/dev/null && printf '%s ' $p; done; true`,
+        `for p in 8333 18333 8888 18888 9333 19333 8082 18082; do nc -z -w 2 ${host} $p 2>/dev/null && printf '%s ' $p; done; true`,
       ], { encoding: "utf8" }).trim()
 
     // Control: the same probe from a container that shares the network sees
-    // every port, so an empty result below means "unreachable", not "no nc".
-    expect(probe("kura-test-ops-1", address)).toBe("8333 8888 18888 9333 19333 8082 18082")
+    // the S3 ports, so an empty result below means "unreachable", not "no nc".
+    expect(probe("kura-test-ops-1", address)).toBe("8333 18333")
 
     expect(probe("kura-test-web-1", "seaweedfs")).toBe("")
     expect(probe("kura-test-web-1", address)).toBe("")
