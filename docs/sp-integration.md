@@ -184,7 +184,7 @@ kura は act-as-user 方式を採る。act-as-user 方式では、SP はユー�
 したがって、次のことが成り立つ。
 
 - SP がアクセスできるのは、token を渡したユーザー自身の領域だけである
-- SP の service account（client credentials）の token では、ユーザーの領域にアクセスできない。token の `sub` が service account のもので、ユーザーの `sub` ではないためである
+- SP の service account（client credentials）の token では、ユーザーの領域にアクセスできない。token の `sub` が service account のもので、ユーザーの `sub` ではないためである。SP の client に audience mapper があると、service account の token も STS を通り、service account の `sub` の名前の bucket を使える。この bucket は、どのユーザーの領域でもない
 - DDBJ account を持たない利用者に代わって kura を使うことはできない
 - kura には、どの SP が委譲を受けているかの情報は無い。委譲の情報は SP と Keycloak にあり、SP と Keycloak の側で管理する
 
