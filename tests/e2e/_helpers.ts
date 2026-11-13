@@ -2,6 +2,7 @@
 // specs stay independent. Do not stash state on module scope beyond the
 // once-per-run values read from process.env at load time.
 import { randomBytes } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -37,6 +38,19 @@ export const requireEnv = (name: string): string => {
 
 export const e2eUsername = (): string => requireEnv("E2E_USERNAME")
 export const e2ePassword = (): string => requireEnv("E2E_PASSWORD")
+
+// The test user's bucket is named after the sub of the session that
+// auth.setup saved. The username in .env only signs in and shows in the UI.
+export const e2eBucket = (): string => {
+  const session = JSON.parse(readFileSync("tests/e2e/.auth/user.session.json", "utf8")) as Record<string, string>
+  const user = Object.entries(session).find(([key]) => key.startsWith("oidc.user:"))?.[1]
+  const sub = user === undefined ? undefined : (JSON.parse(user) as { profile?: { sub?: string } }).profile?.sub
+  if (sub === undefined || sub === "") {
+    throw new Error("tests/e2e/.auth/user.session.json holds no signed-in user (auth.setup has not run)")
+  }
+
+  return sub
+}
 export const runId = (): string => requireEnv("KURA_E2E_RUN_ID")
 export const s3Endpoint = (): string =>
   process.env["KURA_E2E_S3_ENDPOINT"] ?? "http://localhost:28333"
@@ -268,7 +282,7 @@ export const s3ClientForE2e = async (page: Page): Promise<S3Client> => {
 export const resetE2eScope = async (page: Page): Promise<void> => {
   if (process.env["KURA_E2E_KEEP_UPLOADS"] === "1") return
   const s3 = await s3ClientForE2e(page)
-  const bucket = e2eUsername()
+  const bucket = e2eBucket()
   const prefix = scopePrefix()
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -322,7 +336,7 @@ export const createFolderViaSdk = async (page: Page, path: string): Promise<void
     await page.locator(".hdr").waitFor({ state: "visible", timeout: 15_000 })
   }
   const s3 = await s3ClientForE2e(page)
-  const bucket = e2eUsername()
+  const bucket = e2eBucket()
   const normalized = path.endsWith("/") ? path : `${path}/`
   await s3.send(new PutObjectCommand({
     Bucket: bucket,
@@ -475,7 +489,7 @@ export const preparePendingUpload = async (
     await page.locator(".hdr").waitFor({ state: "visible", timeout: 15_000 })
   }
   const s3 = await s3ClientForE2e(page)
-  const bucket = e2eUsername()
+  const bucket = e2eBucket()
   const partSize = 8 * 1024 * 1024
   const total = opts.sizeMiB * 1024 * 1024
   const buffer = Buffer.alloc(total, (opts.seed ?? 0x11) & 0xff)

@@ -8,8 +8,8 @@ const base64UrlDecode = (segment: string): string => {
 }
 
 // Claims are decoded without signature verification: the frontend only uses
-// them for display and bucket-name derivation, authorization is enforced by
-// SeaweedFS.
+// them for display and to name the user's bucket, authorization is enforced
+// by SeaweedFS.
 export const decodeJwtPayload = (jwt: string): unknown => {
   const segments = jwt.split(".")
   const payload = segments[1]
@@ -19,7 +19,13 @@ export const decodeJwtPayload = (jwt: string): unknown => {
   return JSON.parse(base64UrlDecode(payload))
 }
 
-const accessTokenClaims = z.object({ preferred_username: z.string().min(1) })
+const usernameClaim = z.object({ preferred_username: z.string().min(1) })
+const subClaim = z.object({ sub: z.string().min(1) })
 
+// Shown in the UI. It plays no part in authorization.
 export const usernameFromAccessToken = (accessToken: string): string =>
-  accessTokenClaims.parse(decodeJwtPayload(accessToken)).preferred_username
+  usernameClaim.parse(decodeJwtPayload(accessToken)).preferred_username
+
+// The user's bucket is named after sub, the one claim the user policy reads.
+export const subFromAccessToken = (accessToken: string): string =>
+  subClaim.parse(decodeJwtPayload(accessToken)).sub

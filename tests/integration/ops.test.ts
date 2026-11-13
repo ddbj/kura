@@ -14,7 +14,7 @@ import {
 } from "@aws-sdk/client-s3"
 import { describe, expect, inject, it } from "vitest"
 
-import { assumeRole, eventually, putText, rootS3Client, s3ClientFor, setupUser, signToken, uniqueUser, weedShell } from "./_helpers"
+import { assumeRole, eventually, putText, rootS3Client, s3ClientFor, setupUser, signToken, uniqueSub, weedShell } from "./_helpers"
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -52,12 +52,12 @@ describe("ops service env passthrough", () => {
 
 describe("default quota reconciler", () => {
   it("applies the default quota to buckets without one", async () => {
-    const { username } = await setupUser()
+    const { sub } = await setupUser()
 
     // env.test: KURA_OPS_INTERVAL_SECONDS=5, KURA_QUOTA_DEFAULT_MB=1024
     await eventually(async () => {
       const listed = weedShell("s3.bucket.list")
-      const line = listed.split("\n").find((l) => l.includes(username))
+      const line = listed.split("\n").find((l) => l.includes(sub))
       expect(line).toContain("quota:1073741824")
     }, 60_000, 2_000)
   })
@@ -65,39 +65,39 @@ describe("default quota reconciler", () => {
 
 describe("file TTL sweep", () => {
   it("deletes only objects past the TTL", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "a/keep me.txt", "k")
-    await putText(s3, username, "b/nested/expire.txt", "e")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "a/keep me.txt", "k")
+    await putText(s3, sub, "b/nested/expire.txt", "e")
 
     runOpsDaily(daysFromNow(29))
-    const kept = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    const kept = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
     expect(kept.Contents?.length).toBe(2)
 
     runOpsDaily(daysFromNow(31))
-    const swept = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    const swept = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
     expect(swept.Contents ?? []).toHaveLength(0)
   })
 
   // The marker is the only thing keeping an empty folder listable, and it is
   // created once and never touched again — so its own age must not delete it.
   it("keeps empty-folder markers regardless of their age", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "empty/.keep", "")
-    await putText(s3, username, ".keep", "")
-    await putText(s3, username, "empty/data.txt", "d")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "empty/.keep", "")
+    await putText(s3, sub, ".keep", "")
+    await putText(s3, sub, "empty/data.txt", "d")
 
     runOpsDaily(daysFromNow(31))
 
-    const remaining = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    const remaining = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
     expect((remaining.Contents ?? []).map((o) => o.Key).sort()).toEqual([".keep", "empty/.keep"])
   })
 
   it("leaves everything alone when the TTL is disabled", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "forever.txt", "f")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "forever.txt", "f")
 
     runOpsDaily(daysFromNow(10_000), { KURA_FILE_TTL_DAYS: "" })
-    const listed = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
     expect(listed.Contents?.length).toBe(1)
   })
 })
@@ -107,11 +107,11 @@ describe("file TTL sweep", () => {
 // reach and counted against their quota.
 describe("old versions in a bucket created with Object Lock", () => {
   const setupObjectLockUser = async () => {
-    const username = uniqueUser()
-    const s3 = s3ClientFor(await assumeRole(await signToken({ username })))
-    await s3.send(new CreateBucketCommand({ Bucket: username, ObjectLockEnabledForBucket: true }))
+    const sub = uniqueSub()
+    const s3 = s3ClientFor(await assumeRole(await signToken({ sub })))
+    await s3.send(new CreateBucketCommand({ Bucket: sub, ObjectLockEnabledForBucket: true }))
 
-    return { username, s3 }
+    return { sub, s3 }
   }
 
   const listVersions = async (bucket: string) => {
@@ -124,72 +124,72 @@ describe("old versions in a bucket created with Object Lock", () => {
   }
 
   it("turns versioning on, which the cleanup relies on to find the bucket", async () => {
-    const { username } = await setupObjectLockUser()
-    const res = await rootS3Client().send(new GetBucketVersioningCommand({ Bucket: username }))
+    const { sub } = await setupObjectLockUser()
+    const res = await rootS3Client().send(new GetBucketVersioningCommand({ Bucket: sub }))
     expect(res.Status).toBe("Enabled")
   })
 
   it("deletes old versions and delete markers, keeps the files the owner sees", async () => {
-    const { username, s3 } = await setupObjectLockUser()
-    await putText(s3, username, "a.txt", "one")
-    await putText(s3, username, "a.txt", "two")
-    await putText(s3, username, "b.txt", "gone")
-    await s3.send(new DeleteObjectCommand({ Bucket: username, Key: "b.txt" }))
-    await putText(s3, username, "empty/.keep", "")
+    const { sub, s3 } = await setupObjectLockUser()
+    await putText(s3, sub, "a.txt", "one")
+    await putText(s3, sub, "a.txt", "two")
+    await putText(s3, sub, "b.txt", "gone")
+    await s3.send(new DeleteObjectCommand({ Bucket: sub, Key: "b.txt" }))
+    await putText(s3, sub, "empty/.keep", "")
 
     // The ops container of the test stack runs the same pass every few
     // seconds, so the state before this run is not asserted: either pass may
     // be the one that cleans up.
     const out = runOpsDaily(daysFromNow(0), { KURA_FILE_TTL_DAYS: "" })
 
-    expect(await listVersions(username)).toEqual({ versions: ["a.txt:latest", "empty/.keep:latest"], deleteMarkers: 0 })
-    expect(out).toContain(`bucket ${username} has versioning on`)
-    const listed = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    expect(await listVersions(sub)).toEqual({ versions: ["a.txt:latest", "empty/.keep:latest"], deleteMarkers: 0 })
+    expect(out).toContain(`bucket ${sub} has versioning on`)
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
     expect((listed.Contents ?? []).map((o) => o.Key).sort()).toEqual(["a.txt", "empty/.keep"])
   })
 
   // The TTL sweep only lays delete markers over expired files in such a
   // bucket; the same pass has to take the content away too.
   it("leaves nothing of a file past the TTL", async () => {
-    const { username, s3 } = await setupObjectLockUser()
-    await putText(s3, username, "old.txt", "x")
+    const { sub, s3 } = await setupObjectLockUser()
+    await putText(s3, sub, "old.txt", "x")
 
     runOpsDaily(daysFromNow(31))
 
-    expect(await listVersions(username)).toEqual({ versions: [], deleteMarkers: 0 })
+    expect(await listVersions(sub)).toEqual({ versions: [], deleteMarkers: 0 })
   })
 
   it("leaves a bucket without versioning out of the report", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "plain.txt", "p")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "plain.txt", "p")
 
     const out = runOpsDaily(daysFromNow(0), { KURA_FILE_TTL_DAYS: "" })
 
-    expect(out).not.toContain(`bucket ${username} has versioning on`)
-    const listed = await s3.send(new ListObjectsV2Command({ Bucket: username }))
+    expect(out).not.toContain(`bucket ${sub} has versioning on`)
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
     expect(listed.Contents?.length).toBe(1)
   })
 })
 
 describe("stale multipart cleanup", () => {
   it("aborts uploads idle past the age limit, keeps recent and part-less ones", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
     const withParts = await s3.send(
-      new CreateMultipartUploadCommand({ Bucket: username, Key: "stale.bin" }),
+      new CreateMultipartUploadCommand({ Bucket: sub, Key: "stale.bin" }),
     )
     await s3.send(
       new UploadPartCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: "stale.bin",
         UploadId: withParts.UploadId!,
         PartNumber: 1,
         Body: Buffer.alloc(5 * 1024 * 1024, 9),
       }),
     )
-    await s3.send(new CreateMultipartUploadCommand({ Bucket: username, Key: "empty.bin" }))
+    await s3.send(new CreateMultipartUploadCommand({ Bucket: sub, Key: "empty.bin" }))
 
     const listKeys = async () => {
-      const res = await s3.send(new ListMultipartUploadsCommand({ Bucket: username }))
+      const res = await s3.send(new ListMultipartUploadsCommand({ Bucket: sub }))
 
       return (res.Uploads ?? []).map((u) => u.Key).sort()
     }

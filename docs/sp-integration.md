@@ -11,7 +11,7 @@ kura は、DDBJ account で認証したユーザーが、自分専用の領域�
 | SP の Keycloak client に audience mapper を足す | SP 側（DDBJ account の realm の管理者への依頼になる場合がある） |
 | S3 client の実装、CLI での利用 | SP 側。kura への申請は要らない |
 | ユーザーの領域（bucket）の作成 | S3 client が初回に作る。申請は要らない |
-| quota の変更、admin 操作、username が bucket 名に使えないユーザーの相談、障害の連絡 | kura の管理者 |
+| quota の変更、admin 操作、障害の連絡 | kura の管理者 |
 
 ## アクセス先
 
@@ -37,11 +37,9 @@ UI は kura の使い方の reference 実装（見本）であり、ブラウザ
 
 接続の前に、次のことを把握しておく必要がある。
 
-領域は 1 つの bucket である。bucket 名は DDBJ account の username（access token の `preferred_username` claim）と同じである。ファイル `<user>/<path>` は、bucket `<user>` の中の object `<path>` として保存される。ユーザーは自分の bucket だけを読み書きでき、他人の bucket の読み・書き・一覧はすべて拒否される。
+領域は 1 つの bucket である。bucket 名は、access token の `sub` claim（DDBJ account のユーザー ID。UUID の形）と同じである。username は bucket 名ではない。ファイル `<user>/<path>` は、bucket `<sub>` の中の object `<path>` として保存される。ユーザーは自分の bucket だけを読み書きでき、他人の bucket の読み・書き・一覧はすべて拒否される。
 
 bucket は S3 client が作る。初回の upload の前に `HeadBucket` で bucket があるかを確かめ、無ければ `CreateBucket` を実行する。kura 側での申請や事前登録は要らない。`CreateBucket` に Object Lock を指定しない。Object Lock を指定すると、bucket の versioning が有効になる。versioning が有効な bucket では、削除や上書きをする前の中身（古い version）が残り、quota に数えられる。古い version は kura の日次処理が消すので、残るのは最長 1 日である。
-
-username が S3 の bucket 命名規則に合わないユーザーは、kura を利用できない。DDBJ account の username のうち、`_` を含むもの、`-` で終わるもの、3 文字未満のものが該当する。kura は username を変換しない。該当するユーザーが SP の利用対象に含まれる場合は、kura の管理者に相談する。
 
 容量の上限（quota）は、1 ユーザーあたり 1 TiB である。
 
@@ -57,7 +55,7 @@ kura には、認証していない第三者に向けてファイルを公開す
 
 環境の設定によっては、作成から一定の日数を過ぎたファイルが自動で削除される（全ファイル TTL）。
 
-操作の記録（誰がいつ何を upload / download / 削除したか）は、kura の前段にある gateway の access log で取る。access log の path には bucket 名（= username）が残るので、SP がユーザーに代わって行った操作も、そのユーザーの操作として記録される。
+操作の記録（誰がいつ何を upload / download / 削除したか）は、kura の前段にある gateway の access log で取る。access log の path には bucket 名（= ユーザーの `sub`）が残るので、SP がユーザーに代わって行った操作も、そのユーザーの操作として記録される。
 
 ## S3 client（aws cli）から使う
 
@@ -107,7 +105,7 @@ JSON.parse(sessionStorage["oidc.user:https://idp.ddbj.nig.ac.jp/realms/master:ku
 
 SP の実装で使う access token は、SP 自身の Keycloak client から得る（「SP がユーザーに代わって使う」）。その場合、SP の client に audience mapper が要る。
 
-token の中身は次のコマンドで確認できる。`aud` に `kura`（SP の client 経由なら `kura` を含む配列）が、`preferred_username` に username が入っていれば、その token は kura で使える。
+token の中身は次のコマンドで確認できる。`aud` に `kura`（SP の client 経由なら `kura` を含む配列）が入っていれば、その token は kura で使える。`sub` の値が bucket 名になる。
 
 ```sh
 python3 -c 'import base64,json,sys; p=sys.argv[1].split(".")[1]; print(json.dumps(json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4))), indent=2))' "$ACCESS_TOKEN"
@@ -133,10 +131,10 @@ eval "$(aws sts assume-role-with-web-identity \
 
 ### 3. S3 API を使う
 
-bucket が未作成なら、最初に 1 度だけ作る。bucket 名は自分の username である。
+bucket が未作成なら、最初に 1 度だけ作る。bucket 名は、access token の `sub` claim の値である。
 
 ```sh
-export KURA_BUCKET=<username>
+export KURA_BUCKET=$(python3 -c 'import base64,json,sys; p=sys.argv[1].split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4)))["sub"])' "$ACCESS_TOKEN")
 aws s3api head-bucket --endpoint-url "$KURA_S3" --bucket "$KURA_BUCKET" \
   || aws s3api create-bucket --endpoint-url "$KURA_S3" --bucket "$KURA_BUCKET"
 ```
@@ -167,14 +165,14 @@ endpoint_url = https://kura-s3.ddbj.nig.ac.jp
 - 長い転送では、一時 credentials の残り時間に注意する。一時 credentials は `--duration-seconds` で指定した時間（最大 12 時間）で失効し、失効すると転送は途中で止まる。aws cli には再開の機能が無いので、失効した場合は credentials を取り直して同じコマンドを再実行する（未完了の part は、kura の日次処理が削除する）
 - ブラウザの UI からの upload は、UI が credentials を自動で取り直すので、失効で止まらない。UI は中断からの再開にも対応している
 - presigned URL の有効期間は、`--expires-in` の値と、一時 credentials の残り時間の短いほうになる
-- ファイルを消しても、親フォルダを表す object が残ることがある。`aws s3 rm` は指定した object を消すだけなので、`dir/` のような key の object が、`aws s3 ls` では 0 byte の行として、UI では空のフォルダとして残る。消すには、末尾にスラッシュを付けた key を削除する（`aws s3api delete-object --bucket <username> --key 'dir/'`）
+- ファイルを消しても、親フォルダを表す object が残ることがある。`aws s3 rm` は指定した object を消すだけなので、`dir/` のような key の object が、`aws s3 ls` では 0 byte の行として、UI では空のフォルダとして残る。消すには、末尾にスラッシュを付けた key を削除する（`aws s3api delete-object --bucket "$KURA_BUCKET" --key 'dir/'`）
 
 ### エラーの読み方
 
 | 症状 | 原因 |
 | --- | --- |
 | STS が `InvalidParameterValue ... token audience matches none of the configured client IDs` | token の `aud` にも `azp` にも `kura` が入っていない。SP の client なら audience mapper が要る |
-| STS は通るが、あらゆる S3 操作が `AccessDenied` | access token に `preferred_username` が入っていない。または、他人の bucket にアクセスしている |
+| STS は通るが、あらゆる S3 操作が `AccessDenied` | bucket 名が access token の `sub` と違う（username を bucket 名にしている、他人の bucket にアクセスしている） |
 | `InvalidAccessKeyId: The access key ID you provided does not exist in our records` | 一時 credentials が失効した。STS からやり直す |
 | download と削除はできるのに、upload だけが `AccessDenied` で失敗する | quota を超えている。不要なファイルを削除するか、kura の管理者に上限の変更を相談する |
 | `NoSuchBucket` | 自分の bucket をまだ作っていない（`CreateBucket` を 1 度だけ実行する） |
@@ -186,7 +184,7 @@ kura は act-as-user 方式を採る。act-as-user 方式では、SP はユー�
 したがって、次のことが成り立つ。
 
 - SP がアクセスできるのは、token を渡したユーザー自身の領域だけである
-- SP の service account（client credentials）では kura を利用できない。service account は、bucket 名になる username を持たないためである
+- SP の service account（client credentials）の token では、ユーザーの領域にアクセスできない。token の `sub` が service account のもので、ユーザーの `sub` ではないためである
 - DDBJ account を持たない利用者に代わって kura を使うことはできない
 - kura には、どの SP が委譲を受けているかの情報は無い。委譲の情報は SP と Keycloak にあり、SP と Keycloak の側で管理する
 
@@ -197,12 +195,11 @@ SP が自分の Keycloak client で発行した access token を kura に渡す�
 | 設定 | 値 | 必須か | 理由 |
 | --- | --- | --- | --- |
 | dedicated scope の Audience mapper | Included Client Audience = `kura`、Add to access token = ON | 必須 | kura は、token の `aud`（`aud` が無ければ `azp`）が `kura` と一致することを検証する。SP の client id を kura 側に登録する仕組みは無い |
-| access token に `preferred_username` を入れる | dedicated scope の User Attribute mapper（`username`）、または `profile` scope | 必須 | bucket 名は `preferred_username` claim から決まる。lightweight access token などで `preferred_username` が token に入らないと、STS は通るのに S3 の操作がすべて拒否される |
-| access token に email と氏名を入れない | `profile` と `email` を default client scope から外し、`preferred_username` は dedicated scope の mapper で入れる | 推奨 | kura の STS は access token の claim を session token に書き込み、session token は presigned URL に載る。email と氏名を入れると、URL を渡した相手に email と氏名が渡る |
+| access token に email と氏名を入れない | `profile` と `email` を default client scope から外す | 推奨 | kura の STS は access token の claim を session token に書き込み、session token は presigned URL に載る。email と氏名を入れると、URL を渡した相手に email と氏名が渡る |
 | `offline_access` を optional client scope に追加する | — | 長時間の処理をするなら必須 | 非対話で access token を取り直し続けるために使う |
 | Access Token Lifespan | 短くてよい（例: 5 分） | 任意 | 一時 credentials と presigned URL の有効期間は、STS に要求した `DurationSeconds` で決まり、token の有効期間には関係しない |
 
-Keycloak の管理コンソールでは、Clients → 対象の client → Client scopes → `<client-id>-dedicated` → Add mapper → By configuration → Audience から追加する。設定したあとに発行した token をデコードし、`aud` に `kura` が含まれることと、`preferred_username` が入っていることを確認する。
+Keycloak の管理コンソールでは、Clients → 対象の client → Client scopes → `<client-id>-dedicated` → Add mapper → By configuration → Audience から追加する。設定したあとに発行した token をデコードし、`aud` に `kura` が含まれることを確認する。
 
 ### ユーザーからの委譲
 

@@ -75,7 +75,7 @@ const seedStsHandler = () => {
 }
 
 const setupHooks = async () => {
-  seedAuthenticatedUser(testConfig, { username: BUCKET })
+  seedAuthenticatedUser(testConfig, { sub: BUCKET })
   seedStsHandler()
   const rendered = renderHook(useReadyHooks, { wrapper })
   await waitFor(() => {

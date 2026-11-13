@@ -1,7 +1,7 @@
 import { fc, test } from "@fast-check/vitest"
 import { describe, expect } from "vitest"
 
-import { decodeJwtPayload, usernameFromAccessToken } from "~/lib/auth/token"
+import { decodeJwtPayload, subFromAccessToken, usernameFromAccessToken } from "~/lib/auth/token"
 
 const b64url = (data: string): string => {
   const bytes = new TextEncoder().encode(data)
@@ -27,6 +27,16 @@ describe("decodeJwtPayload properties", () => {
     (username, extra) => {
       const jwt = encodeJwt({ preferred_username: username, aud: extra, sub: extra })
       expect(usernameFromAccessToken(jwt)).toBe(username)
+    },
+  )
+
+  // sub names the bucket, so it must come out exactly as the token carries
+  // it, whatever the username next to it holds.
+  test.prop([fc.string({ minLength: 1 }), fc.string()])(
+    "subFromAccessToken_anySub_isExtractedUnchanged",
+    (sub, username) => {
+      const jwt = encodeJwt({ sub, preferred_username: username })
+      expect(subFromAccessToken(jwt)).toBe(sub)
     },
   )
 })

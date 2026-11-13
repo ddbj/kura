@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process"
-import { createHash, createHmac } from "node:crypto"
+import { createHash, createHmac, randomBytes } from "node:crypto"
 
 import {
+  AbortMultipartUploadCommand,
   CreateBucketCommand,
+  CreateMultipartUploadCommand,
   DeleteBucketCommand,
   DeleteBucketCorsCommand,
   DeleteBucketEncryptionCommand,
@@ -14,6 +16,7 @@ import {
   DeletePublicAccessBlockCommand,
   GetObjectCommand,
   GetObjectTaggingCommand,
+  HeadBucketCommand,
   ListMultipartUploadsCommand,
   ListObjectsV2Command,
   PutBucketAclCommand,
@@ -43,10 +46,11 @@ import {
   assumeRole,
   type AwsCreds,
   putText,
+  rootS3Client,
   s3ClientFor,
   setupUser,
   signToken,
-  uniqueUser,
+  uniqueSub,
 } from "./_helpers"
 
 const accessDenied = { $metadata: { httpStatusCode: 403 } }
@@ -56,70 +60,112 @@ describe("IAM policy boundary", () => {
     const { s3 } = await setupUser() // setupUser already creates the own bucket
 
     await expect(
-      s3.send(new CreateBucketCommand({ Bucket: uniqueUser() })),
+      s3.send(new CreateBucketCommand({ Bucket: uniqueSub() })),
     ).rejects.toMatchObject(accessDenied)
   })
 
-  it("allows read / write / list / tagging in the own bucket", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "a/b.txt", "own")
+  // The bucket name comes from sub alone. A username is not a valid bucket
+  // name for a quarter of the accounts, and two accounts can never share a sub.
+  it("denies creating a bucket named after the own username", async () => {
+    const username = `u${randomBytes(6).toString("hex")}`
+    const s3 = s3ClientFor(await assumeRole(await signToken({ sub: uniqueSub(), username })))
 
-    const got = await s3.send(new GetObjectCommand({ Bucket: username, Key: "a/b.txt" }))
+    await expect(
+      s3.send(new CreateBucketCommand({ Bucket: username })),
+    ).rejects.toMatchObject(accessDenied)
+  })
+
+  it("serves a token that carries no username", async () => {
+    const sub = uniqueSub()
+    const s3 = s3ClientFor(await assumeRole(await signToken({ sub, username: null })))
+
+    await s3.send(new CreateBucketCommand({ Bucket: sub }))
+    await putText(s3, sub, "a.txt", "no username")
+    const got = await s3.send(new GetObjectCommand({ Bucket: sub, Key: "a.txt" }))
+    expect(await got.Body!.transformToString()).toBe("no username")
+  })
+
+  // An admin moves data into a bucket named after the owner's sub. The owner
+  // did not create that bucket and must still have the run of it.
+  it("gives a user the bucket an admin created under their sub", async () => {
+    const sub = uniqueSub()
+    const root = rootS3Client()
+    await root.send(new CreateBucketCommand({ Bucket: sub }))
+    await putText(root, sub, "moved/data.txt", "moved by admin")
+
+    const s3 = s3ClientFor(await assumeRole(await signToken({ sub })))
+    await s3.send(new HeadBucketCommand({ Bucket: sub }))
+    const got = await s3.send(new GetObjectCommand({ Bucket: sub, Key: "moved/data.txt" }))
+    expect(await got.Body!.transformToString()).toBe("moved by admin")
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: sub }))
+    expect(listed.Contents?.map((o) => o.Key)).toEqual(["moved/data.txt"])
+    await putText(s3, sub, "new.txt", "written by owner")
+    await s3.send(new DeleteObjectCommand({ Bucket: sub, Key: "moved/data.txt" }))
+    const upload = await s3.send(new CreateMultipartUploadCommand({ Bucket: sub, Key: "big.bin" }))
+    expect((await s3.send(new ListMultipartUploadsCommand({ Bucket: sub }))).Uploads).toHaveLength(1)
+    await s3.send(new AbortMultipartUploadCommand({ Bucket: sub, Key: "big.bin", UploadId: upload.UploadId }))
+  })
+
+  it("allows read / write / list / tagging in the own bucket", async () => {
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "a/b.txt", "own")
+
+    const got = await s3.send(new GetObjectCommand({ Bucket: sub, Key: "a/b.txt" }))
     expect(await got.Body!.transformToString()).toBe("own")
 
-    const listed = await s3.send(new ListObjectsV2Command({ Bucket: username, Prefix: "a/" }))
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: sub, Prefix: "a/" }))
     expect(listed.Contents?.map((o) => o.Key)).toContain("a/b.txt")
 
     await s3.send(
       new PutObjectTaggingCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: "a/b.txt",
         Tagging: { TagSet: [{ Key: "kura-test", Value: "1" }] },
       }),
     )
     const tags = await s3.send(
-      new GetObjectTaggingCommand({ Bucket: username, Key: "a/b.txt" }),
+      new GetObjectTaggingCommand({ Bucket: sub, Key: "a/b.txt" }),
     )
     expect(tags.TagSet).toContainEqual({ Key: "kura-test", Value: "1" })
 
-    await s3.send(new DeleteObjectCommand({ Bucket: username, Key: "a/b.txt" }))
+    await s3.send(new DeleteObjectCommand({ Bucket: sub, Key: "a/b.txt" }))
   })
 
   it("denies read / write / list / tagging on another user's bucket", async () => {
     const alice = await setupUser()
     const bob = await setupUser()
-    await putText(bob.s3, bob.username, "secret.txt", "bob only")
+    await putText(bob.s3, bob.sub, "secret.txt", "bob only")
 
     await expect(
-      alice.s3.send(new GetObjectCommand({ Bucket: bob.username, Key: "secret.txt" })),
+      alice.s3.send(new GetObjectCommand({ Bucket: bob.sub, Key: "secret.txt" })),
     ).rejects.toMatchObject(accessDenied)
     await expect(
       alice.s3.send(
-        new PutObjectCommand({ Bucket: bob.username, Key: "intruder.txt", Body: "x" }),
+        new PutObjectCommand({ Bucket: bob.sub, Key: "intruder.txt", Body: "x" }),
       ),
     ).rejects.toMatchObject(accessDenied)
     await expect(
-      alice.s3.send(new ListObjectsV2Command({ Bucket: bob.username })),
+      alice.s3.send(new ListObjectsV2Command({ Bucket: bob.sub })),
     ).rejects.toMatchObject(accessDenied)
     await expect(
       alice.s3.send(
         new PutObjectTaggingCommand({
-          Bucket: bob.username,
+          Bucket: bob.sub,
           Key: "secret.txt",
           Tagging: { TagSet: [{ Key: "kura-test", Value: "1" }] },
         }),
       ),
     ).rejects.toMatchObject(accessDenied)
     await expect(
-      alice.s3.send(new DeleteObjectCommand({ Bucket: bob.username, Key: "secret.txt" })),
+      alice.s3.send(new DeleteObjectCommand({ Bucket: bob.sub, Key: "secret.txt" })),
     ).rejects.toMatchObject(accessDenied)
     await expect(
-      alice.s3.send(new ListMultipartUploadsCommand({ Bucket: bob.username })),
+      alice.s3.send(new ListMultipartUploadsCommand({ Bucket: bob.sub })),
     ).rejects.toMatchObject(accessDenied)
   })
 
   it("denies assuming KuraAdminRole with a non-admin token", async () => {
-    const token = await signToken({ username: uniqueUser() })
+    const token = await signToken({ sub: uniqueSub() })
 
     // Trust policy checks oidc:sub against KURA_ADMIN_SUBS; a non-admin sub
     // returns AccessDenied (403). A 5xx would mean the STS handler crashed
@@ -132,12 +178,12 @@ describe("IAM policy boundary", () => {
 
   it("allows a configured admin sub to access any bucket", async () => {
     const alice = await setupUser()
-    await putText(alice.s3, alice.username, "data.txt", "readable by admin")
+    await putText(alice.s3, alice.sub, "data.txt", "readable by admin")
 
-    const adminToken = await signToken({ username: uniqueUser(), sub: inject("adminSub") })
+    const adminToken = await signToken({ sub: inject("adminSub") })
     const adminS3 = s3ClientFor(await assumeRole(adminToken, ADMIN_ROLE_ARN))
     const got = await adminS3.send(
-      new GetObjectCommand({ Bucket: alice.username, Key: "data.txt" }),
+      new GetObjectCommand({ Bucket: alice.sub, Key: "data.txt" }),
     )
     expect(await got.Body!.transformToString()).toBe("readable by admin")
   })
@@ -146,11 +192,11 @@ describe("IAM policy boundary", () => {
   // reaches S3 without a signature. There is no other unauthenticated path
   // into kura, which is what the whole design rests on.
   it("denies unsigned requests to a bucket, an object and the bucket list", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "anon.txt", "not for the world")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "anon.txt", "not for the world")
     const endpoint = inject("s3Endpoint").replace(/\/+$/, "")
 
-    for (const path of ["/", `/${username}`, `/${username}?list-type=2`, `/${username}/anon.txt`]) {
+    for (const path of ["/", `/${sub}`, `/${sub}?list-type=2`, `/${sub}/anon.txt`]) {
       const res = await fetch(`${endpoint}${path}`)
       expect(res.status, `unsigned GET ${path}`).toBe(403)
       // A 403 from anywhere but the authorizer (a proxy, a misroute) would
@@ -220,7 +266,7 @@ describe("IAM policy boundary", () => {
   }, 60_000)
 
   it("rejects tokens with a wrong audience", async () => {
-    const token = await signToken({ username: uniqueUser(), aud: "someone-else" })
+    const token = await signToken({ sub: uniqueSub(), aud: "someone-else" })
 
     // Audience mismatch is a token validation failure, not a policy failure,
     // so STS returns InvalidParameterValue (400) rather than 5xx.
@@ -231,7 +277,7 @@ describe("IAM policy boundary", () => {
   })
 
   it("rejects expired tokens", async () => {
-    const token = await signToken({ username: uniqueUser(), lifetimeSeconds: -60 })
+    const token = await signToken({ sub: uniqueSub(), lifetimeSeconds: -60 })
 
     // An expired JWT (exp in the past) surfaces as ExpiredTokenException
     // (400). A network failure or crash would return no body or 5xx.
@@ -367,38 +413,38 @@ const sendSigned = async (creds: AwsCreds, method: string, path: string, query: 
 
 describe("own bucket settings", () => {
   it.each(ownBucketConfigChanges)("denies %s on the own bucket", async (_, change) => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "target.txt", "x")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "target.txt", "x")
 
-    await expect(change(s3, username)).rejects.toMatchObject(accessDenied)
+    await expect(change(s3, sub)).rejects.toMatchObject(accessDenied)
   })
 
   it("denies raising the own quota through the S3 quota extension", async () => {
-    const { username, creds } = await setupUser()
+    const { sub, creds } = await setupUser()
 
-    const res = await sendSigned(creds, "PUT", `/${username}`, { "seaweedfs-quota": "" }, JSON.stringify({ quota_size: 1, quota_unit: "TB", quota_enabled: true }))
+    const res = await sendSigned(creds, "PUT", `/${sub}`, { "seaweedfs-quota": "" }, JSON.stringify({ quota_size: 1, quota_unit: "TB", quota_enabled: true }))
 
     expect(res.status).toBe(403)
   })
 
   it("keeps an object stored with a public-read ACL unreadable without a signature", async () => {
-    const { username, s3 } = await setupUser()
-    await s3.send(new PutObjectCommand({ Bucket: username, Key: "acl.txt", Body: "x", ACL: "public-read" })).catch(() => undefined)
+    const { sub, s3 } = await setupUser()
+    await s3.send(new PutObjectCommand({ Bucket: sub, Key: "acl.txt", Body: "x", ACL: "public-read" })).catch(() => undefined)
     const endpoint = inject("s3Endpoint").replace(/\/+$/, "")
 
-    const res = await fetch(`${endpoint}/${username}/acl.txt`)
+    const res = await fetch(`${endpoint}/${sub}/acl.txt`)
 
     expect(res.status).toBe(403)
   })
 
   it("keeps a bucket created with a public-read ACL unlistable without a signature", async () => {
-    const username = uniqueUser()
-    const s3 = s3ClientFor(await assumeRole(await signToken({ username })))
-    await s3.send(new CreateBucketCommand({ Bucket: username, ACL: "public-read" })).catch(() => undefined)
-    await putText(s3, username, "acl.txt", "x").catch(() => undefined)
+    const sub = uniqueSub()
+    const s3 = s3ClientFor(await assumeRole(await signToken({ sub })))
+    await s3.send(new CreateBucketCommand({ Bucket: sub, ACL: "public-read" })).catch(() => undefined)
+    await putText(s3, sub, "acl.txt", "x").catch(() => undefined)
     const endpoint = inject("s3Endpoint").replace(/\/+$/, "")
 
-    for (const path of [`/${username}?list-type=2`, `/${username}/acl.txt`]) {
+    for (const path of [`/${sub}?list-type=2`, `/${sub}/acl.txt`]) {
       const res = await fetch(`${endpoint}${path}`)
       expect(res.status, `unsigned GET ${path}`).toBe(403)
     }
@@ -408,23 +454,23 @@ describe("own bucket settings", () => {
   // CreateBucket, so a user can create such a bucket. Retention and legal hold
   // are what would make objects undeletable, by the owner and by the admin.
   it("denies retention and legal hold in a bucket created with Object Lock enabled", async () => {
-    const username = uniqueUser()
-    const s3 = s3ClientFor(await assumeRole(await signToken({ username })))
-    await s3.send(new CreateBucketCommand({ Bucket: username, ObjectLockEnabledForBucket: true }))
+    const sub = uniqueSub()
+    const s3 = s3ClientFor(await assumeRole(await signToken({ sub })))
+    await s3.send(new CreateBucketCommand({ Bucket: sub, ObjectLockEnabledForBucket: true }))
     const retainUntil = new Date(Date.now() + 86_400_000)
 
     await expect(s3.send(new PutObjectCommand({
-      Bucket: username, Key: "locked.txt", Body: "x", ObjectLockMode: "COMPLIANCE", ObjectLockRetainUntilDate: retainUntil,
+      Bucket: sub, Key: "locked.txt", Body: "x", ObjectLockMode: "COMPLIANCE", ObjectLockRetainUntilDate: retainUntil,
     }))).rejects.toMatchObject(accessDenied)
     await expect(s3.send(new PutObjectCommand({
-      Bucket: username, Key: "held.txt", Body: "x", ObjectLockLegalHoldStatus: "ON",
+      Bucket: sub, Key: "held.txt", Body: "x", ObjectLockLegalHoldStatus: "ON",
     }))).rejects.toMatchObject(accessDenied)
-    await putText(s3, username, "plain.txt", "x")
+    await putText(s3, sub, "plain.txt", "x")
     await expect(s3.send(new PutObjectRetentionCommand({
-      Bucket: username, Key: "plain.txt", Retention: { Mode: "COMPLIANCE", RetainUntilDate: retainUntil },
+      Bucket: sub, Key: "plain.txt", Retention: { Mode: "COMPLIANCE", RetainUntilDate: retainUntil },
     }))).rejects.toMatchObject(accessDenied)
     await expect(s3.send(new PutObjectLockConfigurationCommand({
-      Bucket: username,
+      Bucket: sub,
       ObjectLockConfiguration: { ObjectLockEnabled: "Enabled", Rule: { DefaultRetention: { Mode: "COMPLIANCE", Days: 1 } } },
     }))).rejects.toMatchObject(accessDenied)
   })

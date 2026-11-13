@@ -9,6 +9,8 @@ type Props = {
   open: boolean
   onClose: () => void
   bucket: string
+  // Shown as the root of the destination path in place of the bucket name.
+  username: string
   // srcPrefix ends with "/" and is the folder being moved.
   srcPrefix: string
   onConfirm: (destParentPrefix: string) => void
@@ -29,7 +31,7 @@ const folderName = (prefix: string): string => {
   return slash === -1 ? withoutTrailing : withoutTrailing.slice(slash + 1)
 }
 
-export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }: Props) => {
+export const FolderMoveModal = ({ open, onClose, bucket, username, srcPrefix, onConfirm }: Props) => {
   const t = useT()
   const initialParent = parentOfPrefix(srcPrefix)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -60,7 +62,7 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
   }
 
   const name = folderName(srcPrefix)
-  const displayPath = destParent === "" ? bucket : `${bucket}/${destParent.slice(0, -1)}`
+  const displayPath = destParent === "" ? username : `${username}/${destParent.slice(0, -1)}`
 
   return (
     <>
@@ -98,6 +100,7 @@ export const FolderMoveModal = ({ open, onClose, bucket, srcPrefix, onConfirm }:
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         bucket={bucket}
+        username={username}
         initialPrefix={destParent}
         disabledPrefix={srcPrefix}
         onSelect={(prefix) => setDestParent(prefix)}

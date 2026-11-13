@@ -70,6 +70,8 @@ quota の既定値は 1 TiB（`KURA_QUOTA_DEFAULT_MB`）で、新しい bucket �
 s3.bucket.quota -name=<bucket> -op=set -sizeMB=<N>
 ```
 
+bucket 名は、そのユーザーの `sub` である。username から `sub` を調べるには、Keycloak の admin console でユーザーを username で検索し、表示されるユーザー ID を読む。
+
 weed shell の topology 系のコマンド（`volume.vacuum` など）は、`lock` を取ってから実行する。`lock` を取らずに実行すると、エラーを出さずに何もしない。
 
 `-op=disable` は使わない。disable した quota は `s3.bucket.list` の表示で未設定の quota と区別できず、quota reconciler が既定値を設定し直すためである。事実上の無制限にしたいときは、大きな値を set する。`KURA_QUOTA_DEFAULT_MB` に 0 や負の値を設定できないのも、`-op=disable` を使わないのと同じ理由である。
@@ -100,7 +102,7 @@ aws sts assume-role-with-web-identity \
   --web-identity-token "$ACCESS_TOKEN"
 ```
 
-返ってきた一時 credentials を `AWS_*` の環境変数に入れれば、`aws s3` で全 bucket を操作できる。ユーザーの `sub` は、そのユーザーの access token の `sub` claim で調べる（Keycloak の admin console が表示するユーザー ID と同じ値である）。`KURA_ADMIN_SUBS` の変更は、コンテナを作り直すと反映される。STS signing key を変えない限り、発行済みの一時 credentials は、コンテナを作り直したあとも有効なままである。
+返ってきた一時 credentials を `AWS_*` の環境変数に入れれば、`aws s3` で全 bucket を操作できる。admin にするユーザーの `sub` は、そのユーザーの access token の `sub` claim で調べる（Keycloak の admin console が表示するユーザー ID と同じ値である）。`KURA_ADMIN_SUBS` の変更は、コンテナを作り直すと反映される。STS signing key を変えない限り、発行済みの一時 credentials は、コンテナを作り直したあとも有効なままである。
 
 filer の API には S3 の IAM が効かないので、filer の metadata-only rename（`POST <dst>?mv.from=<src>`）は client に開放しない。
 
@@ -108,7 +110,7 @@ filer の API には S3 の IAM が効かないので、filer の metadata-only 
 
 kura のファイル操作は、すべて S3 API として前段の gateway を通る。そのため、監査に使える記録は gateway の access log だけである（client IP・method・path・query が記録される）。SeaweedFS は request ごとの log を出さず、kura のコンテナも監査ログを持たない。
 
-path に含まれる bucket 名は username なので、access log の操作を対象のユーザーに結び付けられる。ただし、admin が他のユーザーの bucket を操作した場合も、access log ではその bucket の所有者の操作に見える。
+path に含まれる bucket 名はユーザーの `sub` なので、access log の操作を対象のユーザーに結び付けられる。`sub` から username を調べるには、Keycloak の admin console でユーザー ID を検索する。ただし、admin が他のユーザーの bucket を操作した場合も、access log ではその bucket の所有者の操作に見える。
 
 access log の保持期間は、gateway 側の access log の運用に従う。kura は独自の保持期間を決めず、log の保存にも rotate にも関与しない。kura は閲覧 UI を持たず、運用者は gateway のホスト上で access log を直接読む。
 

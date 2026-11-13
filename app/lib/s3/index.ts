@@ -1,4 +1,3 @@
-export { isUsableBucketName } from "./bucket-name"
 export { createS3Client } from "./client"
 export { createStsCredentialsProvider, type GetToken } from "./credentials"
 export { dirName, entryName, keyParent, keyToUrlPath, prefixToSegments, prefixToUrlPath, segmentsToPrefix, splatToPrefix,splitExtension } from "./keys"

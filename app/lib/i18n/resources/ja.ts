@@ -23,10 +23,6 @@ export type Resources = {
     errorTitle: string
     backToTop: string
   }
-  bucket: {
-    unsupportedUsernameTitle: string
-    unsupportedUsernameBody: string
-  }
   duration: {
     lessThanMinute: string
     minutes: string
@@ -221,11 +217,6 @@ export const ja: Resources = {
     processingCallback: "ログイン処理中…",
     errorTitle: "ログインに失敗しました",
     backToTop: "トップへ戻る",
-  },
-  bucket: {
-    unsupportedUsernameTitle: "このユーザー名では kura を利用できません",
-    unsupportedUsernameBody:
-      "ユーザー名 {{username}} は S3 バケット命名規則 (小文字英数と . - のみ、3-63 文字、先頭末尾は英数字) に適合しないため、kura の領域を作成できません。",
   },
   duration: {
     lessThanMinute: "1 分",

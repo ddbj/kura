@@ -92,7 +92,7 @@ export const llmsText = (input: CrawlInput): string =>
     "",
     `1. Get an access token for the client \`${input.oidcClientId}\` from the OIDC issuer. A program without a browser uses the device authorization grant (RFC 8628) with PKCE (S256).`,
     "2. Call `AssumeRoleWithWebIdentity` on the STS endpoint with the access token. The response contains temporary S3 credentials.",
-    "3. Sign S3 requests with the temporary credentials (SigV4). The bucket name is the username of the DDBJ account (the `preferred_username` claim of the access token). A user can access only their own bucket.",
+    "3. Sign S3 requests with the temporary credentials (SigV4). The bucket name is the `sub` claim of the access token (the user ID of the DDBJ account, a UUID). A user can access only their own bucket.",
     "",
     "## Documentation",
     "",

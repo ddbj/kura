@@ -23,11 +23,6 @@ export const en: Resources = {
     errorTitle: "Sign-in failed",
     backToTop: "Back to top",
   },
-  bucket: {
-    unsupportedUsernameTitle: "kura is not available for this username",
-    unsupportedUsernameBody:
-      "The username {{username}} does not meet the S3 bucket naming rules (lowercase letters, digits, . and - only, 3-63 characters, starting and ending with a letter or digit), so a kura space cannot be created.",
-  },
   duration: {
     // "min" / "h" stay the same for 1 and for many, so the copy needs no
     // plural handling.

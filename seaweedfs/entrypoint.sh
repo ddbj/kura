@@ -1,6 +1,6 @@
 #!/bin/sh
 # Generates s3.json / iam.json / security.toml from environment variables,
-# then starts weed. IAM policy variables like ${jwt:preferred_username} are
+# then starts weed. IAM policy variables like ${jwt:sub} are
 # escaped so they reach the JSON literally.
 set -euo pipefail
 
@@ -158,7 +158,7 @@ cat > /etc/seaweedfs/iam.json <<EOJSON
               "s3:ListBucketMultipartUploads",
               "s3:GetBucketLocation"
             ],
-            "Resource": ["arn:aws:s3:::\${jwt:preferred_username}"]
+            "Resource": ["arn:aws:s3:::\${jwt:sub}"]
           },
           {
             "Sid": "OwnObjects",
@@ -176,7 +176,7 @@ cat > /etc/seaweedfs/iam.json <<EOJSON
               "s3:PutObjectTagging",
               "s3:DeleteObjectTagging"
             ],
-            "Resource": ["arn:aws:s3:::\${jwt:preferred_username}/*"]
+            "Resource": ["arn:aws:s3:::\${jwt:sub}/*"]
           }
         ]
       }

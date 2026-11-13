@@ -13,24 +13,24 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { describe, expect, inject, it } from "vitest"
 
-import { assumeRole, eventually, putText, s3ClientFor, setupUser, signToken, uniqueUser } from "./_helpers"
+import { assumeRole, eventually, putText, s3ClientFor, setupUser, signToken, uniqueSub } from "./_helpers"
 
 describe("multipart upload", () => {
   it("uploads in parts and downloads the identical bytes", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
     const key = "dir/multi.bin"
     const part1 = Buffer.alloc(5 * 1024 * 1024, 1)
     const part2 = Buffer.alloc(1 * 1024 * 1024, 2)
 
     const created = await s3.send(
-      new CreateMultipartUploadCommand({ Bucket: username, Key: key }),
+      new CreateMultipartUploadCommand({ Bucket: sub, Key: key }),
     )
     const uploadId = created.UploadId!
     const parts = []
     for (const [index, body] of [part1, part2].entries()) {
       const res = await s3.send(
         new UploadPartCommand({
-          Bucket: username,
+          Bucket: sub,
           Key: key,
           UploadId: uploadId,
           PartNumber: index + 1,
@@ -41,14 +41,14 @@ describe("multipart upload", () => {
     }
     await s3.send(
       new CompleteMultipartUploadCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: key,
         UploadId: uploadId,
         MultipartUpload: { Parts: parts },
       }),
     )
 
-    const got = await s3.send(new GetObjectCommand({ Bucket: username, Key: key }))
+    const got = await s3.send(new GetObjectCommand({ Bucket: sub, Key: key }))
     const bytes = Buffer.from(await got.Body!.transformToByteArray())
     expect(bytes.length).toBe(part1.length + part2.length)
     expect(bytes.equals(Buffer.concat([part1, part2]))).toBe(true)
@@ -57,18 +57,18 @@ describe("multipart upload", () => {
 
 describe("multipart upload resume", () => {
   it("continues an interrupted upload from a fresh STS session", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
     const key = "resume.bin"
     const part1 = Buffer.alloc(5 * 1024 * 1024, 3)
     const part2 = Buffer.alloc(1 * 1024 * 1024, 4)
 
     const created = await s3.send(
-      new CreateMultipartUploadCommand({ Bucket: username, Key: key }),
+      new CreateMultipartUploadCommand({ Bucket: sub, Key: key }),
     )
     const uploadId = created.UploadId!
     await s3.send(
       new UploadPartCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: key,
         UploadId: uploadId,
         PartNumber: 1,
@@ -78,15 +78,15 @@ describe("multipart upload resume", () => {
 
     // A new session (fresh token and credentials) stands in for the client
     // coming back after an interruption.
-    const fresh = s3ClientFor(await assumeRole(await signToken({ username })))
+    const fresh = s3ClientFor(await assumeRole(await signToken({ sub })))
     const listed = await fresh.send(
-      new ListPartsCommand({ Bucket: username, Key: key, UploadId: uploadId }),
+      new ListPartsCommand({ Bucket: sub, Key: key, UploadId: uploadId }),
     )
     expect(listed.Parts?.map((p) => p.PartNumber)).toEqual([1])
 
     const res = await fresh.send(
       new UploadPartCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: key,
         UploadId: uploadId,
         PartNumber: 2,
@@ -95,7 +95,7 @@ describe("multipart upload resume", () => {
     )
     await fresh.send(
       new CompleteMultipartUploadCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: key,
         UploadId: uploadId,
         MultipartUpload: {
@@ -107,7 +107,7 @@ describe("multipart upload resume", () => {
       }),
     )
 
-    const got = await fresh.send(new GetObjectCommand({ Bucket: username, Key: key }))
+    const got = await fresh.send(new GetObjectCommand({ Bucket: sub, Key: key }))
     const bytes = Buffer.from(await got.Body!.transformToByteArray())
     expect(bytes.equals(Buffer.concat([part1, part2]))).toBe(true)
   })
@@ -121,12 +121,12 @@ describe("multipart upload inventory", () => {
       .then((res) => res.UploadId!)
 
   it("lists in-flight uploads filtered by prefix", async () => {
-    const { username, s3 } = await setupUser()
-    await begin(s3, username, "a/one.bin")
-    await begin(s3, username, "a/two.bin")
-    await begin(s3, username, "b/three.bin")
+    const { sub, s3 } = await setupUser()
+    await begin(s3, sub, "a/one.bin")
+    await begin(s3, sub, "a/two.bin")
+    await begin(s3, sub, "b/three.bin")
 
-    const all = await s3.send(new ListMultipartUploadsCommand({ Bucket: username }))
+    const all = await s3.send(new ListMultipartUploadsCommand({ Bucket: sub }))
     expect(all.Uploads?.map((u) => u.Key).sort()).toEqual([
       "a/one.bin", "a/two.bin", "b/three.bin",
     ])
@@ -136,40 +136,40 @@ describe("multipart upload inventory", () => {
     }
 
     const scoped = await s3.send(
-      new ListMultipartUploadsCommand({ Bucket: username, Prefix: "a/" }),
+      new ListMultipartUploadsCommand({ Bucket: sub, Prefix: "a/" }),
     )
     expect(scoped.Uploads?.map((u) => u.Key).sort()).toEqual(["a/one.bin", "a/two.bin"])
   })
 
   it("keeps concurrent in-flight uploads for the same key apart", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
     const key = "same.bin"
-    const first = await begin(s3, username, key)
-    const second = await begin(s3, username, key)
+    const first = await begin(s3, sub, key)
+    const second = await begin(s3, sub, key)
     expect(first).not.toBe(second)
 
     const listed = await s3.send(
-      new ListMultipartUploadsCommand({ Bucket: username, Prefix: key }),
+      new ListMultipartUploadsCommand({ Bucket: sub, Prefix: key }),
     )
     expect(listed.Uploads?.map((u) => u.UploadId).sort()).toEqual([first, second].sort())
   })
 
   it("returns part ETags equal to the MD5 of the part bytes", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
     const key = "etag.bin"
     const body = Buffer.alloc(5 * 1024 * 1024, 7)
     const md5 = createHash("md5").update(body).digest("hex")
 
-    const uploadId = await begin(s3, username, key)
+    const uploadId = await begin(s3, sub, key)
     const put = await s3.send(
       new UploadPartCommand({
-        Bucket: username, Key: key, UploadId: uploadId, PartNumber: 1, Body: body,
+        Bucket: sub, Key: key, UploadId: uploadId, PartNumber: 1, Body: body,
       }),
     )
     expect(put.ETag).toBe(`"${md5}"`)
 
     const listed = await s3.send(
-      new ListPartsCommand({ Bucket: username, Key: key, UploadId: uploadId }),
+      new ListPartsCommand({ Bucket: sub, Key: key, UploadId: uploadId }),
     )
     expect(listed.Parts?.map((p) => p.ETag)).toEqual([`"${md5}"`])
     expect(listed.Parts?.[0]?.LastModified).toBeInstanceOf(Date)
@@ -178,12 +178,12 @@ describe("multipart upload inventory", () => {
 
 describe("presigned URLs with temporary credentials", () => {
   it("serves a private object through a presigned GET", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "presigned.txt", "presigned content")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "presigned.txt", "presigned content")
 
     const url = await getSignedUrl(
       s3,
-      new GetObjectCommand({ Bucket: username, Key: "presigned.txt" }),
+      new GetObjectCommand({ Bucket: sub, Key: "presigned.txt" }),
       { expiresIn: 300 },
     )
     expect(url).toContain("X-Amz-Security-Token=")
@@ -194,29 +194,29 @@ describe("presigned URLs with temporary credentials", () => {
   })
 
   it("accepts an upload through a presigned PUT", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
 
     const url = await getSignedUrl(
       s3,
-      new PutObjectCommand({ Bucket: username, Key: "uploaded.txt" }),
+      new PutObjectCommand({ Bucket: sub, Key: "uploaded.txt" }),
       { expiresIn: 300 },
     )
     const put = await fetch(url, { method: "PUT", body: "via presign" })
     expect(put.status).toBe(200)
 
     const got = await s3.send(
-      new GetObjectCommand({ Bucket: username, Key: "uploaded.txt" }),
+      new GetObjectCommand({ Bucket: sub, Key: "uploaded.txt" }),
     )
     expect(await got.Body!.transformToString()).toBe("via presign")
   })
 
   it("stops honouring a presigned URL once its X-Amz-Expires has passed", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "short.txt", "short-lived")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "short.txt", "short-lived")
 
     const url = await getSignedUrl(
       s3,
-      new GetObjectCommand({ Bucket: username, Key: "short.txt" }),
+      new GetObjectCommand({ Bucket: sub, Key: "short.txt" }),
       { expiresIn: 2 },
     )
 
@@ -229,8 +229,8 @@ describe("presigned URLs with temporary credentials", () => {
   // The SPA presigns with a session of the requested length (up to 12h) taken
   // from a 5-minute access token, so the session must not end with the token.
   it("sizes the STS session by DurationSeconds, not by the access token's remaining life", async () => {
-    const username = uniqueUser()
-    const token = await signToken({ username, lifetimeSeconds: 60 })
+    const sub = uniqueSub()
+    const token = await signToken({ sub, lifetimeSeconds: 60 })
 
     const { expiration } = await assumeRole(token, undefined, 43_200)
 
@@ -242,10 +242,10 @@ describe("presigned URLs with temporary credentials", () => {
   // sign any request the issuer can make, writes and deletes included, until
   // the session ends.
   it("does not let the holder of a presigned URL sign other requests", async () => {
-    const { username, s3 } = await setupUser()
+    const { sub, s3 } = await setupUser()
     const url = new URL(await getSignedUrl(
       s3,
-      new GetObjectCommand({ Bucket: username, Key: "shared.txt" }),
+      new GetObjectCommand({ Bucket: sub, Key: "shared.txt" }),
       { expiresIn: 300 },
     ))
     const sessionToken = url.searchParams.get("X-Amz-Security-Token")!
@@ -256,30 +256,30 @@ describe("presigned URLs with temporary credentials", () => {
     const forged = s3ClientFor({ accessKeyId, secretAccessKey: derivedSecret, sessionToken })
 
     await expect(
-      forged.send(new PutObjectCommand({ Bucket: username, Key: "forged.txt", Body: "x" })),
+      forged.send(new PutObjectCommand({ Bucket: sub, Key: "forged.txt", Body: "x" })),
     ).rejects.toMatchObject({ $metadata: { httpStatusCode: 403 } })
   })
 
   it("rejects a session token sent as a Bearer token", async () => {
-    const { username, s3, creds } = await setupUser()
-    await putText(s3, username, "bearer.txt", "x")
+    const { sub, s3, creds } = await setupUser()
+    await putText(s3, sub, "bearer.txt", "x")
     const endpoint = inject("s3Endpoint").replace(/\/+$/, "")
     const headers = { Authorization: `Bearer ${creds.sessionToken!}` }
 
-    const read = await fetch(`${endpoint}/${username}/bearer.txt`, { headers })
-    const write = await fetch(`${endpoint}/${username}/bearer-write.txt`, { method: "PUT", headers, body: "x" })
+    const read = await fetch(`${endpoint}/${sub}/bearer.txt`, { headers })
+    const write = await fetch(`${endpoint}/${sub}/bearer-write.txt`, { method: "PUT", headers, body: "x" })
 
     expect(read.status).toBe(403)
     expect(write.status).toBe(403)
   })
 
   it("rejects the same request without the signature", async () => {
-    const { username, s3 } = await setupUser()
-    await putText(s3, username, "presigned.txt", "x")
+    const { sub, s3 } = await setupUser()
+    await putText(s3, sub, "presigned.txt", "x")
 
     const url = await getSignedUrl(
       s3,
-      new GetObjectCommand({ Bucket: username, Key: "presigned.txt" }),
+      new GetObjectCommand({ Bucket: sub, Key: "presigned.txt" }),
       { expiresIn: 300 },
     )
     const bare = new URL(url)

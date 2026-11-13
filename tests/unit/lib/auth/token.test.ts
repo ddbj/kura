@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import { decodeJwtPayload, usernameFromAccessToken } from "~/lib/auth/token"
+import { decodeJwtPayload, subFromAccessToken, usernameFromAccessToken } from "~/lib/auth/token"
 
 import { encodeTestJwt } from "../../_helpers/oidc"
 
@@ -30,5 +30,25 @@ describe("usernameFromAccessToken", () => {
 
   test("usernameFromAccessToken_nonStringUsername_throws", () => {
     expect(() => usernameFromAccessToken(encodeTestJwt({ preferred_username: 42 }))).toThrow()
+  })
+})
+
+describe("subFromAccessToken", () => {
+  test("subFromAccessToken_tokenWithSub_returnsSub", () => {
+    const token = encodeTestJwt({ sub: "0f8fad5b-d9cb-469f-a165-70867728950e", preferred_username: "a_b" })
+
+    expect(subFromAccessToken(token)).toBe("0f8fad5b-d9cb-469f-a165-70867728950e")
+  })
+
+  test("subFromAccessToken_missingClaim_throws", () => {
+    expect(() => subFromAccessToken(encodeTestJwt({ preferred_username: "x" }))).toThrow()
+  })
+
+  test("subFromAccessToken_emptySub_throws", () => {
+    expect(() => subFromAccessToken(encodeTestJwt({ sub: "" }))).toThrow()
+  })
+
+  test("subFromAccessToken_nonStringSub_throws", () => {
+    expect(() => subFromAccessToken(encodeTestJwt({ sub: 42 }))).toThrow()
   })
 })

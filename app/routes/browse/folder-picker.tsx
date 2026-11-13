@@ -10,6 +10,8 @@ type Props = {
   open: boolean
   onClose: () => void
   bucket: string
+  // Shown as the root of the breadcrumb in place of the bucket name.
+  username: string
   title?: string
   submitLabel?: string
   initialPrefix?: string
@@ -27,6 +29,7 @@ export const FolderPicker = ({
   open,
   onClose,
   bucket,
+  username,
   title,
   submitLabel,
   initialPrefix = "",
@@ -70,8 +73,8 @@ export const FolderPicker = ({
       <div className="mdest-label">{t("modal.moveTo")}</div>
       <div className="picker-crumbs" aria-label={t("modal.moveTo")}>
         {segments.length === 0
-          ? <span className="cur">{bucket}</span>
-          : <Button unstyled onClick={() => goTo(-1)}>{bucket}</Button>}
+          ? <span className="cur">{username}</span>
+          : <Button unstyled onClick={() => goTo(-1)}>{username}</Button>}
         {segments.map((seg, i) => {
           const isLast = i === segments.length - 1
 

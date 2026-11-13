@@ -14,13 +14,16 @@ import { createQueryClient } from "~/lib/query"
 import { BrowsePage } from "~/routes/browse/browse-page"
 import { OverlayProviders } from "~/shell"
 
-import { seedAuthenticatedUser } from "../../_helpers/oidc"
+import { seedAuthenticatedUser, TEST_SUB } from "../../_helpers/oidc"
 import { testConfig } from "../../_helpers/render"
 import { listMultipartUploadsXml, listObjectsV2Xml, s3ErrorXml, stsAssumeRoleXml } from "../../mocks/s3-xml"
 import { server } from "../../mocks/server"
 
 const ENDPOINT = testConfig.s3Endpoint
-const USER = "kura-tester"
+// The username holds an underscore, which a bucket name cannot: the page has
+// to reach S3 through sub alone.
+const USERNAME = "kura_tester"
+const BUCKET = TEST_SUB
 
 // Static metadata + disabled auto-renewal keep the AuthProvider off the
 // network (discovery, silent-renew iframe), which jsdom cannot serve.
@@ -89,15 +92,15 @@ const seedBucket = ({
   const requestedTokens: (string | null)[] = []
   server.use(
     sts(),
-    http.head(`${ENDPOINT}/${USER}`, () => new HttpResponse(null, { status: 200 })),
-    http.get(`${ENDPOINT}/${USER}`, ({ request }) => {
+    http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 200 })),
+    http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
       const url = new URL(request.url)
       if (url.searchParams.has("uploads")) {
-        return HttpResponse.xml(listMultipartUploadsXml({ bucket: USER, uploads: [] }))
+        return HttpResponse.xml(listMultipartUploadsXml({ bucket: BUCKET, uploads: [] }))
       }
       if (url.searchParams.get("delimiter") !== "/") {
         return HttpResponse.xml(listObjectsV2Xml({
-          bucket: USER, prefix: "", objects: usage, commonPrefixes: [],
+          bucket: BUCKET, prefix: "", objects: usage, commonPrefixes: [],
         }))
       }
       const token = url.searchParams.get("continuation-token")
@@ -108,7 +111,7 @@ const seedBucket = ({
         if (page === undefined) throw new Error(`no page ${index}`)
 
         return HttpResponse.xml(listObjectsV2Xml({
-          bucket: USER,
+          bucket: BUCKET,
           prefix: "",
           objects: page.files,
           commonPrefixes: page.dirs,
@@ -117,7 +120,7 @@ const seedBucket = ({
       }
 
       return HttpResponse.xml(listObjectsV2Xml({
-        bucket: USER, prefix: "", objects: files, commonPrefixes: dirs,
+        bucket: BUCKET, prefix: "", objects: files, commonPrefixes: dirs,
       }))
     }),
   )
@@ -130,7 +133,7 @@ const file = (key: string, size = 10): ListedFile =>
 
 beforeEach(() => {
   window.sessionStorage.clear()
-  seedAuthenticatedUser(testConfig, { username: USER })
+  seedAuthenticatedUser(testConfig, { username: USERNAME, sub: BUCKET })
 })
 
 describe("BrowsePage listing", () => {
@@ -215,16 +218,16 @@ describe("BrowsePage failures", () => {
     let bucketReachable = false
     server.use(
       sts(),
-      http.head(`${ENDPOINT}/${USER}`, () =>
+      http.head(`${ENDPOINT}/${BUCKET}`, () =>
         new HttpResponse(null, { status: bucketReachable ? 200 : 500 })),
-      http.get(`${ENDPOINT}/${USER}`, ({ request }) => {
+      http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
         const url = new URL(request.url)
         if (url.searchParams.has("uploads")) {
-          return HttpResponse.xml(listMultipartUploadsXml({ bucket: USER, uploads: [] }))
+          return HttpResponse.xml(listMultipartUploadsXml({ bucket: BUCKET, uploads: [] }))
         }
 
         return HttpResponse.xml(listObjectsV2Xml({
-          bucket: USER, prefix: "", objects: [file("after-retry.txt")], commonPrefixes: [],
+          bucket: BUCKET, prefix: "", objects: [file("after-retry.txt")], commonPrefixes: [],
         }))
       }),
     )
@@ -241,11 +244,11 @@ describe("BrowsePage failures", () => {
   test("browsePage_listingFails_reportsItAsAnAlert", async () => {
     server.use(
       sts(),
-      http.head(`${ENDPOINT}/${USER}`, () => new HttpResponse(null, { status: 200 })),
-      http.get(`${ENDPOINT}/${USER}`, ({ request }) => {
+      http.head(`${ENDPOINT}/${BUCKET}`, () => new HttpResponse(null, { status: 200 })),
+      http.get(`${ENDPOINT}/${BUCKET}`, ({ request }) => {
         const url = new URL(request.url)
         if (url.searchParams.has("uploads")) {
-          return HttpResponse.xml(listMultipartUploadsXml({ bucket: USER, uploads: [] }))
+          return HttpResponse.xml(listMultipartUploadsXml({ bucket: BUCKET, uploads: [] }))
         }
 
         return new HttpResponse(s3ErrorXml("InternalError", "boom"), {
@@ -260,20 +263,15 @@ describe("BrowsePage failures", () => {
   })
 })
 
-describe("BrowsePage unusable username", () => {
-  // The username is the bucket name verbatim, so one that S3 rejects can never
-  // get a space. Saying so beats a failing CreateBucket the user cannot act on.
-  test("browsePage_usernameThatS3Rejects_explainsInsteadOfListing", async () => {
-    window.sessionStorage.clear()
-    seedAuthenticatedUser(testConfig, { username: "bad_name" })
-    server.use(
-      sts(),
-      http.head(`${ENDPOINT}/bad_name`, () => {
-        throw new Error("must not touch S3 for an unusable username")
-      }),
-    )
+describe("BrowsePage identity", () => {
+  // The bucket is named after sub, which says nothing to the user. The page
+  // shows the username wherever the root of the space is named.
+  test("browsePage_root_showsUsernameInsteadOfBucketName", async () => {
+    seedBucket({ files: [file("a.txt")] })
     await renderBrowse()
 
-    expect(await screen.findByText(/このユーザー名では kura を利用できません/)).toBeInTheDocument()
+    expect(await screen.findByText("a.txt")).toBeInTheDocument()
+    expect(document.querySelector(".pathbar .crumb .cur")).toHaveTextContent(USERNAME)
+    expect(document.body).not.toHaveTextContent(BUCKET)
   })
 })

@@ -11,7 +11,7 @@ import { expect } from "@playwright/test"
 import {
   clearClientPrefs,
   delayUploadPart,
-  e2eUsername,
+  e2eBucket,
   expectUploadDone,
   expectUploadRowAutoDismissed,
   getRow,
@@ -305,7 +305,7 @@ test.describe("UPLOAD", () => {
     // failCount のデフォルトは 5 で AWS SDK v3 の maxAttempts=3 (1 initial +
     // 2 retries) を超える。1 回目の 500 だけを返しても SDK 内で retry されて
     // upload 全体は成功し .tag.fail が出ない。
-    await stallPutObject(page, { bucket: e2eUsername(), key })
+    await stallPutObject(page, { bucket: e2eBucket(), key })
 
     await openUploadMenu(page)
     await page.locator(".uploadmenu").getByRole("menuitem", { name: "ファイルを選択" }).click()

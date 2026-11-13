@@ -57,12 +57,12 @@ describe("ops env startup validation", () => {
 
 describe("bucket quota", () => {
   it("rejects writes while over quota, keeps read/delete, and recovers", { timeout: 360_000 }, async () => {
-    const { username, s3 } = await setupUser()
-    weedShell(`s3.bucket.quota -name=${username} -op=set -sizeMB=1`)
+    const { sub, s3 } = await setupUser()
+    weedShell(`s3.bucket.quota -name=${sub} -op=set -sizeMB=1`)
 
     await s3.send(
       new PutObjectCommand({
-        Bucket: username,
+        Bucket: sub,
         Key: "fill.bin",
         Body: Buffer.alloc(2 * 1024 * 1024, 1),
       }),
@@ -73,7 +73,7 @@ describe("bucket quota", () => {
     const overQuotaStatus = await eventually(async () => {
       weedShell("s3.bucket.quota.enforce -apply")
       const status = await s3
-        .send(new PutObjectCommand({ Bucket: username, Key: "probe.bin", Body: "x" }))
+        .send(new PutObjectCommand({ Bucket: sub, Key: "probe.bin", Body: "x" }))
         .then(
           () => undefined,
           (err: { $metadata?: { httpStatusCode?: number } }) =>
@@ -90,19 +90,19 @@ describe("bucket quota", () => {
     expect(overQuotaStatus).toBe(403)
 
     // Reads and deletes must keep working while read-only.
-    const got = await s3.send(new GetObjectCommand({ Bucket: username, Key: "fill.bin" }))
+    const got = await s3.send(new GetObjectCommand({ Bucket: sub, Key: "fill.bin" }))
     expect((await got.Body!.transformToByteArray()).length).toBe(2 * 1024 * 1024)
-    await s3.send(new DeleteObjectCommand({ Bucket: username, Key: "fill.bin" }))
+    await s3.send(new DeleteObjectCommand({ Bucket: sub, Key: "fill.bin" }))
 
     // After deletion the bucket must become writable again. The logical size
     // only drops after the deleted needles are vacuumed, so compact this
     // bucket's collection while polling.
     await eventually(
       async () => {
-        weedShell(`volume.vacuum -garbageThreshold=0.0001 -collection=${username}`)
+        weedShell(`volume.vacuum -garbageThreshold=0.0001 -collection=${sub}`)
         weedShell("s3.bucket.quota.enforce -apply")
         await s3.send(
-          new PutObjectCommand({ Bucket: username, Key: "recovered.txt", Body: "ok" }),
+          new PutObjectCommand({ Bucket: sub, Key: "recovered.txt", Body: "ok" }),
         )
       },
       180_000,

@@ -25,7 +25,7 @@ kura の機能は次の 3 つだけである。kura は、認証していない�
   +--------- static assets ---> SPA delivery server
 ```
 
-ユーザーは Keycloak で認証し、受け取った access token を SeaweedFS の STS に渡して、一時 credentials を受け取る。以後のファイル操作は、すべて一時 credentials で署名した S3 API の呼び出しで行う。ユーザーの領域は 1 つの bucket で、bucket 名は DDBJ account の username と同じである。
+ユーザーは Keycloak で認証し、受け取った access token を SeaweedFS の STS に渡して、一時 credentials を受け取る。以後のファイル操作は、すべて一時 credentials で署名した S3 API の呼び出しで行う。ユーザーの領域は 1 つの bucket で、bucket 名は DDBJ account のユーザー ID（access token の `sub` claim）と同じである。
 
 ## リポジトリの構成
 

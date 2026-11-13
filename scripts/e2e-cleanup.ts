@@ -1,6 +1,8 @@
 // Manual CLI to wipe every past E2E run's leftovers from the test user's
 // bucket. Uses the SeaweedFS root credentials from .env so it works without
-// running a Playwright browser or negotiating STS via Keycloak.
+// running a Playwright browser or negotiating STS via Keycloak. The bucket is
+// named after the test user's sub, which is read from the session that the
+// E2E setup saved, so the E2E must have run once.
 //
 // Usage:
 //   node --experimental-strip-types scripts/e2e-cleanup.ts
@@ -55,7 +57,6 @@ const require_ = (name: string, source: Record<string, string>): string => {
 }
 
 const dotenv = readEnvFile(new URL("../.env", import.meta.url).pathname)
-const username = require_("E2E_USERNAME", dotenv)
 const accessKeyId = require_("KURA_ROOT_ACCESS_KEY", dotenv)
 const secretAccessKey = require_("KURA_ROOT_SECRET_KEY", dotenv)
 const endpoint = process.env["KURA_E2E_S3_ENDPOINT"] ?? "http://localhost:28333"
@@ -66,7 +67,24 @@ const s3 = new S3Client({
   ...SEAWEEDFS_S3_CLIENT_OPTIONS,
 })
 
-const bucket = username
+const readE2eSub = (): string => {
+  const path = new URL("../tests/e2e/.auth/user.session.json", import.meta.url).pathname
+  let session: Record<string, string>
+  try {
+    session = JSON.parse(readFileSync(path, "utf8")) as Record<string, string>
+  } catch {
+    throw new Error(`e2e-cleanup: ${path} is missing (run the E2E once to sign the test user in)`)
+  }
+  const user = Object.entries(session).find(([key]) => key.startsWith("oidc.user:"))?.[1]
+  const sub = user === undefined ? undefined : (JSON.parse(user) as { profile?: { sub?: string } }).profile?.sub
+  if (sub === undefined || sub === "") {
+    throw new Error(`e2e-cleanup: ${path} holds no signed-in user`)
+  }
+
+  return sub
+}
+
+const bucket = readE2eSub()
 
 const listAllUnder = async (prefix: string): Promise<string[]> => {
   const keys: string[] = []

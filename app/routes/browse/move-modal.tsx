@@ -11,12 +11,14 @@ type Props = {
   open: boolean
   onClose: () => void
   bucket: string
+  // Shown as the root of the destination path in place of the bucket name.
+  username: string
   // srcKey is a file key. For folders, use FolderMoveModal.
   srcKey: string
   onConfirm: (destKey: string) => void
 }
 
-export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) => {
+export const MoveModal = ({ open, onClose, bucket, username, srcKey, onConfirm }: Props) => {
   const s3 = useS3()
   const t = useT()
   const initialParent = keyParent(srcKey)
@@ -59,7 +61,7 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
     }
   }
 
-  const displayPath = destPrefix === "" ? bucket : `${bucket}/${destPrefix.slice(0, -1)}`
+  const displayPath = destPrefix === "" ? username : `${username}/${destPrefix.slice(0, -1)}`
 
   return (
     <>
@@ -98,6 +100,7 @@ export const MoveModal = ({ open, onClose, bucket, srcKey, onConfirm }: Props) =
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         bucket={bucket}
+        username={username}
         initialPrefix={destPrefix}
         onSelect={(prefix) => setDestPrefix(prefix)}
       />

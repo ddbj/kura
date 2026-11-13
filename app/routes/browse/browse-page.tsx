@@ -4,7 +4,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, u
 import { useAuth } from "react-oidc-context"
 import { Link, useNavigate } from "react-router"
 
-import { usernameFromAccessToken } from "~/lib/auth/token"
+import { subFromAccessToken, usernameFromAccessToken } from "~/lib/auth/token"
 import { useConfig } from "~/lib/config"
 import { formatBytes, formatDuration } from "~/lib/format"
 import { formatListDateTime, useLang, useT } from "~/lib/i18n"
@@ -14,7 +14,6 @@ import {
   dirName,
   ensureOwnBucket,
   entryName,
-  isUsableBucketName,
   listBucketStats,
   listDirectory,
   listPendingUploads,
@@ -61,7 +60,6 @@ import { MoveModal } from "./move-modal"
 import { NewFolderModal } from "./new-folder-modal"
 import { RenameModal } from "./rename-modal"
 import { ShareModal } from "./share-modal"
-import { UnsupportedUsername } from "./unsupported-username"
 import { UploadCard } from "./upload-card"
 
 type Props = { prefix: string }
@@ -77,15 +75,16 @@ export const BrowsePage = ({ prefix }: Props) => (
 const AuthenticatedBrowse = ({ prefix }: Props) => {
   const auth = useAuth()
   const token = auth.user?.access_token
-  const username = useMemo(() => (token === undefined ? "" : usernameFromAccessToken(token)), [token])
-  if (username === "") return <p className="plain-text">…</p>
+  const identity = useMemo(
+    () => (token === undefined ? null : { bucket: subFromAccessToken(token), username: usernameFromAccessToken(token) }),
+    [token],
+  )
+  if (identity === null) return <p className="plain-text">…</p>
 
   return (
     <>
       <Header />
-      {isUsableBucketName(username)
-        ? <Browse bucket={username} prefix={prefix} />
-        : <UnsupportedUsername username={username} />}
+      <Browse bucket={identity.bucket} username={identity.username} prefix={prefix} />
     </>
   )
 }
@@ -134,13 +133,17 @@ const TtlExpiry = ({ createdMs, ttlDays }: { createdMs: number; ttlDays: number 
   return <>{t("browse.ttlRemaining", { days: remainingDays })}</>
 }
 
-const Browse = ({ bucket, prefix }: { bucket: string; prefix: string }) => (
+// bucket is the name S3 knows the user's space by. username is what the page
+// shows in its place.
+type BrowseProps = { bucket: string; username: string; prefix: string }
+
+const Browse = (props: BrowseProps) => (
   <NowProvider>
-    <BrowseInner bucket={bucket} prefix={prefix} />
+    <BrowseInner {...props} />
   </NowProvider>
 )
 
-const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => {
+const BrowseInner = ({ bucket, username, prefix }: BrowseProps) => {
   const s3 = useS3()
   const config = useConfig()
   const queryClient = useQueryClient()
@@ -382,8 +385,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
 
   const clearSelection = () => setSelection(new Set())
 
-  // zip 名は今いる場所から採る。root では bucket 名。
-  const currentFolderName = prefix === "" ? bucket : (prefixToSegments(prefix).at(-1) ?? bucket)
+  // zip 名は今いる場所から採る。root では username。
+  const currentFolderName = prefix === "" ? username : (prefixToSegments(prefix).at(-1) ?? username)
 
   const downloadSelection = async (keys: readonly string[]) => {
     const entries: ZipEntry[] = files
@@ -656,8 +659,8 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
       <div className="pathbar">
         <div className="crumb">
           {segments.length === 0
-            ? <span className="cur">{bucket}</span>
-            : <Link to={bucketRootHref}>{bucket}</Link>}
+            ? <span className="cur">{username}</span>
+            : <Link to={bucketRootHref}>{username}</Link>}
           <span className="sl">/</span>
           {segments.map((seg, idx) => {
             const isLast = idx === segments.length - 1
@@ -1163,6 +1166,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           open
           onClose={() => setMoveTarget(null)}
           bucket={bucket}
+          username={username}
           srcKey={moveTarget}
           onConfirm={(destKey) => {
             const src = moveTarget
@@ -1221,6 +1225,7 @@ const BrowseInner = ({ bucket, prefix }: { bucket: string; prefix: string }) => 
           open
           onClose={() => setFolderMoveTarget(null)}
           bucket={bucket}
+          username={username}
           srcPrefix={folderMoveTarget.prefix}
           onConfirm={(destParent) => {
             const target = folderMoveTarget

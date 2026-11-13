@@ -27,7 +27,7 @@ vitest は projects 構成で、次の 3 つの project に分かれている。
 - mock してよいのは外部境界だけで、内部の実装は mock しない。S3（SeaweedFS）と filer は mock せず、実物を使う
 - テストは、Keycloak の代わりに、テスト用の鍵で署名した JWT と、ローカルの JWKS の配信サービスを使う。SeaweedFS の OIDC provider は、この JWKS で JWT を検証する。実際の Keycloak を使うのは E2E だけである
 - frontend の unit テストでは、HTTP の境界を msw で mock する
-- テスト間で状態を共有せず、テストの実行順序に依存させない。integration はテストごとに一意な username（= bucket 名）を使う
+- テスト間で状態を共有せず、テストの実行順序に依存させない。integration はテストごとに一意な `sub`（= bucket 名）を使う
 
 ## integration（設定群のテスト）
 
@@ -41,11 +41,16 @@ IAM policy boundary（`iam-boundary.test.ts`）は、認可の境界そのもの
 - public-read の ACL を付けて置いた object と bucket に、署名の無い request が届かないこと
 - 他人の bucket の read / write / list / tagging / delete が拒否されること
 - 他人の bucket 名での、新しい bucket の作成が拒否されること
+- 自分の username と同じ名前の bucket の作成が拒否されること
+- `preferred_username` の無い token でも、自分の bucket を使えること
+- admin が本人の `sub` の名前で作った bucket を、本人が使えること
 - role の偽装（token に対応しない role の指定）が拒否されること
 - `KURA_ADMIN_SUBS` に列挙した `sub` を持つユーザーだけが `KuraAdminRole` を取れ、任意の bucket にアクセスできること
 - audience が一致しない token と、期限切れの token が、STS で拒否されること
 - 認証の無い（anonymous の）request が、bucket にも object にも届かないこと
-- compose network 上の別のコンテナから、filer の HTTP API を認証なしで読めないこと。filer には S3 の IAM が効かないので、filer へのアクセスに認証を求める手段は、security.toml の鍵（filer JWT signing key）だけである
+- seaweedfs のコンテナが loopback 以外で listen する port が、S3 API と S3 の gRPC だけであること。コンテナの中の listen の一覧を読むので、SeaweedFS が port を増やすと失敗する
+- filer の HTTP API を認証なしで読めないこと（security.toml の filer JWT signing key）
+- web のコンテナから seaweedfs のどの port にも届かないこと
 
 S3 のフローのテストは、ユースケースを実物の SeaweedFS に対して最後まで実行する。
 
@@ -90,7 +95,6 @@ UI の文言が必ず i18n resources を経由することも、unit テスト�
 `tests/pbt/` にある。fast-check で不変条件を検査する。主な対象は次のとおりである。
 
 - key と prefix の組み立て（`..`、percent-encoding、unicode、空の segment）
-- username が S3 の bucket 名として使えるかの判定（SeaweedFS が受け付ける名前の集合と一致すること）
 - ファイル名の検証の境界値
 - ビルド時の設定（ファイルの TTL・quota の既定値・UI の origin）として受け付ける値の集合
 - i18n resources の ja と en の対応（キーの集合が一致すること、空文字が無いこと、翻訳漏れが無いこと）

@@ -2,7 +2,7 @@
 // SPA 起動時の HeadBucket 発火 pin、bucket 初期化失敗 UI、logout 経路。
 import { expect } from "@playwright/test"
 
-import { e2eUsername, s3Endpoint } from "./_helpers"
+import { e2eBucket, e2eUsername, s3Endpoint } from "./_helpers"
 import { test } from "./fixtures"
 
 test.describe("AUTH.user", () => {
@@ -14,7 +14,7 @@ test.describe("AUTH.user", () => {
   })
 
   test("S-AUTH-04: 初回訪問で HeadBucket が発行される", async ({ page }) => {
-    const bucket = e2eUsername()
+    const bucket = e2eBucket()
     const headPromise = page.waitForRequest((req) => {
       if (req.method() !== "HEAD") return false
       try {
@@ -29,7 +29,8 @@ test.describe("AUTH.user", () => {
     await headPromise
 
     await expect(page.locator(".hdr .user")).toBeVisible()
-    await expect(page.locator(".pathbar .crumb .cur")).toHaveText(bucket)
+    // パンくずの root は bucket 名ではなく username を表示する。
+    await expect(page.locator(".pathbar .crumb .cur")).toHaveText(e2eUsername())
     await expect(page.locator(".upcard")).toHaveCount(0)
   })
 
@@ -70,7 +71,7 @@ test.describe("AUTH.user", () => {
   })
 
   test("E-AUTH-04: bucket 初期化失敗のときエラー Callout が出る", async ({ page }) => {
-    const bucket = e2eUsername()
+    const bucket = e2eBucket()
     const originHost = new URL(s3Endpoint()).host
 
     // HEAD /${bucket}/ → 404 (bucket 未作成偽装) / PUT /${bucket}/ → 500 (create fails)。

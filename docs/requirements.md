@@ -18,15 +18,13 @@ kura のファイルにアクセスできるのは、本人と、本人が明示
 
 ## 認証と利用者
 
-ユーザーは DDBJ account（Keycloak）の OIDC で認証する。kura は独自のアカウントを持たず、DDBJ account を持つユーザーは誰でも kura を利用できる。kura はユーザーを DDBJ account の username（`preferred_username` claim）で識別する。
+ユーザーは DDBJ account（Keycloak）の OIDC で認証する。kura は独自のアカウントを持たず、DDBJ account を持つユーザーは誰でも kura を利用できる。kura はユーザーを DDBJ account のユーザー ID（access token の `sub` claim）で識別する。username（`preferred_username` claim）は、UI の表示にだけ使う。
 
 admin は、全ユーザーの領域を操作できる。admin が使う手段は CLI（S3 client）と運用スクリプトの 2 つだけで、kura は admin 向けの UI を提供しない。admin として扱う DDBJ account は、配備の設定（環境ごとの env）に列挙する。
 
 ## ファイル領域
 
 各ユーザーは自分専用の領域を持ち、領域の中に任意のディレクトリ構造でファイルを置ける。ファイルは `<user>/<path>` で識別する。ユーザーは、他のユーザーの領域の読み書きも一覧もできない。領域は、ユーザーが kura を初めて使うときに client（SPA または S3 client）が作るので、事前の申請や作成の手続きは要らない。
-
-username が S3 bucket の命名規則に合わないユーザー（`_` を含む、`-` で終わる、など）は kura を利用できない。
 
 各領域には容量の上限（quota）がある。quota の既定値は 1 TiB で、admin がユーザー単位に変更できる。
 

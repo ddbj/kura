@@ -33,16 +33,11 @@ SeaweedFS は S3 API・STS・IAM・filer を担当し、ファイルの SSOT に
 
 ## データの配置
 
-ユーザーの領域は 1 つの bucket である。bucket 名には username（`preferred_username`）をそのまま使う。ファイル `<user>/<path>` の実体は、bucket `<user>` の中の object `<path>`（filer の path では `/buckets/<user>/<path>`）である。
+ユーザーの領域は 1 つの bucket である。bucket 名には、access token の `sub` claim（DDBJ account のユーザー ID）をそのまま使う。ファイル `<user>/<path>` の実体は、bucket `<sub>` の中の object `<path>`（filer の path では `/buckets/<sub>/<path>`）である。
 
 bucket は client が作る。SPA は一覧画面を開いたときに作り、CLI ではユーザーが初回の upload の前に作る。SeaweedFS では、初回の PUT による bucket の自動作成が admin 権限でしか効かず、STS で認証した一般ユーザーには使えないためである。CreateBucket は、所有者が自分の既存の bucket に対して実行しても 409（`BucketAlreadyExists` / `BucketAlreadyOwnedByYou`）を返す。そのため client は、HeadBucket で bucket があるかを確かめ、無いときだけ CreateBucket を実行する。ユーザーから見れば、初めて使うときに領域が用意されるので、事前の申請は要らない。
 
-kura は username を sanitize せず、そのまま bucket 名にする。SeaweedFS は bucket の作成時に S3 の命名規則を強制する。
-
-- S3 の命名規則: 3-63 文字。使える文字は小文字英数と `.` `-` だけで、先頭と末尾は英数。`..` の連続、IP アドレスの形、`xn--` で始まる名前、`-s3alias` で終わる名前、`filemeta` は拒否される
-- DDBJ account の username の規則: 3-24 文字。先頭は小文字英数で、使える文字は `a-z 0-9 _ -`
-
-このため、`_` を含む username と `-` で終わる username のユーザーは、kura を利用できない。kura は username を変換して、こうしたユーザーを利用できるようにすることはしない。username を重複なく bucket 名に変換する処理を、認証の経路（Keycloak が発行する token から IAM policy まで）の上に置けないためである。変換すると、bucket 名が `preferred_username` claim と一致しなくなる。
+bucket 名に username（`preferred_username`）ではなく `sub` を使うのは、username を bucket 名にできないユーザーがいるためである。SeaweedFS は bucket の作成時に S3 の命名規則（小文字英数と `.` `-` だけ、先頭と末尾は英数）を強制するが、DDBJ account の username には `_` を使え、`-` で終われる。IAM の policy は claim の値をそのまま bucket 名に展開するだけで、値を変換できない。Keycloak の `sub` は UUID（小文字の 16 進数と `-` の 36 文字）なので、どのユーザーの `sub` も bucket 名にできる。`sub` は、kura が client に設定を求めなくても、どの client の access token にも入る。
 
 ファイルツリーには、ユーザーが置いたファイルだけがある。kura は prefix による分類も、目印の object も持たない。例外は 1 つだけで、SPA の「新規フォルダ」操作は 0-byte の `.keep` object を作る。`.keep` は、まだ file を upload していないフォルダを一覧に表示するための object である。`.keep` は SPA の一覧に表示されず、TTL の削除の対象にもならない。
 
@@ -56,7 +51,7 @@ kura は username を sanitize せず、そのまま bucket 名にする。Seawe
 
 認可の主体は 3 つあり、それぞれアクセスできる範囲が違う。
 
-`KuraUserRole`（一般ユーザー）は、roleMapping の `defaultRole` である。検証を通った access token は、role を指定しなくてもこの role になる。policy は、kura が使う操作の action だけを、bucket `${jwt:preferred_username}` とその中の object に対して Allow する（policy 変数は bucket 名の位置でも展開される）。許可する操作は次のとおりで、一覧は `seaweedfs/entrypoint.sh` にある。
+`KuraUserRole`（一般ユーザー）は、roleMapping の `defaultRole` である。検証を通った access token は、role を指定しなくてもこの role になる。policy は、kura が使う操作の action だけを、bucket `${jwt:sub}` とその中の object に対して Allow する（policy 変数は bucket 名の位置でも展開される）。許可する操作は次のとおりで、一覧は `seaweedfs/entrypoint.sh` にある。
 
 - bucket に対して: 作成、一覧、multipart upload の一覧、location の取得
 - object に対して: 読み書き、削除、multipart upload の各操作、tag の読み書き
@@ -147,8 +142,8 @@ kura は、realm に専用の public client を 1 つ持ち、Authorization Code
 
 access token には、kura が使う claim だけを載せる。presigned URL を受け取った相手に、発行した人の email や氏名が渡らないようにするためである（「presigned URL と一時 credentials の有効期間」）。
 
-- client の default scope から、`profile`・`email`・`roles` を外す。`sub` は `basic` scope で access token に入る。admin の trust policy が `sub` を使う
-- dedicated scope に 2 つの mapper を置く。audience mapper は、access token の `aud` に client id を入れる。SeaweedFS の OIDC provider は `aud` を検証に使う。user attribute mapper は、username を `preferred_username` claim に入れる。kura は `preferred_username` を bucket 名と policy 変数に使う
+- client の default scope から、`profile`・`email`・`roles` を外す。`sub` は `basic` scope で access token に入る。kura は `sub` を、bucket 名と policy 変数と、admin の trust policy に使う
+- dedicated scope に 2 つの mapper を置く。audience mapper は、access token の `aud` に client id を入れる。SeaweedFS の OIDC provider は `aud` を検証に使う。user attribute mapper は、username を `preferred_username` claim に入れる。SPA は `preferred_username` を、ヘッダーとパンくずの表示に使う。認可には使わない
 - kura は Keycloak の role を使わないので、dedicated scope の Full scope allowed は OFF にする
 - admin 用の claim や mapper は作らない。admin の判定は、kura の trust policy が `sub` で行うためである
 
@@ -181,7 +176,7 @@ SPA のビルドは、検索エンジンとプログラム向けに `/robots.txt
 
 - 検索エンジンに載せるのは、トップページ（`/`）だけである。`/browse` 以下はログインした人の領域の一覧で、`/auth/` 以下はログインの途中のページなので、robots.txt でクロールを拒否する。sitemap.xml にはトップページだけを書く。robots.txt と sitemap.xml には絶対 URL が要るので、UI の origin（`KURA_UI_ORIGIN`）を build 時に埋め込む
 - `KURA_NOINDEX` を `true` にした環境では、robots.txt で `/llms.txt` 以外のクロールを拒否し、sitemap.xml を作らず、index.html に noindex の meta を付ける。staging は production と同じ画面なので、staging が検索結果に production と並んで出ないようにするためである
-- `/llms.txt` には、kura の説明と、プログラムから kura を使う方法を英語の Markdown で書く。使う方法として、S3 endpoint、OIDC の issuer と client id、device flow で取った access token を `AssumeRoleWithWebIdentity` に渡すこと、bucket 名が username であることを書く。詳しい手順として、[sp-integration.md](./sp-integration.md) の GitHub の URL を示す。プログラムで kura を使う読み手（LLM の agent など）に、画面ではなく S3 API を使ってもらうためである。`KURA_NOINDEX` を `true` にした環境でも、robots.txt は `/llms.txt` のクロールを許す
+- `/llms.txt` には、kura の説明と、プログラムから kura を使う方法を英語の Markdown で書く。使う方法として、S3 endpoint、OIDC の issuer と client id、device flow で取った access token を `AssumeRoleWithWebIdentity` に渡すこと、bucket 名が access token の `sub` claim であることを書く。詳しい手順として、[sp-integration.md](./sp-integration.md) の GitHub の URL を示す。プログラムで kura を使う読み手（LLM の agent など）に、画面ではなく S3 API を使ってもらうためである。`KURA_NOINDEX` を `true` にした環境でも、robots.txt は `/llms.txt` のクロールを許す
 
 ## web と ops の image
 

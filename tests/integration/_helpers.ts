@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { randomBytes } from "node:crypto"
+import { randomBytes, randomUUID } from "node:crypto"
 import { setTimeout as sleep } from "node:timers/promises"
 
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
@@ -12,25 +12,30 @@ import { SEAWEEDFS_S3_CLIENT_OPTIONS } from "~/lib/s3/seaweedfs-compat"
 export const USER_ROLE_ARN = "arn:aws:iam::role/KuraUserRole"
 export const ADMIN_ROLE_ARN = "arn:aws:iam::role/KuraAdminRole"
 
-// Unique per call so tests never share buckets (= users) or depend on order.
-export const uniqueUser = () => `u${randomBytes(6).toString("hex")}`
+// The bucket name is the token's sub, a UUID as Keycloak issues it. Unique per
+// call so tests never share buckets (= users) or depend on order.
+export const uniqueSub = () => randomUUID()
 
 interface TokenInput {
-  username: string
-  sub?: string
+  sub: string
+  // null leaves the claim out of the token.
+  username?: string | null
   aud?: string
   lifetimeSeconds?: number
 }
 
-export const signToken = async ({ username, sub, aud, lifetimeSeconds = 3600 }: TokenInput) => {
+// The default username has an underscore, which a bucket name cannot hold:
+// every test that passes shows the username plays no part in authorization.
+export const signToken = async ({ sub, username, aud, lifetimeSeconds = 3600 }: TokenInput) => {
   const key = await importPKCS8(inject("jwtPrivateKeyPem"), "RS256")
   const now = Math.floor(Date.now() / 1000)
+  const preferredUsername = username === undefined ? `user_${randomBytes(4).toString("hex")}` : username
 
-  return new SignJWT({ preferred_username: username })
+  return new SignJWT(preferredUsername === null ? {} : { preferred_username: preferredUsername })
     .setProtectedHeader({ alg: "RS256", kid: "kura-test" })
     .setIssuer(inject("oidcIssuer"))
     .setAudience(aud ?? inject("oidcClientId"))
-    .setSubject(sub ?? `sub-${username}`)
+    .setSubject(sub)
     .setIssuedAt(now)
     .setExpirationTime(now + lifetimeSeconds)
     .sign(key)
@@ -86,13 +91,13 @@ export const rootS3Client = () =>
 
 // A signed-in user with their own (already created) bucket.
 export const setupUser = async () => {
-  const username = uniqueUser()
-  const token = await signToken({ username })
+  const sub = uniqueSub()
+  const token = await signToken({ sub })
   const creds = await assumeRole(token)
   const s3 = s3ClientFor(creds)
-  await s3.send(new CreateBucketCommand({ Bucket: username }))
+  await s3.send(new CreateBucketCommand({ Bucket: sub }))
 
-  return { username, token, creds, s3 }
+  return { sub, token, creds, s3 }
 }
 
 export const putText = (s3: S3Client, bucket: string, key: string, body: string) =>
